@@ -21,6 +21,13 @@ def log_artifacts(artifact_files, artifact_folders):
                 relative_path = os.path.relpath(full_path, start=os.path.dirname(folder_path))
                 mlflow.log_artifact(full_path, relative_path)
 
+def get_dags_from_artifacts(node_name, artifacts):
+    dag_paths = []
+    for artifact_name, artifact_path in artifacts.items():
+        if artifact_name.startswith(f'{node_name}_dag_'):
+            dag_paths.append(artifact_path)
+    return dag_paths
+
 class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
     def __init__(
         self,
@@ -52,15 +59,36 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
             load_dotenv(dotenv_path=dotenv_path)
         else:
             raise ValueError(f"Environment file {env_filename} not found in artifacts")
-
+    
     def load_context(self, context):
-        if "node_registry" in context.artifacts:
-            self.node_registry_path = context.artifacts["node_registry"]
-        
+        if "node_registry_path" in context.artifacts:
+            self.node_registry_path = context.artifacts["node_registry_path"]
+
         from hypernodes import NodeRegistry
         registry = NodeRegistry(registry_path=self.node_registry_path)
-        self.node = registry.load(node_name=self.node_name)
+
+        new_nodes = {}
+        # Process nodes and their artifacts
+        for node_name, node in registry.nodes.items():
+            if 'hamilton_dags' in node:
+                node['hamilton_dags'] = []
+                node_dag_paths = get_dags_from_artifacts(node_name, context.artifacts)
+                node['hamilton_dags'] = node_dag_paths
+                
+            if 'hypster_config' in node:
+                node['hypster_config'] = None
+                hypster_config_key = f"{node_name}_hypster_config"
+                if hypster_config_key in context.artifacts:
+                    node['hypster_config'] = context.artifacts[hypster_config_key]
             
+            new_nodes[node_name] = node
+        
+        registry.nodes = new_nodes
+        registry.registry_path = "node_registry_updated.yaml"
+        context.artifacts["node_registry_path"] = registry.registry_path
+        registry._save_registry()
+        
+        self.node = registry.load(node_name=self.node_name)
         if self.env_filename:
             self._load_dotenv(context.artifacts, self.env_filename)
 
@@ -179,4 +207,3 @@ def get_code_paths(base_dir=".", folders=["src"], suffixes=[".py"]):
             all_paths.extend(relative_paths)
     
     return all_paths
-

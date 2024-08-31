@@ -29,16 +29,22 @@ class NodeHandler:
     def save_dag(self, module: ModuleType, overwrite: bool = True):
         module_name = module.__name__
         module_path = self.folder / f"{self.name}_{module_name}.py"
-        
+
         if not overwrite and module_path.exists():
-            raise ValueError(f"DAG '{module_name}' already exists for node '{self.name}'. Use overwrite=True to replace it.")
+            raise ValueError(
+                f"DAG '{module_name}' already exists for node '{self.name}'. Use overwrite=True to replace it."
+            )
 
         with open(module_path, "w") as f:
             f.write(inspect.getsource(module))
 
         # Update the registry with the new DAG path
         # if the module is in the list of Hamilton DAGs, remove it first:
-        self.hamilton_dags = [dag for dag in self.hamilton_dags if dag.__name__ != f"{self.name}_{module_name}"]
+        self.hamilton_dags = [
+            dag
+            for dag in self.hamilton_dags
+            if dag.__name__ != f"{self.name}_{module_name}"
+        ]
         self.hamilton_dags.append(module)
         self.registry.add_dag_to_node(self.name, str(module_path))
 
@@ -46,42 +52,40 @@ class NodeHandler:
 
     def save_hypster_config(self, hypster_config: Hypster, overwrite: bool = True):
         config_path = self.folder / f"{self.name}_hypster_config.py"
-        
+
         if not overwrite and config_path.exists():
-            raise ValueError(f"Hypster config already exists for node '{self.name}'. Use overwrite=True to replace it.")
+            raise ValueError(
+                f"Hypster config already exists for node '{self.name}'. Use overwrite=True to replace it."
+            )
 
         hypster.save(hypster_config, str(config_path))
         self.hypster_config = hypster_config
         self.registry.set_hypster_config_for_node(self.name, str(config_path))
 
         print(f'Hypster config is saved for "{self.name}"')
-    
+
     def load_dags(self):
-        self.hamilton_dags = []
-        node_info = self.registry.nodes.get(self.name, {})
-        dag_paths = node_info.get("hamilton_dags", [])
-
-        # Ensure the folder containing DAGs is in sys.path
-        if str(self.folder) not in sys.path:
-            sys.path.insert(0, str(self.folder))
-
-        for dag_path in dag_paths:
+        dags_paths = self.registry.nodes.get(self.name, {}).get("hamilton_dags", [])
+        for dag_path in dags_paths:
+            print(dag_path)
             dag_path = Path(dag_path)
-            if dag_path.exists():
-                # Convert file path to module path
-                module_name = dag_path.stem
+            module_name = dag_path.stem
 
-                try:
-                    # Import the module
-                    module = importlib.import_module(module_name)
-                    self.hamilton_dags.append(module)
-                except ImportError as e:
-                    print(f"Failed to import {module_name}. Error: {e}")
-                    print("sys.path:", sys.path)
-                    print("Available modules:", list(sys.modules.keys()))
-                    raise
-            else:
-                print(f"Warning: DAG file not found: {dag_path}")
+            folder = dag_path.parent
+            
+            if str(folder) not in sys.path:
+                print(f"Adding {folder} to sys.path")
+                sys.path.insert(0, str(folder))
+
+            try:
+                # Import the module
+                module = importlib.import_module(module_name)
+                self.hamilton_dags.append(module)
+            except ImportError as e:
+                print(f"Failed to import {module_name}. Error: {e}")
+                print("sys.path:", sys.path)
+                print("Available modules:", list(sys.modules.keys()))
+                raise
 
     def save_hypster(self, hypster_config: Hypster, overwrite: bool = True):
         hypster_config_path = self.folder / f"{self.name}_hypster_config.py"
@@ -144,10 +148,9 @@ class NodeHandler:
             self.hypster_config = hypster.config(hypster_config_module)
         else:
             self.hypster_config = None
-    
+
     def to_hypernode(self) -> HyperNode:
         return HyperNode(self.name, self.hamilton_dags, self.hypster_config)
-
 
 
 class NodeRegistry:
@@ -157,69 +160,89 @@ class NodeRegistry:
 
     def _load_registry(self) -> Dict[str, Dict[str, Any]]:
         if self.registry_path.exists():
-            with open(self.registry_path, 'r') as f:
+            with open(self.registry_path, "r") as f:
                 return yaml.safe_load(f) or {}
         return {}
 
-    def create_or_get(self, node_name: str, folder: str, overwrite: bool = False) -> 'NodeHandler':
+    def create_or_get(
+        self, node_name: str, folder: str, overwrite: bool = False
+    ) -> "NodeHandler":
         if node_name in self.nodes:
-            existing_folder = self.nodes[node_name]['folder']
+            existing_folder = self.nodes[node_name]["folder"]
             if existing_folder != folder:
                 if not overwrite:
-                    raise ValueError(f"Node '{node_name}' already exists with a different folder. "
-                                     f"Existing: {existing_folder}, Requested: {folder}. "
-                                     f"Use overwrite=True to create a new node.")
+                    raise ValueError(
+                        f"Node '{node_name}' already exists with a different folder. "
+                        f"Existing: {existing_folder}, Requested: {folder}. "
+                        f"Use overwrite=True to create a new node."
+                    )
                 else:
-                    print(f"Overwriting existing node '{node_name}' with new folder: {folder}")
-                    self.nodes[node_name] = {'folder': folder}
+                    print(
+                        f"Overwriting existing node '{node_name}' with new folder: {folder}"
+                    )
+                    self.nodes[node_name] = {"folder": folder}
                     self._save_registry()
             else:
                 print(f'Loaded existing node "{node_name}" from {existing_folder}')
         else:
-            self.nodes[node_name] = {'folder': folder}
+            self.nodes[node_name] = {"folder": folder}
             self._save_registry()
             print(f'Created new node "{node_name}" in {folder}')
-        
+
         return NodeHandler(node_name, folder, self)
 
     def set_hypster_config_for_node(self, node_name: str, config_path: str):
         if node_name not in self.nodes:
             raise ValueError(f"Node '{node_name}' not found in registry")
-        
-        self.nodes[node_name]['hypster_config'] = config_path
+
+        self.nodes[node_name]["hypster_config"] = config_path
         self._save_registry()
-    
+
     def add_dag_to_node(self, node_name: str, dag_path: str):
         if node_name not in self.nodes:
             raise ValueError(f"Node '{node_name}' not found in registry")
-        
-        if 'hamilton_dags' not in self.nodes[node_name]:
-            self.nodes[node_name]['hamilton_dags'] = []
-        
-        if dag_path not in self.nodes[node_name]['hamilton_dags']:
-            self.nodes[node_name]['hamilton_dags'].append(dag_path)
+
+        if "hamilton_dags" not in self.nodes[node_name]:
+            self.nodes[node_name]["hamilton_dags"] = []
+
+        if dag_path not in self.nodes[node_name]["hamilton_dags"]:
+            self.nodes[node_name]["hamilton_dags"].append(dag_path)
         self._save_registry()
-    
-    def update_node(self, node_name: str, handler: 'NodeHandler'):
+
+    def update_node(self, node_name: str, handler: "NodeHandler"):
         if node_name not in self.nodes:
             raise ValueError(f"Node '{node_name}' not found in registry")
-        
+
         self.nodes[node_name] = {
-            'folder': str(handler.folder),
-            'hamilton_dags': [str(handler.folder / f"{node_name}_{module.__name__}.py") for module in handler.hamilton_dags],
-            'hypster_config': str(handler.folder / f"{node_name}_hypster_config.py") if handler.hypster_config else None
+            "folder": str(handler.folder),
+            "hamilton_dags": [
+                str(handler.folder / f"{node_name}_{module.__name__}.py")
+                for module in handler.hamilton_dags
+            ],
+            "hypster_config": str(handler.folder / f"{node_name}_hypster_config.py")
+            if handler.hypster_config
+            else None,
         }
         self._save_registry()
 
     def load(self, node_name: str) -> HyperNode:
         if node_name not in self.nodes:
             raise ValueError(f"Node '{node_name}' not found in registry")
-        
+
         node_info = self.nodes[node_name]
-        node_handler = NodeHandler(node_name, node_info['folder'], self)
+        node_handler = NodeHandler(node_name, node_info["folder"], self)
         return node_handler.to_hypernode()
 
     def _save_registry(self):
+        # cleaned_nodes = {}
+        # for node_name, node_info in self.nodes.items():
+        #     cleaned_node = {"folder": node_info["folder"]}
+        #     if node_info.get("hamilton_dags"):
+        #         cleaned_node["hamilton_dags"] = node_info["hamilton_dags"]
+        #     if node_info.get("hypster_config"):
+        #         cleaned_node["hypster_config"] = node_info["hypster_config"]
+        #     cleaned_nodes[node_name] = cleaned_node
+
         with open(self.registry_path, "w") as f:
             yaml.dump(self.nodes, f, default_flow_style=False, sort_keys=False)
 
@@ -230,7 +253,7 @@ class NodeRegistry:
         del self.nodes[node_name]
         self._save_registry()
         print(f"Deleted node '{node_name}' from registry")
-
+    
     def _get_default_registry_path(self) -> str:
         try:
             # Look for pyproject.toml in the current directory and parent directories
@@ -271,4 +294,8 @@ class NodeRegistry:
         except Exception as e:
             print(f"Error reading pyproject.toml: {e}. Using default registry path.")
 
+        # Default fallback
+        # default_path = Path.home() / ".hypernodes" / "registry.yaml"
+        # default_path.parent.mkdir(parents=True, exist_ok=True)
+        # return str(default_path)
         raise ValueError("No valid registry path found")
