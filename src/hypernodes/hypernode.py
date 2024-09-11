@@ -1,11 +1,7 @@
-import importlib
 import inspect
-import json
-from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 
-import hypster
 from hamilton.driver import Builder, Driver
 from hypster.core import Hypster
 
@@ -90,6 +86,16 @@ class HyperNode:
         inputs = inputs.copy()
         {k: inputs.pop(k) for k in self._driver.config}
 
+        if len(final_vars) == 0:
+            final_vars = [
+                n
+                for n in self._driver.list_available_variables()
+                if not n.is_external_input
+            ]
+
+        if len(inputs) == 0:
+            inputs = self._instantiated_inputs
+
         return self._driver.execute(final_vars=final_vars, inputs=inputs)
 
     def get_node_inputs(self, node_name: str) -> Dict[str, Any]:
@@ -100,7 +106,9 @@ class HyperNode:
             raise RuntimeError("Driver initialization failed")
 
         upstream_args = get_upstream_args(self._driver, node_name)
-        return self.execute(final_vars=upstream_args, inputs=self._instantiated_inputs)
+        return self.execute(
+            final_vars=upstream_args, inputs=self._instantiated_inputs
+        )
 
 
 def get_upstream_args(driver: Driver, node_name: str) -> List[str]:

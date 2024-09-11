@@ -2,31 +2,34 @@ import glob
 import os
 import sys
 from typing import Dict, List, Optional
-import pandas as pd
-from dotenv import load_dotenv
 
 import mlflow
 import yaml
+
 
 def log_artifacts(artifact_files, artifact_folders):
     # Log individual files
     for artifact_name, file_path in artifact_files.items():
         mlflow.log_artifact(file_path, artifact_name)
-    
+
     # Log folders and their contents
     for folder_path in artifact_folders:
         for root, dirs, files in os.walk(folder_path):
             for file in files:
                 full_path = os.path.join(root, file)
-                relative_path = os.path.relpath(full_path, start=os.path.dirname(folder_path))
+                relative_path = os.path.relpath(
+                    full_path, start=os.path.dirname(folder_path)
+                )
                 mlflow.log_artifact(full_path, relative_path)
+
 
 def get_dags_from_artifacts(node_name, artifacts):
     dag_paths = []
     for artifact_name, artifact_path in artifacts.items():
-        if artifact_name.startswith(f'{node_name}_dag_'):
+        if artifact_name.startswith(f"{node_name}_dag_"):
             dag_paths.append(artifact_path)
     return dag_paths
+
 
 class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
     def __init__(
@@ -41,7 +44,9 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
     ):
         self.node_name = node_name
         self.dynamic_inputs = dynamic_inputs
-        self.final_vars = [final_vars] if isinstance(final_vars, str) else final_vars
+        self.final_vars = (
+            [final_vars] if isinstance(final_vars, str) else final_vars
+        )
         self.final_outputs = (
             final_outputs if len(final_outputs) > 0 else self.final_vars
         )
@@ -58,45 +63,54 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
             dotenv_path = artifacts.get(env_filename)
             load_dotenv(dotenv_path=dotenv_path)
         else:
-            raise ValueError(f"Environment file {env_filename} not found in artifacts")
-    
+            raise ValueError(
+                f"Environment file {env_filename} not found in artifacts"
+            )
+
     def load_context(self, context):
         if "node_registry_path" in context.artifacts:
             self.node_registry_path = context.artifacts["node_registry_path"]
 
         from hypernodes import NodeRegistry
+
         registry = NodeRegistry(registry_path=self.node_registry_path)
 
         new_nodes = {}
         # Process nodes and their artifacts
         for node_name, node in registry.nodes.items():
-            if 'hamilton_dags' in node:
-                node['hamilton_dags'] = []
-                node_dag_paths = get_dags_from_artifacts(node_name, context.artifacts)
-                node['hamilton_dags'] = node_dag_paths
-                
-            if 'hypster_config' in node:
-                node['hypster_config'] = None
+            if "hamilton_dags" in node:
+                node["hamilton_dags"] = []
+                node_dag_paths = get_dags_from_artifacts(
+                    node_name, context.artifacts
+                )
+                node["hamilton_dags"] = node_dag_paths
+
+            if "hypster_config" in node:
+                node["hypster_config"] = None
                 hypster_config_key = f"{node_name}_hypster_config"
                 if hypster_config_key in context.artifacts:
-                    node['hypster_config'] = context.artifacts[hypster_config_key]
-            
+                    node["hypster_config"] = context.artifacts[
+                        hypster_config_key
+                    ]
+
             new_nodes[node_name] = node
-        
+
         registry.nodes = new_nodes
         registry.registry_path = "node_registry_updated.yaml"
         context.artifacts["node_registry_path"] = registry.registry_path
         registry._save_registry()
-        
+
         self.node = registry.load(node_name=self.node_name)
         if self.env_filename:
             self._load_dotenv(context.artifacts, self.env_filename)
 
-        overrides = self.overrides.copy() #TODO: fix this?
+        overrides = self.overrides.copy()  # TODO: fix this?
         for k, v in context.artifacts.items():
             overrides[k] = v
 
-        self.node.instantiate_inputs(selections=self.selections, overrides=overrides)
+        self.node.instantiate_inputs(
+            selections=self.selections, overrides=overrides
+        )
         self.context_loaded = True
 
     def add_cols_to_df(self, df, input_df):
@@ -104,7 +118,7 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
             if col not in df.columns:
                 df[col] = input_df[col].values[0]
         return df
-    
+
     def predict(self, context, model_input, params=None):
         import pandas as pd
 
@@ -161,7 +175,9 @@ class EnvironmentGenerator:
         # TODO: Add support for pyproject.toml and setup.py
         with open(self.dependency_file, "r") as f:
             self.dependencies.extend(
-                line.strip() for line in f if line.strip() and not line.startswith("#")
+                line.strip()
+                for line in f
+                if line.strip() and not line.startswith("#")
             )
 
     def get_conda_environment_dict(self) -> Dict:
@@ -187,9 +203,11 @@ class EnvironmentGenerator:
         with open(filepath, "w") as f:
             f.write("\n".join(self.get_pip_requirements_list()))
 
+
 def find_files_with_suffix(directory, suffix):
     pattern = os.path.join(directory, f"**/*{suffix}")
     return glob.glob(pattern, recursive=True)
+
 
 def get_code_paths(base_dir=".", folders=["src"], suffixes=[".py"]):
     if isinstance(suffixes, str):
@@ -197,13 +215,15 @@ def get_code_paths(base_dir=".", folders=["src"], suffixes=[".py"]):
 
     all_paths = []
     base_dir = os.path.abspath(base_dir)
-    
+
     for folder in folders:
         folder_path = os.path.join(base_dir, folder)
         for suffix in suffixes:
             paths = find_files_with_suffix(folder_path, suffix)
             # Convert absolute paths to relative paths
-            relative_paths = [os.path.relpath(path, base_dir) for path in paths]
+            relative_paths = [
+                os.path.relpath(path, base_dir) for path in paths
+            ]
             all_paths.extend(relative_paths)
-    
+
     return all_paths
