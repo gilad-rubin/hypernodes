@@ -3,3 +3,4 @@
 *.whl
 *.tar*
 .env
+mlruns/*
