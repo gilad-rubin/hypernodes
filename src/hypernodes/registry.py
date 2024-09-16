@@ -44,18 +44,14 @@ class NodeHandler:
         # Update the registry with the new DAG path
         # if the module is in the list of Hamilton DAGs, remove it first:
         self.hamilton_dags = [
-            dag
-            for dag in self.hamilton_dags
-            if dag.__name__ != f"{self.name}_{module_name}"
+            dag for dag in self.hamilton_dags if dag.__name__ != f"{self.name}_{module_name}"
         ]
         self.hamilton_dags.append(module)
         self.registry.add_dag_to_node(self.name, str(module_path))
 
         print(f'`{module_name}` is saved as a hamilton DAG for "{self.name}"')
 
-    def save_hypster_config(
-        self, hypster_config: Hypster, overwrite: bool = True
-    ):
+    def save_hypster_config(self, hypster_config: Hypster, overwrite: bool = True):
         config_path = self.folder / f"{self.name}_hypster_config.py"
 
         if not overwrite and config_path.exists():
@@ -68,15 +64,10 @@ class NodeHandler:
         self.hypster_config = hypster_config
         self.registry.set_hypster_config_for_node(self.name, str(config_path))
 
-        print(
-            f"`{hypster_config.name}` is saved as a hypster "
-            f'config for "{self.name}"'
-        )
+        print(f"`{hypster_config.name}` is saved as a hypster " f'config for "{self.name}"')
 
     def load_dags(self):
-        dags_paths = self.registry.nodes.get(self.name, {}).get(
-            "hamilton_dags", []
-        )
+        dags_paths = self.registry.nodes.get(self.name, {}).get("hamilton_dags", [])
         for dag_path in dags_paths:
             dag_path = Path(dag_path)
             module_name = dag_path.stem
@@ -144,9 +135,7 @@ class NodeHandler:
 
 class NodeRegistry:
     def __init__(self, registry_path: Optional[str] = None):
-        self.registry_path = Path(
-            registry_path or self._get_default_registry_path()
-        )
+        self.registry_path = Path(registry_path or self._get_default_registry_path())
         self.nodes: Dict[str, Dict[str, Any]] = self._load_registry()
         self.node_folder_template = self._get_node_folder_template()
 
@@ -154,9 +143,7 @@ class NodeRegistry:
         try:
             with open(self.registry_path, "r") as f:
                 registry = yaml.safe_load(f)
-            return registry.get(
-                "node_folder_template", "tests/nodes/{node_name}/artifacts"
-            )
+            return registry.get("node_folder_template", "tests/nodes/{node_name}/artifacts")
         except Exception as e:
             print(f"Error reading registry: {e}. Using default template.")
             return "tests/nodes/{node_name}/artifacts"
@@ -200,9 +187,7 @@ class NodeRegistry:
                     self.nodes[node_name] = {"folder": folder}
                     self._save_registry()
             else:
-                print(
-                    f'Loaded existing node "{node_name}" from {existing_folder}'
-                )
+                print(f'Loaded existing node "{node_name}" from {existing_folder}')
         else:
             os.makedirs(folder, exist_ok=True)
             self.nodes[node_name] = {"folder": folder}
@@ -239,9 +224,7 @@ class NodeRegistry:
                 str(handler.folder / f"{node_name}_{module.__name__}.py")
                 for module in handler.hamilton_dags
             ],
-            "hypster_config": str(
-                handler.folder / f"{node_name}_hypster_config.py"
-            )
+            "hypster_config": str(handler.folder / f"{node_name}_hypster_config.py")
             if handler.hypster_config
             else None,
         }
@@ -306,16 +289,18 @@ class NodeRegistry:
                                 return str(registry_path)
                             else:
                                 print(
-                                    f"Warning: Specified registry path '{registry_path}' does not exist. Using default."
+                                    f"Warning: Specified registry path '{registry_path}' "
+                                    f"does not exist. Using default."
                                 )
                         else:
-                            # If it's a relative path, make it relative to the pyproject.toml location
+                            # If it's a relative path, make it relative to the pyproject.toml
                             full_path = pyproject_path.parent / registry_path
                             if full_path.exists():
                                 return str(full_path)
                             else:
                                 print(
-                                    f"Warning: Specified registry path '{full_path}' does not exist. Using default."
+                                    f"Warning: Specified registry path '{full_path}' "
+                                    f"does not exist. Using default."
                                 )
                 current_dir = current_dir.parent
 
@@ -323,9 +308,7 @@ class NodeRegistry:
             #    "No pyproject.toml found or no valid registry_path specified. Using default."
             # )
         except Exception as e:
-            print(
-                f"Error reading pyproject.toml: {e}. Using default registry path."
-            )
+            print(f"Error reading pyproject.toml: {e}. Using default registry path.")
 
         # Default fallback
         default_path = Path.cwd() / "conf" / "node_registry.yaml"
