@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hypernodes"
-version = "0.1.0"
+version = "0.1.2"
 description = "DS & AI Tools & Templates for Binding Hamilton with Hypster together"
 authors = ["Gillad Rubin <gilad.rubin@gmail.com>"]
 license = "MIT"
@@ -21,9 +21,16 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
-line-length = 79
+line-length = 100
 target-version = "py310"
 
 [tool.mypy]
 ignore_missing_imports = true
 strict_optional = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["F841", "F811", "F821"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hypernodes"]
