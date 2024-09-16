@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hypernodes"
-version = "0.1.2"
+version = "0.1.3"
 description = "DS & AI Tools & Templates for Binding Hamilton with Hypster together"
 authors = ["Gillad Rubin <gilad.rubin@gmail.com>"]
 license = "MIT"
@@ -31,6 +31,7 @@ strict_optional = true
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["F841", "F811", "F821"]
+unfixable = ["F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["hypernodes"]
