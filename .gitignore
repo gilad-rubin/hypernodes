@@ -4,3 +4,4 @@
 *.tar*
 .env
 mlruns/*
+node_registry_updated.yaml
