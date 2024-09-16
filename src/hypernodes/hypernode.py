@@ -17,11 +17,13 @@ class HyperNode:
         self.hamilton_dags = hamilton_dags or []
         self.hypster_config = hypster_config
         self._instantiated_inputs: Optional[Dict[str, Any]] = None
-        self._driver: Optional[Driver] = None
+        self._driver: Driver = None
 
     def _check_hamilton_dags(self):
         if not self.hamilton_dags:
-            raise ValueError("No Hamilton DAGs have been added to this node.")
+            raise ValueError(
+                f"No Hamilton DAGs have been added to node {self.name}."
+            )
 
     def instantiate_inputs(
         self,
@@ -47,7 +49,9 @@ class HyperNode:
                     return_config_snapshot=False,
                 )
 
-    def init_driver(self) -> None:
+    def init_driver(
+        self
+    ) -> None:  # TODO: make it instant after instantiated_inputs is set?
         self._check_hamilton_dags()
         if self._driver is not None:
             return
