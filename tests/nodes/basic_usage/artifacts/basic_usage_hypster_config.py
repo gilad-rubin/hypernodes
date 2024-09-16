@@ -1,5 +1,6 @@
 from hypster import HP
 
+
 def my_config(hp: HP):
     data_path = hp.text_input("data")
     llm_model = hp.select(

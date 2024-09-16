@@ -1,5 +1,6 @@
 from hypernodes import HyperNode
 
+
 def nested(nested_node : HyperNode) -> dict:
     nested_node.instantiate_inputs()
     return nested_node.execute()

@@ -1,5 +1,6 @@
 from hypster import HP
 
+
 def my_config(hp: HP):
     from hypernodes import NodeRegistry
     node_registry_path = hp.text_input("conf/node_registry.yaml")
