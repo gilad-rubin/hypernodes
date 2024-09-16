@@ -150,14 +150,15 @@ class EnvironmentGenerator:
         extra_dependencies: Optional[List[str]] = None,
     ):
         self.env_name = env_name
-        self.python_version = python_version or self._detect_python_version()
+        self.python_version = python_version or self.detect_python_version()
         self.dependency_file = dependency_file
         self.extra_dependencies = extra_dependencies or []
         self.dependencies: List[str] = []
 
         self._load_dependencies()
 
-    def _detect_python_version(self) -> str:
+    @staticmethod
+    def detect_python_version() -> str:
         return f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
     def _load_dependencies(self):
@@ -180,7 +181,7 @@ class EnvironmentGenerator:
                 if line.strip() and not line.startswith("#")
             )
 
-    def get_conda_environment_dict(self) -> Dict:
+    def to_conda(self) -> Dict:
         return {
             "name": self.env_name,
             "channels": ["defaults"],
@@ -227,3 +228,92 @@ def get_code_paths(base_dir=".", folders=["src"], suffixes=[".py"]):
             all_paths.extend(relative_paths)
 
     return all_paths
+
+
+def registry_to_artifacts(node_registry):
+    registry_path = node_registry.registry_path
+    if os.path.exists(registry_path):
+        with open(registry_path, "r") as file:
+            data = yaml.safe_load(file) or {}
+    else:
+        print(
+            f"Input file {registry_path} does not exist. Starting with an empty dictionary."
+        )
+        data = {}
+
+    artifacts = {}
+    for node_name, node_info in data.items():
+        if "hamilton_dags" in node_info:
+            for dag_path in node_info["hamilton_dags"]:
+                artifacts[
+                    f"{node_name}_dag_{os.path.basename(dag_path)}"
+                ] = dag_path
+
+        if "hypster_config" in node_info:
+            artifacts[f"{node_name}_hypster_config"] = node_info[
+                "hypster_config"
+            ]
+
+    return artifacts
+
+
+def get_existing_dependencies_files():
+    optional_files = [
+        "requirements.txt",
+        "environment.yml",
+        "environment.yaml",
+        "pyproject.toml",
+        "*.toml",
+    ]
+
+    project_root = os.path.abspath(os.path.join(os.path.abspath("")))
+    existing_files = []
+
+    for file_pattern in optional_files:
+        matches = glob.glob(os.path.join(project_root, file_pattern))
+        existing_files.extend([os.path.basename(f) for f in matches])
+
+    existing_files = list(set(existing_files))  # Remove duplicates
+    return existing_files
+
+
+class MLFlowSetup:
+    def __init__(
+        self, registry, artifacts, dotenv_file, code_paths, conda_env
+    ):
+        self.registry = registry
+        self.artifacts = artifacts
+        self.dotenv_file = dotenv_file
+        self.code_paths = code_paths
+        self.conda_env = conda_env
+
+    def log_model(
+        self, model, artifact_path="model"
+    ):  # model_uri, run_id, mode, experiment_name
+        artifacts = self.artifacts.copy()
+        artifacts.update(registry_to_artifacts(self.registry))
+        artifacts["node_registry_path"] = str(self.registry.registry_path)
+        with mlflow.start_run():
+            model_info = mlflow.pyfunc.log_model(
+                artifact_path=artifact_path,
+                python_model=model,
+                artifacts=artifacts,
+                conda_env=self.conda_env,
+                code_paths=self.code_paths,
+            )
+            model_uri = f"runs:/{model_info.run_id}/model"
+            return model_uri
+
+    def register_model(self, model_uri, model_name):
+        model_reg = mlflow.register_model(model_uri, model_name)
+        return model_reg
+
+    def load_model(self, model_uri):
+        model = mlflow.pyfunc.load_model(model_uri)
+        return model
+
+    # .log_register
+    # .register
+    # .test_local() #example
+    # .deploy(...)
+    # .test_remote() #example
