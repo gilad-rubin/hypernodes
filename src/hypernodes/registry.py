@@ -148,6 +148,18 @@ class NodeRegistry:
             registry_path or self._get_default_registry_path()
         )
         self.nodes: Dict[str, Dict[str, Any]] = self._load_registry()
+        self.node_folder_template = self._get_node_folder_template()
+
+    def _get_node_folder_template(self) -> str:
+        try:
+            with open(self.registry_path, "r") as f:
+                registry = yaml.safe_load(f)
+            return registry.get(
+                "node_folder_template", "tests/nodes/{node_name}/artifacts"
+            )
+        except Exception as e:
+            print(f"Error reading registry: {e}. Using default template.")
+            return "tests/nodes/{node_name}/artifacts"
 
     def _load_registry(self) -> Dict[str, Dict[str, Any]]:
         if self.registry_path.exists():
@@ -155,9 +167,21 @@ class NodeRegistry:
                 return yaml.safe_load(f) or {}
         return {}
 
+    def list_nodes(self) -> List[str]:
+        final_nodes = []
+        for name, node in self.nodes.items():
+            if "hypster_config" in node and "hamilton_dags" in node:
+                final_nodes.append(name)
+        return final_nodes
+
     def create_or_get(
-        self, node_name: str, folder: str, overwrite: bool = False
+        self,
+        node_name: str,
+        folder: Optional[str] = None,
+        overwrite: bool = False,
     ) -> "NodeHandler":
+        if folder is None:
+            folder = self.node_folder_template.format(node_name=node_name)
         if node_name in self.nodes:
             existing_folder = self.nodes[node_name]["folder"]
             if existing_folder != folder:
@@ -295,16 +319,16 @@ class NodeRegistry:
                                 )
                 current_dir = current_dir.parent
 
-            print(
-                "No pyproject.toml found or no valid registry_path specified. Using default."
-            )
+            # print(
+            #    "No pyproject.toml found or no valid registry_path specified. Using default."
+            # )
         except Exception as e:
             print(
                 f"Error reading pyproject.toml: {e}. Using default registry path."
             )
 
         # Default fallback
-        default_path = Path.home() / ".hypernodes" / "registry.yaml"
+        default_path = Path.cwd() / "conf" / "node_registry.yaml"
         default_path.parent.mkdir(parents=True, exist_ok=True)
         return str(default_path)
         raise ValueError("No valid registry path found")
