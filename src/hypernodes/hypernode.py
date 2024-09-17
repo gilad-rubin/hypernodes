@@ -69,10 +69,13 @@ class HyperNode:
         self._init_driver()
 
     def _instantiate_config(self, selections: Dict[str, Any] = {}, overrides: Dict[str, Any] = {}):
+        if self.hypster_config is None and (selections or overrides):
+            raise ValueError(f"No hypster config found for node {self.name}.\
+                             Please add a hypster config or the remove selections and overrides.")
+
         self._instantiated_config = self.hypster_config(
             selections=selections,
             overrides=overrides,
-            return_config_snapshot=False,
         )
 
     def _init_driver(self) -> None:
