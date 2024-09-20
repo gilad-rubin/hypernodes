@@ -1,5 +1,9 @@
 from .hypernode import HyperNode
-from .mlflow_utils import HyperNodeMLFlow
-from .registry import NodeHandler, NodeRegistry
+from .registry import NodeInfo, create_registry, registry
 
-__all__ = ["NodeRegistry", "NodeHandler", "HyperNode", "HyperNodeMLFlow"]
+__all__ = [
+    "HyperNode",
+    "NodeInfo",
+    "create_registry",
+    "registry",
+]
