@@ -100,9 +100,19 @@ class HyperNode:
 
         return self._driver.execute(final_vars=final_vars, inputs=inputs)
 
-    def get_node_inputs(self, node_name: str) -> Dict[str, Any]:
+    def get_hamilton_node_inputs(self, node_name: str) -> Dict[str, Any]:
         self._check_hamilton_dags()
         self._check_driver_initialized()
 
         upstream_args = _get_upstream_args(self._driver, node_name)
         return self.execute(final_vars=upstream_args)
+
+    def set_instantiated_config(self, config: Dict[str, Any]) -> None:
+        """
+        Set the instantiated config directly and initialize the driver.
+
+        Args:
+            config (Dict[str, Any]): The instantiated configuration to set.
+        """
+        self._instantiated_config = config
+        self._init_driver()
