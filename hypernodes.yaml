@@ -1,2 +1,2 @@
 node_registry_path: conf/node_registry.yaml
-node_folder_template: tests/nodes/{node_name}/artifacts
+node_folder_template: tests/nodes/{node_name}/modules
