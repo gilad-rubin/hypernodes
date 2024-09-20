@@ -1,5 +1,3 @@
 hypster
 sf-hamilton
-tomli
-pyyaml
 graphviz
