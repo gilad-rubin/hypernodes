@@ -1,17 +1,15 @@
 basic_usage:
-  folder: tests/nodes/basic_usage/artifacts
-  hypster_config: tests/nodes/basic_usage/artifacts/basic_usage_hypster_config.py
-  hamilton_dags:
-  - tests/nodes/basic_usage/artifacts/basic_usage_dag.py
+  builder_param_name: builder
+  folder: tests/nodes/basic_usage/modules
+  hamilton_dag_paths:
+  - tests/nodes/basic_usage/modules/basic_usage_dag.py
+  hypster_config_path: tests/nodes/basic_usage/modules/basic_usage_hypster_config.py
 downstream_node:
   folder: tests/nodes/downstream_node/artifacts
-  hamilton_dags:
-  - tests/nodes/downstream_node/artifacts/downstream_node_dag.py
-  hypster_config: tests/nodes/downstream_node/artifacts/downstream_node_hypster_config.py
+  hamilton_dag_paths: []
 parent_node:
-  folder: tests/nodes/parent_node/artifacts
-  hypster_config: tests/nodes/parent_node/artifacts/parent_node_hypster_config.py
-  hamilton_dags:
-  - tests/nodes/parent_node/artifacts/parent_node_dag.py
-mlflow_model:
-  folder: tests/nodes/mlflow_model/artifacts
+  builder_param_name: builder
+  folder: tests/nodes/parent_node/modules
+  hamilton_dag_paths:
+  - tests/nodes/parent_node/modules/parent_node_dag.py
+  hypster_config_path: tests/nodes/parent_node/modules/parent_node_hypster_config.py
