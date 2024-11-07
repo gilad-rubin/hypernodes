@@ -8,7 +8,7 @@ from hypster import HP, config
 
 from hypernodes import HyperNode
 from hypernodes.node_handler import NodeHandler
-from hypernodes.registry import NodeInfo, NodeRegistry, StoreHandler, create_registry
+from hypernodes.registry import NodeInfo, NodeRegistry, StoreHandler
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def temp_store_path():
 @pytest.fixture
 def node_registry(temp_store_path):
     print(temp_store_path)
-    return create_registry(temp_store_path)
+    return NodeRegistry.initialize(registry_path=temp_store_path)
 
 
 # @pytest.fixture
@@ -87,7 +87,7 @@ def test_list_nodes(node_registry):
     ],
 )
 def test_create_registry(store_path, folder_template):
-    registry = create_registry(store_path, folder_template)
+    registry = NodeRegistry.initialize(registry_path=store_path, folder_template=folder_template)
     assert isinstance(registry, NodeRegistry)
-    assert registry.store_handler.file_path == store_path
+    assert registry.store_handler.path == store_path
     assert registry.folder_template == (folder_template or "src/nodes/{node_name}/modules")

@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -13,7 +14,6 @@ from .hypernode import HyperNode
 from .registry import NodeInfo, NodeRegistry
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +28,10 @@ def write_module_to_file(module: ModuleType, file_path: Path) -> None:
     Raises:
         IOError: If there's an error writing the file.
     """
+    directory = os.path.dirname(file_path)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
     try:
         file_path.write_text(inspect.getsource(module))
     except IOError as e:

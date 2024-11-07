@@ -3,28 +3,32 @@ import os
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Dict, List, Optional
 
+import toml  # Require 'toml' package for parsing pyproject.toml
 import yaml
 
 from . import mock_dag
 from .hypernode import HyperNode
 
-
-def load_hypernodes_config():
-    config_path = "hypernodes.yaml"
-    if os.path.exists(config_path):
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        return config
-    return {}
-
-
-hypernodes_config = load_hypernodes_config()
-DEFAULT_REGISTRY_PATH = hypernodes_config.get("node_registry_path", "conf/node_registry.yaml")
-DEFAULT_FOLDER_TEMPLATE = hypernodes_config.get(
-    "node_folder_template", "src/nodes/{node_name}/modules"
-)
-
 logger = logging.getLogger(__name__)
+
+DEFAULT_REGISTRY_PATH = "conf/node_registry.yaml"
+DEFAULT_FOLDER_TEMPLATE = "src/nodes/{node_name}/modules"
+
+
+def find_project_root() -> str:
+    """
+    Find the project root directory by looking for 'pyproject.toml' upwards from the cwd.
+    """
+    current_dir = os.getcwd()
+    while True:
+        if os.path.isfile(os.path.join(current_dir, "pyproject.toml")):
+            return current_dir
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            raise FileNotFoundError(
+                "Could not find 'pyproject.toml'. Please create one at the root of your project."
+            )
+        current_dir = parent_dir
 
 
 @dataclass
@@ -92,19 +96,21 @@ class NodeInfo:
 
 
 class StoreHandler:
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, path: str):
+        self.path = path
 
-    def load(self) -> Dict[str, Dict[str, Any]]:
-        try:
-            with open(self.file_path, "r") as f:
+    def load(self) -> Dict[str, Any]:
+        if os.path.exists(self.path):
+            with open(self.path, "r") as f:
                 return yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            return {}
+        return {}
 
-    def save(self, data: Dict[str, Dict[str, Any]]) -> None:
-        with open(self.file_path, "w") as f:
-            yaml.dump(data, f, default_flow_style=False)
+    def save(self, data: Dict[str, Any]) -> None:
+        directory = os.path.dirname(self.path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+        with open(self.path, "w") as f:
+            yaml.safe_dump(data, f)
 
 
 class NodeRegistry:
@@ -123,6 +129,41 @@ class NodeRegistry:
         self.store_handler = store_handler
         self.folder_template = folder_template
         self.nodes = self._load_nodes()
+
+    @classmethod
+    def initialize(
+        cls,
+        registry_path: Optional[str] = None,
+        folder_template: Optional[str] = None,
+        create_if_missing: bool = True,
+    ) -> "NodeRegistry":
+        if registry_path is None:
+            project_root = find_project_root()
+            pyproject_path = os.path.join(project_root, "pyproject.toml")
+            with open(pyproject_path, "r") as f:
+                pyproject_data = toml.load(f)
+            tool_config = pyproject_data.get("tool", {}).get("hypernodes", {})
+            registry_path = tool_config.get("node_registry_path")
+            folder_template = tool_config.get("node_folder_template")
+
+            if registry_path is None:
+                registry_path = os.path.join(project_root, DEFAULT_REGISTRY_PATH)
+            else:
+                registry_path = os.path.join(project_root, registry_path)
+
+            if folder_template is None:
+                folder_template = DEFAULT_FOLDER_TEMPLATE
+        else:
+            if folder_template is None:
+                folder_template = DEFAULT_FOLDER_TEMPLATE
+
+        if create_if_missing:
+            directory = os.path.dirname(registry_path)
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+
+        store_handler = StoreHandler(registry_path)
+        return cls(store_handler, folder_template)
 
     def _load_nodes(self) -> Dict[str, NodeInfo]:
         """
@@ -348,27 +389,3 @@ class NodeRegistry:
         del self.nodes[node_name]
         self._save_nodes()
         logger.info(f"Deleted node '{node_name}' from registry")
-
-
-def create_registry(
-    registry_path: str = DEFAULT_REGISTRY_PATH, folder_template: str = DEFAULT_FOLDER_TEMPLATE
-) -> NodeRegistry:
-    """
-    Create or get a NodeRegistry instance with default or custom settings.
-
-    Args:
-        store_path (str): Path to the YAML file for storing node data.
-        folder_template (str): Template for node folder paths.
-
-    Returns:
-        NodeRegistry: Initialized NodeRegistry instance.
-    """
-    directory = os.path.dirname(registry_path)
-    if directory and not os.path.exists(directory):
-        os.makedirs(directory, exist_ok=True)
-    store_handler = StoreHandler(registry_path)
-    return NodeRegistry(store_handler, folder_template)
-
-
-# Add this at the end of the file
-registry = create_registry()

@@ -38,16 +38,14 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
         dynamic_inputs,
         final_vars,
         final_outputs=[],
-        selections={},
-        overrides={},
+        values={},
         env_filename=None,
     ):
         self.node_name = node_name
         self.dynamic_inputs = dynamic_inputs
         self.final_vars = [final_vars] if isinstance(final_vars, str) else final_vars
         self.final_outputs = final_outputs if len(final_outputs) > 0 else self.final_vars
-        self.selections = selections
-        self.overrides = overrides
+        self.values = values
         self.env_filename = env_filename
         self.context_loaded = False
         self.node = None
@@ -65,9 +63,9 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
         if "node_registry_path" in context.artifacts:
             self.node_registry_path = context.artifacts["node_registry_path"]
 
-        from hypernodes import create_registry
+        from hypernodes import NodeRegistry
 
-        registry = create_registry(registry_path=self.node_registry_path)
+        registry = NodeRegistry.initialize(registry_path=self.node_registry_path)
 
         new_nodes = {}
         for node_name, node_info in registry.nodes.items():
@@ -86,18 +84,18 @@ class HyperNodeMLFlow(mlflow.pyfunc.PythonModel):
             new_nodes[node_name] = new_node_info
 
         registry.nodes = new_nodes
-        registry.store_handler.file_path = "node_registry_updated.yaml"
-        context.artifacts["node_registry_path"] = registry.store_handler.file_path
+        registry.store_handler.path = "node_registry_updated.yaml"
+        context.artifacts["node_registry_path"] = registry.store_handler.path
         registry._save_nodes()
 
         self.node = registry.load(node_name=self.node_name)
         if self.env_filename:
             self._load_dotenv(context.artifacts, self.env_filename)
 
-        overrides = self.overrides.copy()
-        overrides.update(context.artifacts)
+        values = self.values.copy()
+        values.update(context.artifacts)
 
-        self.node.instantiate(selections=self.selections, overrides=overrides)
+        self.node.instantiate(values=values)
         self.context_loaded = True
         print(self.node._instantiated_config)
 
@@ -280,7 +278,7 @@ class MLFlowSetup:
     def log_model(self, model, artifact_path="model"):
         artifacts = self.artifacts.copy()
         artifacts.update(registry_to_artifacts(self.registry))
-        artifacts["node_registry_path"] = self.registry.store_handler.file_path
+        artifacts["node_registry_path"] = self.registry.store_handler.path
         with mlflow.start_run():
             model_info = mlflow.pyfunc.log_model(
                 artifact_path=artifact_path,

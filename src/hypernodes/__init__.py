@@ -1,9 +1,8 @@
 from .hypernode import HyperNode
-from .registry import NodeInfo, create_registry, registry
+from .registry import NodeInfo, NodeRegistry
 
 __all__ = [
     "HyperNode",
     "NodeInfo",
-    "create_registry",
-    "registry",
+    "NodeRegistry",
 ]

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hypernodes"
-version = "0.1.7"
+version = "0.1.9"
 description = "DS & AI Tools & Templates for Binding Hamilton with Hypster together"
 authors = ["Gillad Rubin <gilad.rubin@gmail.com>"]
 license = "MIT"
@@ -35,3 +35,7 @@ unfixable = ["F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["hypernodes"]
+
+[tool.hypernodes]
+node_registry_path = "conf/node_registry.yaml"
+node_folder_template = "tests/nodes/{node_name}/modules"

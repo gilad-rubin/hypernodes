@@ -28,7 +28,8 @@ pip install hypernodes
 Here's a simple example of how to use hypernodes:
 
 ```python
-from hypernodes import registry
+from hypernodes import NodeRegistry
+registry = NodeRegistry.initialize()
 
 # Create or get a HyperNode
 node = registry.create_or_get("example_node")
@@ -39,7 +40,7 @@ from hypster import HP, config
 
 @config
 def my_config(hp: HP):
-  data_path = hp.text_input("data")
+  data_path = hp.text("data")
   env = hp.select(["dev", "prod"], default="dev")
   llm_model = hp.select({"haiku": "claude-3-haiku-20240307",
                          "sonnet": "claude-3-5-sonnet-20240620"}, default="haiku")
@@ -56,8 +57,7 @@ node.save_dag(dag)
 
 # Load and execute
 node = registry.load("example_node")
-node.instantiate(selections={"llm_model": "sonnet"},
-                 overrides={"data_path": "data_folder"})
+node.instantiate(values={"llm_model": "sonnet", "data_path": "data_folder"})
 
 results = node.execute()
 print(results) # {'query': 'Querying claude-3-5-sonnet-20240620...'}
