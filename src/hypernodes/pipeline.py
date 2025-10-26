@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 import networkx as nx
 
-from .backend import LocalBackend
+from .backend import Backend, LocalBackend
 from .cache import Cache
 from .callbacks import PipelineCallback
 from .exceptions import CycleError, DependencyError
@@ -19,7 +19,7 @@ class PipelineNode(Node):
 
     This class adapts a Pipeline interface to work as a node in another pipeline,
     with support for parameter renaming and internal mapping.
-    
+
     Inherits from Node to ensure type compatibility when used in Pipeline.nodes lists.
 
     Attributes:
@@ -65,7 +65,13 @@ class PipelineNode(Node):
         Returns:
             Tuple of parameter names from outer pipeline's perspective
         """
-        # Start with inner pipeline's root args
+        # Special case: map_over without input_mapping
+        # In this mode, the outer interface exposes ONLY the map_over parameter(s),
+        # and inner parameters are derived from transposed dict items at call time.
+        if self.map_over and not self.input_mapping:
+            return tuple(self.map_over)
+
+        # Otherwise, start with inner pipeline's root args
         inner_params = set(self.pipeline.root_args)
 
         # Apply reverse input mapping: inner -> outer
@@ -75,6 +81,13 @@ class PipelineNode(Node):
         for inner_param in inner_params:
             outer_param = reverse_mapping.get(inner_param, inner_param)
             outer_params.append(outer_param)
+
+        # If map_over is specified (with input_mapping or matching names),
+        # include those parameters as well to ensure varying params are accepted.
+        if self.map_over:
+            for map_param in self.map_over:
+                if map_param not in outer_params:
+                    outer_params.append(map_param)
 
         return tuple(outer_params)
 
@@ -128,28 +141,81 @@ class PipelineNode(Node):
         Returns:
             Mapped outputs (single value or dict depending on output_name)
         """
-        # Apply input mapping: outer -> inner
-        inner_inputs = {}
-        for outer_name, value in kwargs.items():
-            inner_name = self.input_mapping.get(outer_name, outer_name)
-            inner_inputs[inner_name] = value
-
         # Get execution context if available (set by backend)
         exec_ctx = getattr(self, "_exec_ctx", None)
-        
+
         # Check if we need to map over parameters
         if self.map_over:
-            # Determine which inner parameters to map over
-            inner_map_over = []
-            for outer_param in self.map_over:
-                inner_param = self.input_mapping.get(outer_param, outer_param)
-                inner_map_over.append(inner_param)
+            # Two modes of operation:
+            # 1. With input_mapping: map parameter names and pass items directly
+            # 2. Without input_mapping + dict items: transpose dict items into separate parameters
 
-            # Execute with map, passing context for nested progress tracking
-            inner_results = self.pipeline.map(
-                inputs=inner_inputs, map_over=inner_map_over, map_mode="zip", _ctx=exec_ctx
-            )
+            if self.input_mapping:
+                # Mode 1: Use input_mapping to rename parameters
+                # Apply input mapping: outer -> inner
+                inner_inputs = {}
+                for outer_name, value in kwargs.items():
+                    inner_name = self.input_mapping.get(outer_name, outer_name)
+                    inner_inputs[inner_name] = value
+
+                # Determine which inner parameters to map over
+                inner_map_over = []
+                for outer_param in self.map_over:
+                    inner_param = self.input_mapping.get(outer_param, outer_param)
+                    inner_map_over.append(inner_param)
+
+                # Execute with map, passing context for nested progress tracking
+                inner_results = self.pipeline.map(
+                    inputs=inner_inputs,
+                    map_over=inner_map_over,
+                    map_mode="zip",
+                    _ctx=exec_ctx,
+                )
+            else:
+                # Mode 2: No input_mapping - check if items are dicts to transpose
+                # Collect the list from the map_over parameters
+                items_list = None
+                for outer_param in self.map_over:
+                    if outer_param in kwargs:
+                        items_list = kwargs[outer_param]
+                        break
+
+                if items_list is None or not isinstance(items_list, list):
+                    raise ValueError("map_over parameter must provide a list")
+
+                # Check if items are dicts - if so, transpose them
+                if items_list and isinstance(items_list[0], dict):
+                    # Transpose: list of dicts -> dict of lists
+                    inner_inputs = {}
+                    for key in items_list[0].keys():
+                        # Extract this key from all items
+                        inner_inputs[key] = [item.get(key) for item in items_list]
+
+                    # Map over all parameters from the transposed inputs
+                    inner_map_over = list(inner_inputs.keys())
+                else:
+                    # Items are not dicts - use original approach
+                    # This handles the case where map_over parameter name matches inner pipeline parameter
+                    inner_inputs = {}
+                    for outer_name, value in kwargs.items():
+                        inner_inputs[outer_name] = value
+
+                    inner_map_over = list(self.map_over)
+
+                # Execute with map, passing context for nested progress tracking
+                inner_results = self.pipeline.map(
+                    inputs=inner_inputs,
+                    map_over=inner_map_over,
+                    map_mode="zip",
+                    _ctx=exec_ctx,
+                )
         else:
+            # No mapping - apply input mapping: outer -> inner
+            inner_inputs = {}
+            for outer_name, value in kwargs.items():
+                inner_name = self.input_mapping.get(outer_name, outer_name)
+                inner_inputs[inner_name] = value
+
             # Execute normally, passing context for nested progress tracking
             inner_results = self.pipeline.run(inputs=inner_inputs, _ctx=exec_ctx)
 
@@ -196,7 +262,7 @@ class Pipeline:
     def __init__(
         self,
         nodes: List[Union[Node, "Pipeline"]],
-        backend: LocalBackend = None,
+        backend: Backend = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
@@ -311,9 +377,7 @@ class Pipeline:
             sorted_nodes = list(nx.topological_sort(self.graph))
             # Filter to only Node/PipelineNode instances (not string inputs)
             # Note: We don't include raw Pipeline because they're auto-wrapped in PipelineNode
-            return [
-                n for n in sorted_nodes if isinstance(n, (Node, PipelineNode))
-            ]
+            return [n for n in sorted_nodes if isinstance(n, (Node, PipelineNode))]
         except nx.NetworkXError as e:
             raise CycleError(f"Cycle detected in pipeline: {e}") from e
 
@@ -456,7 +520,7 @@ class Pipeline:
     # Fluent Builder Methods
     # ======================
 
-    def with_backend(self, backend: "LocalBackend") -> "Pipeline":
+    def with_backend(self, backend: "Backend") -> "Pipeline":
         """Configure pipeline with a specific backend.
 
         Returns the same pipeline instance for method chaining.
@@ -756,11 +820,12 @@ class Pipeline:
                 node_ids.append(str(n))
 
         ctx.set_pipeline_metadata(
-            self.id, {
+            self.id,
+            {
                 "total_nodes": len(self.execution_order),
                 "node_ids": node_ids,
-                "pipeline_name": self.name or self.id
-            }
+                "pipeline_name": self.name or self.id,
+            },
         )
 
         # Trigger map start callbacks

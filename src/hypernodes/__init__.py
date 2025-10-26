@@ -26,7 +26,7 @@ Example:
 
 from .node import Node, node
 from .pipeline import Pipeline
-from .backend import LocalBackend, ModalBackend
+from .backend import Backend, LocalBackend, ModalBackend
 from .cache import DiskCache
 from .callbacks import PipelineCallback, CallbackContext
 from .exceptions import (
@@ -50,7 +50,9 @@ __all__ = [
     # Classes
     "Node",
     "Pipeline",
+    "Backend",
     "LocalBackend",
+    "ModalBackend",
     "DiskCache",
     "PipelineCallback",
     "CallbackContext",
