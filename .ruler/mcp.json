@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "tavily-remote-mcp": {
+      "command": "npx -y mcp-remote https://mcp.tavily.com/mcp/?tavilyApiKey=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"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {}
+    },
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/sse"
+    }
+  }
+}

@@ -1,2 +1,0 @@
-def mock() -> None:
-    pass

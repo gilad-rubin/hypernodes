@@ -1,41 +1,39 @@
-[tool.poetry]
+[project]
 name = "hypernodes"
-version = "0.1.9"
-description = "DS & AI Tools & Templates for Binding Hamilton with Hypster together"
-authors = ["Gillad Rubin <gilad.rubin@gmail.com>"]
-license = "MIT"
+version = "0.1.0"
+description = "Hierarchical, Modular Pipeline System"
 readme = "README.md"
-repository = "https://github.com/gilad-rubin/hypernodes"
-keywords = ["template", "ai", "ds", "hypernodes"]
+license = {text = "MIT"}
+requires-python = ">=3.12"
+dependencies = ["networkx>=3.0"]
 
-[tool.poetry.dependencies]
-python = "^3.10"
+[project.optional-dependencies]
+viz = [
+    "networkx>=3.0",
+    "graphviz>=0.20",
+    "rich>=13.0.0",
+    "tqdm>=4.67.1",
+    "ipykernel>=7.0.1",
+    "ipywidgets>=8.1.7",
+]
 
-[tool.poetry.dev-dependencies]
-pytest = "^6.0"
-ruff = "^0.1.0"
-mypy = "^0.950"
+examples = ["diskcache>=5.6.3",
+    "numpy>=2.3.4",
+    "pydantic>=2.12.3",]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
+[tool.hatch.build.targets.wheel]
+packages = ["src/hypernodes"]
 
-[tool.mypy]
-ignore_missing_imports = true
-strict_optional = true
-
-[tool.ruff.lint]
-select = ["E", "F", "I"]
-ignore = ["F841", "F811", "F821"]
-unfixable = ["F401"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["hypernodes"]
-
-[tool.hypernodes]
-node_registry_path = "conf/node_registry.yaml"
-node_folder_template = "tests/nodes/{node_name}/modules"
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
