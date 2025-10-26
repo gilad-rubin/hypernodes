@@ -6,7 +6,7 @@ import networkx as nx
 import graphviz
 
 from .node import Node
-from .pipeline import Pipeline
+from .pipeline import Pipeline, PipelineNode
 
 
 # Maximum label length before truncation
@@ -268,13 +268,20 @@ def build_graph(
     # the Pipeline object (collapsed).
     local_output_map: Dict[str, Any] = {}
     for n in pipeline.nodes:
+        # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
+        inner_pipeline = None
         if isinstance(n, Pipeline):
+            inner_pipeline = n
+        elif isinstance(n, PipelineNode):
+            inner_pipeline = n.pipeline
+        
+        if inner_pipeline is not None:
             expanded = (depth is None or _current_depth < depth)
             if expanded:
-                for inner in n.nodes:
+                for inner in inner_pipeline.nodes:
                     local_output_map[inner.output_name] = inner
             else:
-                for inner in n.nodes:
+                for inner in inner_pipeline.nodes:
                     local_output_map[inner.output_name] = n
         else:
             outputs = n.output_name
@@ -285,14 +292,21 @@ def build_graph(
                 local_output_map[outputs] = n
     
     for node in pipeline.nodes:
-        # Handle nested pipelines
+        # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
+        inner_pipeline = None
         if isinstance(node, Pipeline):
+            inner_pipeline = node
+        elif isinstance(node, PipelineNode):
+            inner_pipeline = node.pipeline
+        
+        # Handle nested pipelines (both direct Pipeline and PipelineNode)
+        if inner_pipeline is not None:
             # Check if we should expand this nested pipeline
             should_expand = (depth is None or _current_depth < depth)
             
             if should_expand:
                 # Recursively build graph for nested pipeline
-                nested_graph = build_graph(node, depth, _current_depth + 1, local_output_map)
+                nested_graph = build_graph(inner_pipeline, depth, _current_depth + 1, local_output_map)
                 # Add nested graph as a subgraph
                 g = nx.compose(g, nested_graph)
                 # Note: Edges into the nested pipeline are handled inside the
@@ -303,7 +317,9 @@ def build_graph(
                 g.add_node(node, node_type="pipeline")
                 
                 # Add edges for pipeline's parameters
-                for param in node.root_args:
+                # Use node.parameters for PipelineNode, root_args for Pipeline
+                params = node.parameters if isinstance(node, PipelineNode) else inner_pipeline.root_args
+                for param in params:
                     if param in local_output_map:
                         producer = local_output_map[param]
                         g.add_edge(producer, node, param_name=param)
@@ -591,28 +607,59 @@ def visualize(
     
     def add_nodes_in_container(container: graphviz.Digraph, pl: Pipeline, current_depth: int = 1):
         for item in pl.nodes:
+            # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
+            inner_pipeline = None
             if isinstance(item, Pipeline):
+                inner_pipeline = item
+            elif isinstance(item, PipelineNode):
+                inner_pipeline = item.pipeline
+            
+            if inner_pipeline is not None:
                 should_expand = (depth is None or current_depth < depth)
                 if should_expand:
                     # Expanded nested pipeline
                     if not flatten:
-                        with container.subgraph(name=f"cluster_{id(item)}") as sub:
+                        with container.subgraph(name=f"cluster_{id(inner_pipeline)}") as sub:
                             sub.attr(
-                                label=_pipeline_display_name(item),
+                                label=_pipeline_display_name(inner_pipeline),
                                 fontname=style_obj.font_name,
                                 fontsize=str(style_obj.font_size),
                                 color=style_obj.cluster_border_color,
                                 penwidth=str(style_obj.cluster_border_width),
                                 style="rounded,filled",
                                 fillcolor=style_obj.cluster_fill_color,
+                                labelloc="b",  # Revert: label inside cluster at bottom (previous behavior)
+                                labeljust="c",
+                                margin="16",
+                                # External title drawn ON TOP of edges with semi-transparent background
+                                xlabel=(f'''<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFFFFFCC">
+  <TR><TD><B>{_escape_html(_pipeline_display_name(inner_pipeline))}</B></TD></TR>
+ </TABLE>>'''),
                             )
-                            add_nodes_in_container(sub, item, current_depth + 1)
+                            add_nodes_in_container(sub, inner_pipeline, current_depth + 1)
                     else:
                         # Flattened view: add its contents directly without a cluster
-                        add_nodes_in_container(container, item, current_depth + 1)
+                        add_nodes_in_container(container, inner_pipeline, current_depth + 1)
                 else:
                     # Collapsed pipeline as a single node
-                    label = _create_pipeline_label(item, style_obj)
+                    # For PipelineNode, check if it has a custom name
+                    if isinstance(item, PipelineNode) and item.name:
+                        # Create custom label for named PipelineNode
+                        label = _create_pipeline_label(inner_pipeline, style_obj)
+                        # Override with custom name
+                        pipeline_name_esc = _escape_html(item.name)
+                        outputs = ", ".join(inner_pipeline.output_name) if inner_pipeline.output_name else "..."
+                        outputs_esc = _escape_html(outputs)
+                        label = f'''<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+  <TR><TD><B>{pipeline_name_esc}</B></TD></TR>
+  <TR><TD><I>(Pipeline)</I></TD></TR>
+  <TR><TD BGCOLOR="{style_obj.func_node_color}">{outputs_esc}</TD></TR>
+</TABLE>>'''
+                    else:
+                        label = _create_pipeline_label(inner_pipeline, style_obj)
+                    
                     container.node(
                         str(id(item)),
                         label=label,
