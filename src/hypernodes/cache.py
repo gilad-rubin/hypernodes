@@ -271,3 +271,15 @@ class DiskCache(Cache):
     def has(self, signature: str) -> bool:
         """Check if signature exists in cache."""
         return signature in self.meta_store
+    
+    def clear(self) -> None:
+        """Clear all cached data."""
+        # Remove all blob files
+        import shutil
+        if self.blob_dir.exists():
+            shutil.rmtree(self.blob_dir)
+            self.blob_dir.mkdir()
+        
+        # Clear metadata
+        self.meta_store = {}
+        self._save_meta()

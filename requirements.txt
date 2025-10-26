@@ -1,3 +1,0 @@
-hypster
-sf-hamilton
-graphviz

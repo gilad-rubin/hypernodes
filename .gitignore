@@ -18,4 +18,9 @@ mlruns/*
 .windsurf/rules/ruler_windsurf_instructions.md.bak
 AGENTS.md
 AGENTS.md.bak
+
 # END Ruler Generated Files
+
+.cache*
+*.svg
+*.html

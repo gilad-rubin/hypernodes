@@ -35,6 +35,12 @@ from .exceptions import (
     DependencyError,
     ExecutionError,
 )
+from .visualization import (
+    GraphvizStyle,
+    DESIGN_STYLES,
+    visualize,
+    build_graph,
+)
 
 __version__ = "0.1.0"
 
@@ -48,6 +54,11 @@ __all__ = [
     "DiskCache",
     "PipelineCallback",
     "CallbackContext",
+    # Visualization
+    "GraphvizStyle",
+    "DESIGN_STYLES",
+    "visualize",
+    "build_graph",
     # Exceptions
     "HyperNodesError",
     "CycleError",

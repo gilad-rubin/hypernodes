@@ -12,6 +12,158 @@ from .callbacks import PipelineCallback
 from .exceptions import CycleError, DependencyError
 
 
+class PipelineNode:
+    """Wraps a Pipeline to behave like a Node with custom input/output mapping.
+    
+    This class adapts a Pipeline interface to work as a node in another pipeline,
+    with support for parameter renaming and internal mapping.
+    
+    Attributes:
+        pipeline: The wrapped pipeline
+        input_mapping: Maps outer parameter names to inner pipeline parameters
+        output_mapping: Maps inner pipeline outputs to outer names
+        map_over: Optional parameter name(s) to map over (from outer perspective)
+    """
+    
+    def __init__(
+        self,
+        pipeline: 'Pipeline',
+        input_mapping: Optional[Dict[str, str]] = None,
+        output_mapping: Optional[Dict[str, str]] = None,
+        map_over: Optional[Union[str, List[str]]] = None,
+    ):
+        """Initialize a PipelineNode wrapper.
+        
+        Args:
+            pipeline: Pipeline to wrap
+            input_mapping: Maps {outer_name: inner_name} for inputs
+            output_mapping: Maps {inner_name: outer_name} for outputs
+            map_over: Parameter name(s) to map over (from outer perspective)
+        """
+        self.pipeline = pipeline
+        self.input_mapping = input_mapping or {}
+        self.output_mapping = output_mapping or {}
+        self.map_over = map_over
+        
+        # Make map_over a list if it's a string
+        if isinstance(self.map_over, str):
+            self.map_over = [self.map_over]
+    
+    @property
+    def parameters(self) -> tuple:
+        """Get outer parameter names (after input mapping).
+        
+        Returns:
+            Tuple of parameter names from outer pipeline's perspective
+        """
+        # Start with inner pipeline's root args
+        inner_params = set(self.pipeline.root_args)
+        
+        # Apply reverse input mapping: inner -> outer
+        reverse_mapping = {v: k for k, v in self.input_mapping.items()}
+        
+        outer_params = []
+        for inner_param in inner_params:
+            outer_param = reverse_mapping.get(inner_param, inner_param)
+            outer_params.append(outer_param)
+        
+        return tuple(outer_params)
+    
+    @property
+    def output_name(self) -> Union[str, tuple]:
+        """Get outer output names (after output mapping).
+        
+        Returns:
+            Output name(s) from outer pipeline's perspective
+        """
+        # Get inner pipeline outputs
+        inner_outputs = self.pipeline.output_name
+        if not isinstance(inner_outputs, tuple):
+            inner_outputs = (inner_outputs,)
+        
+        # Apply output mapping
+        outer_outputs = []
+        for inner_output in inner_outputs:
+            outer_output = self.output_mapping.get(inner_output, inner_output)
+            outer_outputs.append(outer_output)
+        
+        # Return tuple or single value
+        if len(outer_outputs) == 1:
+            return outer_outputs[0]
+        return tuple(outer_outputs)
+    
+    @property
+    def cache(self) -> bool:
+        """Whether this node should be cached.
+        
+        Returns:
+            True if caching enabled (delegates to pipeline)
+        """
+        return True  # Caching handled at inner pipeline level
+    
+    @property
+    def func(self):
+        """Get the wrapped pipeline for compatibility with Node interface.
+        
+        Returns:
+            The wrapped pipeline
+        """
+        return self.pipeline
+    
+    def __call__(self, **kwargs) -> Union[Any, Dict[str, Any]]:
+        """Execute the wrapped pipeline with input/output mapping.
+        
+        Args:
+            **kwargs: Outer parameter names and values
+            
+        Returns:
+            Mapped outputs (single value or dict depending on output_name)
+        """
+        # Apply input mapping: outer -> inner
+        inner_inputs = {}
+        for outer_name, value in kwargs.items():
+            inner_name = self.input_mapping.get(outer_name, outer_name)
+            inner_inputs[inner_name] = value
+        
+        # Check if we need to map over parameters
+        if self.map_over:
+            # Determine which inner parameters to map over
+            inner_map_over = []
+            for outer_param in self.map_over:
+                inner_param = self.input_mapping.get(outer_param, outer_param)
+                inner_map_over.append(inner_param)
+            
+            # Execute with map
+            inner_results = self.pipeline.map(
+                inputs=inner_inputs,
+                map_over=inner_map_over,
+                map_mode="zip"
+            )
+        else:
+            # Execute normally
+            inner_results = self.pipeline.run(inputs=inner_inputs)
+        
+        # Apply output mapping: inner -> outer
+        outer_results = {}
+        for inner_name, value in inner_results.items():
+            outer_name = self.output_mapping.get(inner_name, inner_name)
+            outer_results[outer_name] = value
+        
+        return outer_results
+    
+    def __repr__(self) -> str:
+        """Return string representation."""
+        return f"PipelineNode({self.pipeline})"
+    
+    def __hash__(self) -> int:
+        """Make PipelineNode hashable."""
+        return hash(id(self))
+    
+    def __eq__(self, other) -> bool:
+        """Check equality based on identity."""
+        return self is other
+
+
 class Pipeline:
     """Pipeline that manages DAG execution of nodes.
     
@@ -37,7 +189,8 @@ class Pipeline:
         backend: LocalBackend = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
-        id: Optional[str] = None
+        id: Optional[str] = None,
+        parent: Optional['Pipeline'] = None
     ):
         """Initialize a Pipeline from a list of nodes.
         
@@ -47,15 +200,18 @@ class Pipeline:
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
             id: Pipeline identifier for callbacks (default: auto-generated)
+            parent: Parent pipeline for configuration inheritance (internal)
             
         Raises:
             CycleError: If a cycle is detected in the dependency graph
             DependencyError: If a dependency cannot be satisfied
         """
         self.nodes = nodes
-        self.backend = backend or LocalBackend()
+        self.backend = backend
         self.cache = cache
-        self.callbacks = callbacks if callbacks is not None else None
+        self.callbacks = callbacks
+        self._parent = parent
+        
         # Generate pipeline ID (handle shadowing of built-in id())
         import builtins
         self.id = id if id is not None else f"pipeline_{builtins.id(self)}"
@@ -63,11 +219,14 @@ class Pipeline:
         # Build output_name -> Node mapping (inspired by pipefunc)
         self.output_to_node = {}
         for node in nodes:
-            # Handle nested pipelines
-            if isinstance(node, Pipeline):
-                # Nested pipeline has multiple outputs
-                for inner_node in node.nodes:
-                    self.output_to_node[inner_node.output_name] = node
+            # Handle nested pipelines and PipelineNodes
+            if isinstance(node, (Pipeline, PipelineNode)):
+                # Get outputs from the node
+                outputs = node.output_name if hasattr(node, 'output_name') else []
+                if not isinstance(outputs, tuple):
+                    outputs = (outputs,)
+                for output in outputs:
+                    self.output_to_node[output] = node
             else:
                 self.output_to_node[node.output_name] = node
         
@@ -91,9 +250,9 @@ class Pipeline:
             g.add_node(node)
             
             # Get parameters for this node
-            if isinstance(node, Pipeline):
-                # Nested pipeline - use its root_args
-                params = node.root_args
+            if isinstance(node, (Pipeline, PipelineNode)):
+                # Nested pipeline or PipelineNode - use parameters property
+                params = node.parameters if hasattr(node, 'parameters') else node.root_args
             else:
                 params = node.parameters
             
@@ -126,8 +285,8 @@ class Pipeline:
         try:
             # Use topological_sort from networkx
             sorted_nodes = list(nx.topological_sort(self.graph))
-            # Filter to only Node/Pipeline instances (not string inputs)
-            return [n for n in sorted_nodes if isinstance(n, (Node, Pipeline))]
+            # Filter to only Node/Pipeline/PipelineNode instances (not string inputs)
+            return [n for n in sorted_nodes if isinstance(n, (Node, Pipeline, PipelineNode))]
         except nx.NetworkXError as e:
             raise CycleError(f"Cycle detected in pipeline: {e}") from e
     
@@ -145,11 +304,14 @@ class Pipeline:
         all_outputs: Set[str] = set()
         
         for node in self.nodes:
-            if isinstance(node, Pipeline):
-                # Nested pipeline
-                all_params.update(node.root_args)
-                for inner_node in node.nodes:
-                    all_outputs.add(inner_node.output_name)
+            if isinstance(node, (Pipeline, PipelineNode)):
+                # Nested pipeline or PipelineNode
+                all_params.update(node.parameters if hasattr(node, 'parameters') else node.root_args)
+                # Get outputs
+                outputs = node.output_name if hasattr(node, 'output_name') else []
+                if not isinstance(outputs, tuple):
+                    outputs = (outputs,) if outputs else ()
+                all_outputs.update(outputs)
             else:
                 all_params.update(node.parameters)
                 all_outputs.add(node.output_name)
@@ -177,10 +339,12 @@ class Pipeline:
         """
         outputs = []
         for node in self.nodes:
-            if isinstance(node, Pipeline):
-                # Nested pipeline
-                for inner_node in node.nodes:
-                    outputs.append(inner_node.output_name)
+            if isinstance(node, (Pipeline, PipelineNode)):
+                # Nested pipeline or PipelineNode
+                node_outputs = node.output_name if hasattr(node, 'output_name') else []
+                if not isinstance(node_outputs, tuple):
+                    node_outputs = (node_outputs,) if node_outputs else ()
+                outputs.extend(node_outputs)
             else:
                 outputs.append(node.output_name)
         return tuple(outputs)
@@ -200,8 +364,8 @@ class Pipeline:
         
         # Check for missing dependencies
         for node in self.nodes:
-            if isinstance(node, Pipeline):
-                params = node.root_args
+            if isinstance(node, (Pipeline, PipelineNode)):
+                params = node.parameters if hasattr(node, 'parameters') else node.root_args
             else:
                 params = node.parameters
                 
@@ -227,7 +391,9 @@ class Pipeline:
         Returns:
             Dictionary containing outputs from all nodes (not inputs)
         """
-        return self.backend.run(self, inputs, _ctx)
+        # Use effective backend to support inheritance
+        backend = self.effective_backend
+        return backend.run(self, inputs, _ctx)
     
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Make Pipeline callable like a Node.
@@ -253,6 +419,87 @@ class Pipeline:
     def __eq__(self, other) -> bool:
         """Check equality based on identity."""
         return self is other
+    
+    @property
+    def effective_backend(self):
+        """Get effective backend (inherited from parent if not set).
+        
+        Returns:
+            Backend to use for execution
+        """
+        if self.backend is not None:
+            return self.backend
+        if self._parent is not None:
+            return self._parent.effective_backend
+        return LocalBackend()  # Default
+    
+    @property
+    def effective_cache(self):
+        """Get effective cache (inherited from parent if not set).
+        
+        Returns:
+            Cache to use for caching
+        """
+        if self.cache is not None:
+            return self.cache
+        if self._parent is not None:
+            return self._parent.effective_cache
+        return None  # Default: no caching
+    
+    @property
+    def effective_callbacks(self):
+        """Get effective callbacks (inherited from parent if not set).
+        
+        Returns:
+            List of callbacks to use
+        """
+        if self.callbacks is not None:
+            return self.callbacks
+        if self._parent is not None:
+            return self._parent.effective_callbacks
+        return []  # Default: no callbacks
+    
+    def as_node(
+        self,
+        input_mapping: Optional[Dict[str, str]] = None,
+        output_mapping: Optional[Dict[str, str]] = None,
+        map_over: Optional[Union[str, List[str]]] = None,
+    ) -> PipelineNode:
+        """Wrap this pipeline as a node with custom input/output mapping.
+        
+        This method allows a pipeline to be used as a node in another pipeline
+        with renamed parameters and/or internal mapping over collections.
+        
+        Args:
+            input_mapping: Maps outer parameter names to inner names.
+                          Format: {outer_name: inner_name}
+                          Direction: outer → inner (how inputs flow IN)
+            output_mapping: Maps inner output names to outer names.
+                           Format: {inner_name: outer_name}
+                           Direction: inner → outer (how outputs flow OUT)
+            map_over: Parameter name(s) that should be mapped over.
+                     From outer pipeline's perspective, this is a list parameter.
+                     Internally, the pipeline maps over each item.
+        
+        Returns:
+            PipelineNode that wraps this pipeline with the specified mapping
+        
+        Example:
+            >>> inner = Pipeline(nodes=[clean_text])  # expects "passage"
+            >>> adapted = inner.as_node(
+            ...     input_mapping={"document": "passage"},  # outer -> inner
+            ...     output_mapping={"cleaned": "processed"}  # inner -> outer
+            ... )
+            >>> outer = Pipeline(nodes=[adapted])
+            >>> result = outer.run(inputs={"document": "text"})
+            >>> # result["processed"] contains the cleaned text
+        """
+        return PipelineNode(
+            pipeline=self,
+            input_mapping=input_mapping,
+            output_mapping=output_mapping,
+            map_over=map_over,
+        )
     
     def map(
         self,
@@ -364,8 +611,8 @@ class Pipeline:
         ctx = CallbackContext()
         ctx.push_pipeline(self.id)
         
-        # Determine callbacks to use
-        callbacks = self.callbacks if self.callbacks is not None else []
+        # Determine callbacks to use (support inheritance)
+        callbacks = self.effective_callbacks
         
         # Trigger map start callbacks
         total_items = len(execution_plans)
@@ -419,3 +666,46 @@ class Pipeline:
             key: [result[key] for result in results_list]
             for key in output_keys
         }
+    
+    def visualize(
+        self,
+        filename: Optional[str] = None,
+        orient: str = "TB",
+        depth: Optional[int] = 1,
+        flatten: bool = False,
+        min_arg_group_size: Optional[int] = 2,
+        show_legend: bool = False,
+        show_types: bool = True,
+        style: Union[str, Any] = "default",
+        return_type: str = "auto",
+    ):
+        """Visualize the pipeline using Graphviz.
+        
+        Args:
+            filename: Output filename (e.g., "pipeline.svg"). If None, returns object
+            orient: Graph orientation ("TB", "LR", "BT", "RL")
+            depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
+            flatten: If True, render nested pipelines inline without containers
+            min_arg_group_size: Minimum inputs to group together (None=no grouping)
+            show_legend: Whether to show a legend explaining node types
+            show_types: Whether to show type hints and default values
+            style: Style name from DESIGN_STYLES or GraphvizStyle object
+            return_type: "auto", "graphviz", or "html"
+            
+        Returns:
+            graphviz.Digraph object (or HTML in Jupyter if return_type="html")
+        """
+        from . import visualization as viz
+        
+        return viz.visualize(
+            self,
+            filename=filename,
+            orient=orient,
+            depth=depth,
+            flatten=flatten,
+            min_arg_group_size=min_arg_group_size,
+            show_legend=show_legend,
+            show_types=show_types,
+            style=style,
+            return_type=return_type,
+        )
