@@ -1,11 +1,12 @@
 """Pipeline class for managing and executing DAGs of nodes."""
 import functools
 import itertools
-from typing import List, Dict, Any, Set, Union
+from typing import List, Dict, Any, Set, Union, Optional
 import networkx as nx
 
 from .node import Node
 from .backend import LocalBackend
+from .cache import Cache
 from .exceptions import CycleError, DependencyError
 
 
@@ -28,12 +29,18 @@ class Pipeline:
         root_args: External input parameters needed by the pipeline
     """
     
-    def __init__(self, nodes: List[Node], backend: LocalBackend = None):
+    def __init__(
+        self,
+        nodes: List[Node],
+        backend: LocalBackend = None,
+        cache: Optional[Cache] = None
+    ):
         """Initialize a Pipeline from a list of nodes.
         
         Args:
             nodes: List of Node instances (or nested Pipelines)
             backend: Backend for execution (default: LocalBackend())
+            cache: Cache backend for result caching (default: None, no caching)
             
         Raises:
             CycleError: If a cycle is detected in the dependency graph
@@ -41,6 +48,7 @@ class Pipeline:
         """
         self.nodes = nodes
         self.backend = backend or LocalBackend()
+        self.cache = cache
         
         # Build output_name -> Node mapping (inspired by pipefunc)
         self.output_to_node = {}

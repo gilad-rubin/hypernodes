@@ -27,6 +27,7 @@ Example:
 from .node import Node, node
 from .pipeline import Pipeline
 from .backend import LocalBackend
+from .cache import DiskCache
 from .exceptions import (
     HyperNodesError,
     CycleError,
@@ -43,6 +44,7 @@ __all__ = [
     "Node",
     "Pipeline",
     "LocalBackend",
+    "DiskCache",
     # Exceptions
     "HyperNodesError",
     "CycleError",
