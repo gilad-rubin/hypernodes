@@ -676,6 +676,23 @@ class Pipeline:
         # Determine callbacks to use (support inheritance)
         callbacks = self.effective_callbacks
         
+        # Set pipeline metadata so callbacks can access node information
+        node_ids = []
+        for n in self.execution_order:
+            if hasattr(n, 'func') and hasattr(n.func, '__name__'):
+                node_ids.append(n.func.__name__)
+            elif hasattr(n, 'id'):
+                node_ids.append(n.id)
+            elif hasattr(n, '__name__'):
+                node_ids.append(n.__name__)
+            else:
+                node_ids.append(str(n))
+        
+        ctx.set_pipeline_metadata(self.id, {
+            "total_nodes": len(self.execution_order),
+            "node_ids": node_ids
+        })
+        
         # Trigger map start callbacks
         total_items = len(execution_plans)
         map_start_time = time.time()

@@ -200,6 +200,9 @@ def _format_type_hint(param_name: str, func: Any) -> str:
             type_str = type_str.replace("typing.", "")
             # Clean up class representation
             type_str = type_str.replace("<class '", "").replace("'>", "")
+            # Remove module prefixes like __main__., mymodule., etc.
+            import re
+            type_str = re.sub(r'\b[a-zA-Z_][a-zA-Z0-9_]*\.', '', type_str)
             return _truncate_type(type_str)
     except Exception:
         pass
@@ -231,6 +234,9 @@ def _format_return_type(func: Any) -> str:
             type_str = type_str.replace("typing.", "")
             # Clean up class representation
             type_str = type_str.replace("<class '", "").replace("'>", "")
+            # Remove module prefixes like __main__., mymodule., etc.
+            import re
+            type_str = re.sub(r'\b[a-zA-Z_][a-zA-Z0-9_]*\.', '', type_str)
             return _truncate_type(type_str)
     except Exception:
         pass
@@ -271,7 +277,12 @@ def build_graph(
                 for inner in n.nodes:
                     local_output_map[inner.output_name] = n
         else:
-            local_output_map[n.output_name] = n
+            outputs = n.output_name
+            if isinstance(outputs, tuple):
+                for out in outputs:
+                    local_output_map[out] = n
+            else:
+                local_output_map[outputs] = n
     
     for node in pipeline.nodes:
         # Handle nested pipelines
@@ -375,8 +386,19 @@ def _create_node_label(
     show_types: bool = True,
 ) -> str:
     """Create HTML label for a function node."""
-    func_name = node.func.__name__
+    # Handle PipelineNode which wraps a Pipeline
+    if hasattr(node.func, '__name__'):
+        func_name = node.func.__name__
+    elif isinstance(node.func, Pipeline):
+        # PipelineNode case
+        func_name = "nested_pipeline"
+    else:
+        func_name = str(node.func)
     output_name = node.output_name
+    
+    # Handle tuple output names
+    if isinstance(output_name, tuple):
+        output_name = ", ".join(output_name)
     
     # Get return type
     return_type = ""
@@ -502,7 +524,7 @@ def visualize(
     orient: Literal["TB", "LR", "BT", "RL"] = "TB",
     depth: Optional[int] = 1,
     flatten: bool = False,
-    min_arg_group_size: Optional[int] = 2,
+    min_arg_group_size: Optional[int] = None,  # Changed default from 2 to None to disable grouping
     show_legend: bool = False,
     show_types: bool = True,
     style: Union[str, GraphvizStyle] = "default",
@@ -545,10 +567,10 @@ def visualize(
     dot.attr(bgcolor=style_obj.background_color)
     dot.attr(fontname=style_obj.font_name)
     dot.attr(fontsize=str(style_obj.font_size))
-    # Compact layout
+    # Compact layout with better spacing
     dot.graph_attr.update({
-        "ranksep": "0.4",
-        "nodesep": "0.3",
+        "ranksep": "0.8",  # Increased from 0.4 for better arrow length
+        "nodesep": "0.5",  # Increased from 0.3 for better spacing
         "pad": "0.06",
     })
     
@@ -601,6 +623,25 @@ def visualize(
                         penwidth=str(style_obj.node_border_width),
                         margin=style_obj.node_padding,
                     )
+                    if item in grouped_inputs:
+                        grp_label = _create_grouped_inputs_label(
+                            grouped_inputs[item],
+                            None,
+                            style_obj,
+                            show_types=False,
+                        )
+                        container.node(
+                            f"group_{id(item)}",
+                            label=grp_label,
+                            shape="box",
+                            style="filled",
+                            fillcolor=style_obj.grouped_args_node_color,
+                            fontname=style_obj.font_name,
+                            fontsize=str(style_obj.font_size),
+                            penwidth=str(style_obj.node_border_width),
+                            margin=style_obj.node_padding,
+                        )
+                        added_grouped_inputs.update(grouped_inputs[item])
             else:
                 # Function node
                 label = _create_node_label(item, style_obj, show_types)
@@ -631,21 +672,9 @@ def visualize(
                     )
                     added_grouped_inputs.update(grouped_inputs[item])
     
-    # Start with the root pipeline
-    if not flatten:
-        with dot.subgraph(name=f"cluster_{id(pipeline)}") as root_cluster:
-            root_cluster.attr(
-                label=_pipeline_display_name(pipeline),
-                fontname=style_obj.font_name,
-                fontsize=str(style_obj.font_size),
-                color=style_obj.cluster_border_color,
-                penwidth=str(style_obj.cluster_border_width),
-                style="rounded,filled",
-                fillcolor=style_obj.cluster_fill_color,
-            )
-            add_nodes_in_container(root_cluster, pipeline, current_depth=1)
-    else:
-        add_nodes_in_container(dot, pipeline, current_depth=1)
+    # Start with the root pipeline - no outer cluster for top level
+    # Only nested pipelines get clusters
+    add_nodes_in_container(dot, pipeline, current_depth=1)
     
     # Add remaining input nodes (not grouped) at top level
     for n in g.nodes():
@@ -688,18 +717,11 @@ def visualize(
         else:
             target_id = str(id(target))
         
-        # Get edge label (parameter name)
-        edge_data = g.get_edge_data(source, target)
-        edge_label = edge_data.get("param_name", "") if edge_data else ""
-        
         dot.edge(
             source_id,
             target_id,
-            xlabel=edge_label,
             label="",
             color=edge_color,
-            fontname=style_obj.font_name,
-            fontsize=str(style_obj.edge_font_size),
             penwidth=str(style_obj.edge_width),
         )
     

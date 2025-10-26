@@ -1,6 +1,6 @@
 <div align="center"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/dark_background_logo.svg">
-  <img alt="hypernodes" src="assets/light_background_logo.svg" width=700">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/dark_background_logo.png">
+  <img alt="hypernodes" src="assets/light_background_logo.png" width="700">
 </picture></div>
 
 <p align="center">
@@ -68,14 +68,16 @@ def count_words(cleaned_text: str) -> int:
 # Build pipeline - dependencies are automatically resolved
 pipeline = Pipeline(nodes=[clean_text, count_words])
 
-# Test with single input
-result = [pipeline.run](http://pipeline.run)(passage="Hello World")
+# Test with single input (two equivalent options)
+result = pipeline(passage="Hello World")
 print(result)  # {'cleaned_text': 'hello world', 'word_count': 2}
+# Or:
+result = pipeline.run(inputs={"passage": "Hello World"})
 
 # Scale to many inputs - each item cached independently
-results = [pipeline.map](http://pipeline.map)(
+results = pipeline.map(
     inputs={"passage": ["Hello", "World", "Foo", "Bar"]},
-    map_over=["passage"]
+    map_over="passage",
 )
 ```
 
@@ -91,10 +93,10 @@ pipeline = Pipeline(
 )
 
 # First run: executes all nodes
-result1 = [pipeline.run](http://pipeline.run)(passage="Hello World")
+result1 = pipeline(passage="Hello World")
 
 # Second run: instant cache hit
-result2 = [pipeline.run](http://pipeline.run)(passage="Hello World")  # ⚡ Cached!
+result2 = pipeline(passage="Hello World")  # Cached!
 ```
 
 ### Nested Pipelines
@@ -106,34 +108,31 @@ text_pipeline = Pipeline(nodes=[clean_text, tokenize, normalize])
 # Outer pipeline using nested pipeline
 main_pipeline = Pipeline(
     nodes=[load_data, text_pipeline, train_model],
-    backend=LocalBackend()
 )
 
-result = main_[pipeline.run](http://pipeline.run)(data_path="corpus.txt")
+result = main_pipeline.run(inputs={"data_path": "corpus.txt"})
 ```
 
-### Hybrid Local/Remote Execution
+### Remote Execution (Modal)
 
 ```python
-from hypernodes import ModalBackend, LocalBackend
+# Optional dependency: pip install 'hypernodes[modal]'
+import modal
+from hypernodes import Pipeline
+from hypernodes import ModalBackend
 
-# Inner pipeline runs on GPU cluster
+# Build a Modal image with your dependencies
+image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("numpy")
+)
+
 gpu_pipeline = Pipeline(
     nodes=[encode_text, embed_image],
-    backend=ModalBackend(gpu="A100", memory="256 GB")
+    backend=ModalBackend(image=image, gpu="A100", memory="32GB"),
 )
 
-# Outer pipeline runs locally
-local_pipeline = Pipeline(
-    nodes=[load_files, gpu_pipeline, save_results],
-    backend=LocalBackend()
-)
-
-# Execution:
-# 1. load_files runs locally
-# 2. gpu_pipeline dispatched to Modal with A100 GPU
-# 3. save_results runs locally with results from remote execution
-result = local_[pipeline.run](http://pipeline.run)(file_path="data.json")
+result = gpu_pipeline.run(inputs={"text": "Hello", "image": b"..."})
 ```
 
 ---
@@ -165,7 +164,7 @@ pipeline = Pipeline(nodes=[clean_text, count_words])
 pipeline.visualize()
 
 # Run with inputs
-result = [pipeline.run](http://pipeline.run)(passage="Hello World")
+result = pipeline.run(inputs={"passage": "Hello World"})
 ```
 
 ### Pipelines → Nodes
@@ -200,10 +199,10 @@ sig(node) = hash(
 pipeline = Pipeline(nodes=[load_data, preprocess, train_model])
 
 # First run: all nodes execute
-result1 = [pipeline.run](http://pipeline.run)(data_path="data.csv", learning_rate=0.01)
+result1 = pipeline.run(inputs={"data_path": "data.csv", "learning_rate": 0.01})
 
 # Change only learning_rate
-result2 = [pipeline.run](http://pipeline.run)(data_path="data.csv", learning_rate=0.001)
+result2 = pipeline.run(inputs={"data_path": "data.csv", "learning_rate": 0.001})
 # ✅ load_data: CACHED (unchanged)
 # ✅ preprocess: CACHED (unchanged)
 # ❌ train_model: RE-RUN (learning_rate changed)
@@ -213,15 +212,15 @@ result2 = [pipeline.run](http://pipeline.run)(data_path="data.csv", learning_rat
 
 ```python
 # First run: process 100 items
-results1 = [pipeline.map](http://pipeline.map)(
+results1 = pipeline.map(
     inputs={"passage": passages_100},
-    map_over=["passage"]
+    map_over="passage",
 )
 
 # Add 50 new items
-results2 = [pipeline.map](http://pipeline.map)(
+results2 = pipeline.map(
     inputs={"passage": passages_150},
-    map_over=["passage"]
+    map_over="passage",
 )
 # ✅ First 100 items: CACHED
 # ❌ 50 new items: EXECUTE
@@ -243,34 +242,13 @@ pipeline = Pipeline(
     nodes=[...],
     backend=LocalBackend()
 )
-
-# Parallel execution
-pipeline = Pipeline(
-    nodes=[...],
-    backend=LocalBackend(
-        node_execution="parallel",
-        map_execution="parallel",
-        max_workers=8
-    )
-)
 ```
 
-### Remote Backends
+### Remote Backend (Modal)
 
 ```python
-from hypernodes import ModalBackend, CoiledBackend
-
-# Serverless GPU execution
-modal_pipeline = Pipeline(
-    nodes=[...],
-    backend=ModalBackend(gpu="A100", memory="256 GB")
-)
-
-# Cloud VMs with Dask
-coiled_pipeline = Pipeline(
-    nodes=[...],
-    backend=CoiledBackend(memory="512 GB", region="us-east-1")
-)
+# See example above in "Remote Execution (Modal)".
+# Requires: pip install 'hypernodes[modal]'
 ```
 
 ---
@@ -280,14 +258,15 @@ coiled_pipeline = Pipeline(
 ### Progress Tracking
 
 ```python
-from hypernodes import ProgressCallback
+from hypernodes import Pipeline
+from hypernodes.telemetry import ProgressCallback
 
 pipeline = Pipeline(
     nodes=[...],
-    callbacks=[ProgressCallback()]
+    callbacks=[ProgressCallback()],
 )
 
-result = [pipeline.run](http://pipeline.run)(data="...")
+result = pipeline.run(inputs={"data": "..."})
 ```
 
 **Output:**
@@ -302,11 +281,12 @@ Processing Pipeline ━━━━━━━━━━━━━━━━━━━━
 ### Distributed Tracing
 
 ```python
-from hypernodes import TelemetryCallback
+from hypernodes import Pipeline
+from hypernodes.telemetry import TelemetryCallback
 
 pipeline = Pipeline(
     nodes=[...],
-    callbacks=[TelemetryCallback()]
+    callbacks=[TelemetryCallback()],
 )
 
 # Traces are automatically sent to OpenTelemetry-compatible backends
@@ -341,17 +321,17 @@ def encode_text(passage: str) -> Vector:
 single_encode = Pipeline(nodes=[clean_text, encode_text])
 
 # Adapt interface: map over corpus, rename inputs/outputs
-encode_corpus = single_[encode.as](http://encode.as)_node(
+encode_corpus = single_encode.as_node(
     input_mapping={"corpus": "passage"},  # outer → inner
     output_mapping={"embedding": "encoded_corpus"},  # inner → outer
-    map_over=["corpus"]  # Map over corpus list
+    map_over="corpus",  # Map over corpus list
 )
 
 # Use in outer pipeline
 index_pipeline = Pipeline(nodes=[encode_corpus, build_index])
 
 # From outer perspective: encode_corpus takes List[str], returns List[Vector]
-result = index_[pipeline.run](http://pipeline.run)(corpus=["Hello", "World", "Foo"])
+result = index_pipeline.run(inputs={"corpus": ["Hello", "World", "Foo"]})
 ```
 
 ### Hierarchical Configuration
@@ -360,25 +340,29 @@ Nested pipelines inherit configuration from parents but can override:
 
 ```python
 # Parent defines defaults
+from hypernodes import LocalBackend, DiskCache
+from hypernodes.telemetry import ProgressCallback
+
 parent = Pipeline(
     nodes=[preprocess, child_pipeline, postprocess],
     backend=LocalBackend(),
-    cache=RedisCache(host="[localhost](http://localhost)"),
-    callbacks=[ProgressCallback()]
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()],
 )
 
 # Child inherits all configuration
 child_pipeline = Pipeline(
     nodes=[step1, step2]
-    # Inherits: LocalBackend, RedisCache, ProgressCallback
+    # Inherits: LocalBackend, DiskCache, ProgressCallback
 )
 
-# Grandchild overrides backend only
-grandchild_pipeline = Pipeline(
-    nodes=[gpu_step],
-    backend=ModalBackend(gpu="A100")  # Override
-    # Inherits: RedisCache, ProgressCallback
-)
+# Grandchild overrides backend only (e.g., to Modal)
+# from hypernodes import ModalBackend
+# grandchild_pipeline = Pipeline(
+#     nodes=[gpu_step],
+#     backend=ModalBackend(image=image, gpu="A100"),  # Override
+#     # Inherits: DiskCache, ProgressCallback
+# )
 ```
 
 ---
@@ -397,7 +381,7 @@ def my_function(input: str) -> str:
 
 def test_single_node():
     pipeline = Pipeline(nodes=[my_function])
-    result = [pipeline.run](http://pipeline.run)(input="hello")
+    result = pipeline(input="hello")
     assert result["result"] == "HELLO"
 
 def test_with_cache():
@@ -405,10 +389,10 @@ def test_with_cache():
     pipeline = Pipeline(nodes=[my_function], cache=cache)
     
     # First run
-    result1 = [pipeline.run](http://pipeline.run)(input="hello")
+    result1 = pipeline.run(inputs={"input": "hello"})
     
     # Second run should hit cache
-    result2 = [pipeline.run](http://pipeline.run)(input="hello")
+    result2 = pipeline.run(inputs={"input": "hello"})
     
     assert result1 == result2
 ```
