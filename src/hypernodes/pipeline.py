@@ -134,6 +134,9 @@ class PipelineNode(Node):
             inner_name = self.input_mapping.get(outer_name, outer_name)
             inner_inputs[inner_name] = value
 
+        # Get execution context if available (set by backend)
+        exec_ctx = getattr(self, "_exec_ctx", None)
+        
         # Check if we need to map over parameters
         if self.map_over:
             # Determine which inner parameters to map over
@@ -142,13 +145,13 @@ class PipelineNode(Node):
                 inner_param = self.input_mapping.get(outer_param, outer_param)
                 inner_map_over.append(inner_param)
 
-            # Execute with map
+            # Execute with map, passing context for nested progress tracking
             inner_results = self.pipeline.map(
-                inputs=inner_inputs, map_over=inner_map_over, map_mode="zip"
+                inputs=inner_inputs, map_over=inner_map_over, map_mode="zip", _ctx=exec_ctx
             )
         else:
-            # Execute normally
-            inner_results = self.pipeline.run(inputs=inner_inputs)
+            # Execute normally, passing context for nested progress tracking
+            inner_results = self.pipeline.run(inputs=inner_inputs, _ctx=exec_ctx)
 
         # Apply output mapping: inner -> outer
         outer_results = {}
@@ -619,6 +622,7 @@ class Pipeline:
         inputs: Dict[str, Any],
         map_over: Union[str, List[str]],
         map_mode: str = "zip",
+        _ctx=None,
     ) -> Dict[str, List[Any]]:
         """Execute pipeline over a collection of inputs.
 
@@ -717,29 +721,46 @@ class Pipeline:
                 ]
 
         # Execute pipeline for each plan with callbacks
-        # Create callback context for map operation
+        # Use provided context or create new one for map operation
         from .callbacks import CallbackContext
 
-        ctx = CallbackContext()
-        ctx.push_pipeline(self.id)
+        if _ctx is None:
+            ctx = CallbackContext()
+            ctx.push_pipeline(self.id)
+        else:
+            # Use existing context (nested pipeline)
+            ctx = _ctx
+            ctx.push_pipeline(self.id)
 
         # Determine callbacks to use (support inheritance)
         callbacks = self.effective_callbacks
 
         # Set pipeline metadata so callbacks can access node information
+        # Use same logic as backend._get_node_id() for consistency
         node_ids = []
         for n in self.execution_order:
-            if hasattr(n, "func") and hasattr(n.func, "__name__"):
+            # PipelineNode with explicit name
+            if hasattr(n, "name") and n.name:
+                node_ids.append(n.name)
+            # Regular node with function name
+            elif hasattr(n, "func") and hasattr(n.func, "__name__"):
                 node_ids.append(n.func.__name__)
+            # Pipeline or object with id
             elif hasattr(n, "id"):
                 node_ids.append(n.id)
+            # Object with __name__
             elif hasattr(n, "__name__"):
                 node_ids.append(n.__name__)
+            # Fallback
             else:
                 node_ids.append(str(n))
 
         ctx.set_pipeline_metadata(
-            self.id, {"total_nodes": len(self.execution_order), "node_ids": node_ids}
+            self.id, {
+                "total_nodes": len(self.execution_order),
+                "node_ids": node_ids,
+                "pipeline_name": self.name or self.id
+            }
         )
 
         # Trigger map start callbacks

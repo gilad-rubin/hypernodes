@@ -1,5 +1,6 @@
 """Execution backends for running pipelines."""
 
+import hashlib
 import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -8,6 +9,37 @@ from .callbacks import CallbackContext
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
+
+
+def _get_node_id(node) -> str:
+    """Get a consistent node ID for callbacks and logging.
+    
+    Handles regular nodes, PipelineNodes, and nested pipelines.
+    
+    Args:
+        node: Node object (Node, PipelineNode, or Pipeline)
+        
+    Returns:
+        String identifier for the node
+    """
+    # PipelineNode with explicit name
+    if hasattr(node, "name") and node.name:
+        return node.name
+    
+    # Regular node with function name
+    if hasattr(node, "func") and hasattr(node.func, "__name__"):
+        return node.func.__name__
+    
+    # Pipeline or object with id
+    if hasattr(node, "id"):
+        return node.id
+    
+    # Object with __name__
+    if hasattr(node, "__name__"):
+        return node.__name__
+    
+    # Fallback to string representation
+    return str(node)
 
 
 class LocalBackend:
@@ -54,21 +86,16 @@ class LocalBackend:
         )
 
         # Set pipeline metadata
-        # Get node IDs safely for different node types
-        node_ids = []
-        for n in pipeline.execution_order:
-            if hasattr(n, "func") and hasattr(n.func, "__name__"):
-                node_ids.append(n.func.__name__)
-            elif hasattr(n, "id"):
-                node_ids.append(n.id)
-            elif hasattr(n, "__name__"):
-                node_ids.append(n.__name__)
-            else:
-                node_ids.append(str(n))
+        # Get node IDs using consistent helper
+        node_ids = [_get_node_id(n) for n in pipeline.execution_order]
 
         ctx.set_pipeline_metadata(
             pipeline.id,
-            {"total_nodes": len(pipeline.execution_order), "node_ids": node_ids},
+            {
+                "total_nodes": len(pipeline.execution_order),
+                "node_ids": node_ids,
+                "pipeline_name": pipeline.name or pipeline.id
+            },
         )
 
         # Push this pipeline onto hierarchy stack
@@ -99,27 +126,111 @@ class LocalBackend:
                         param: available_values[param] for param in node.parameters
                     }
 
-                    # Trigger nested pipeline start callbacks
+                    # Mark this as a PipelineNode in context so progress bar knows not to create node bar
+                    node_id = _get_node_id(node)
+                    ctx.set(f"_is_pipeline_node:{node_id}", True)
+
+                    # Compute signature for PipelineNode caching
+                    # Hash the inner pipeline structure (all node functions)
                     inner_pipeline = node.pipeline
-                    nested_start_time = time.time()
-                    for callback in callbacks:
-                        callback.on_nested_pipeline_start(
-                            pipeline.id, inner_pipeline.id, ctx
-                        )
+                    inner_code_hashes = []
+                    for inner_node in inner_pipeline.execution_order:
+                        if hasattr(inner_node, "pipeline"):
+                            # Nested PipelineNode - use pipeline ID to represent its structure
+                            inner_code_hashes.append(inner_node.pipeline.id)
+                        elif hasattr(inner_node, "func"):
+                            # Regular node - hash its function
+                            inner_code_hashes.append(hash_code(inner_node.func))
+                    code_hash = hashlib.sha256("::".join(inner_code_hashes).encode()).hexdigest()
+                    
+                    inputs_hash = hash_inputs(node_inputs)
+                    
+                    # Compute dependencies hash from upstream node signatures
+                    deps_signatures = []
+                    for param in node.parameters:
+                        if param in node_signatures:
+                            deps_signatures.append(node_signatures[param])
+                    deps_hash = ":".join(sorted(deps_signatures))
+                    
+                    signature = compute_signature(
+                        code_hash=code_hash,
+                        inputs_hash=inputs_hash,
+                        deps_hash=deps_hash,
+                    )
+                    
+                    # Check cache if enabled
+                    effective_cache = (
+                        pipeline.effective_cache
+                        if hasattr(pipeline, "effective_cache")
+                        else pipeline.cache
+                    )
+                    cache_enabled = effective_cache is not None and node.cache
+                    result = None
+                    
+                    if cache_enabled:
+                        result = effective_cache.get(signature)
+                        
+                        if result is not None:
+                            # Cache hit - trigger callbacks
+                            for callback in callbacks:
+                                callback.on_node_cached(node_id, signature, ctx)
 
-                    # Call the PipelineNode (it handles all mapping internally)
-                    result = node(**node_inputs)
+                    if result is None:
+                        # Cache miss or caching disabled - execute PipelineNode
+                        # Trigger node start callbacks (for progress bar updates)
+                        node_start_time = time.time()
+                        for callback in callbacks:
+                            callback.on_node_start(node_id, node_inputs, ctx)
 
-                    # Trigger nested pipeline end callbacks
-                    nested_duration = time.time() - nested_start_time
-                    for callback in callbacks:
-                        callback.on_nested_pipeline_end(
-                            pipeline.id, inner_pipeline.id, nested_duration, ctx
-                        )
+                        # Trigger nested pipeline start callbacks
+                        nested_start_time = time.time()
+                        for callback in callbacks:
+                            callback.on_nested_pipeline_start(
+                                pipeline.id, inner_pipeline.id, ctx
+                            )
+
+                        # Pass context to PipelineNode so it can share with nested pipeline
+                        # Store temporarily as attribute (PipelineNode will use it if available)
+                        node._exec_ctx = ctx
+                        
+                        # Temporarily set parent so nested pipeline inherits callbacks/cache/backend
+                        old_parent = inner_pipeline._parent
+                        inner_pipeline._parent = pipeline
+
+                        # Call the PipelineNode (it handles all mapping internally)
+                        result = node(**node_inputs)
+                        
+                        # Restore original parent and clean up
+                        inner_pipeline._parent = old_parent
+                        node._exec_ctx = None
+
+                        # Trigger nested pipeline end callbacks
+                        nested_duration = time.time() - nested_start_time
+                        for callback in callbacks:
+                            callback.on_nested_pipeline_end(
+                                pipeline.id, inner_pipeline.id, nested_duration, ctx
+                            )
+
+                        # Trigger node end callbacks (for progress bar updates)
+                        node_duration = time.time() - node_start_time
+                        for callback in callbacks:
+                            callback.on_node_end(
+                                _get_node_id(node),
+                                result,
+                                node_duration,
+                                ctx,
+                            )
+                        
+                        # Store in cache if enabled
+                        if cache_enabled:
+                            effective_cache.put(signature, result)
 
                     # Result is a dict of outputs
                     outputs.update(result)
                     available_values.update(result)
+                    # Store signature for each output
+                    for output_name in result.keys():
+                        node_signatures[output_name] = signature
                 else:
                     # Regular node execution with caching and callbacks
                     node_inputs = {
@@ -160,7 +271,7 @@ class LocalBackend:
                             # Cache hit - trigger callbacks
                             for callback in callbacks:
                                 callback.on_node_cached(
-                                    node.func.__name__, signature, ctx
+                                    _get_node_id(node), signature, ctx
                                 )
 
                             # If in a map operation, also trigger map item cached callback
@@ -176,7 +287,7 @@ class LocalBackend:
                         # Trigger node start callbacks
                         node_start_time = time.time()
                         for callback in callbacks:
-                            callback.on_node_start(node.func.__name__, node_inputs, ctx)
+                            callback.on_node_start(_get_node_id(node), node_inputs, ctx)
 
                         # If in a map operation, also trigger map item start callback
                         if ctx.get("_in_map"):
@@ -191,7 +302,7 @@ class LocalBackend:
                             node_duration = time.time() - node_start_time
                             for callback in callbacks:
                                 callback.on_node_end(
-                                    node.func.__name__,
+                                    _get_node_id(node),
                                     {node.output_name: result},
                                     node_duration,
                                     ctx,
@@ -214,7 +325,7 @@ class LocalBackend:
                         except Exception as e:
                             # Trigger error callbacks
                             for callback in callbacks:
-                                callback.on_error(node.func.__name__, e, ctx)
+                                callback.on_error(_get_node_id(node), e, ctx)
                             raise
 
                         # Store in cache if enabled

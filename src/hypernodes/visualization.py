@@ -676,10 +676,28 @@ def visualize(
                     # For PipelineNode, check if it has a custom name
                     if isinstance(item, PipelineNode) and item.name:
                         # Create custom label for named PipelineNode
-                        label = _create_pipeline_label(inner_pipeline, style_obj)
-                        # Override with custom name
+                        # Use item.output_name to get mapped outputs (after output_mapping)
                         pipeline_name_esc = _escape_html(item.name)
-                        outputs = ", ".join(inner_pipeline.output_name) if inner_pipeline.output_name else "..."
+                        item_outputs = item.output_name
+                        if isinstance(item_outputs, tuple):
+                            outputs = ", ".join(item_outputs)
+                        else:
+                            outputs = item_outputs if item_outputs else "..."
+                        outputs_esc = _escape_html(outputs)
+                        label = f'''<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+  <TR><TD><B>{pipeline_name_esc}</B> ⚙</TD></TR>
+  <TR><TD BGCOLOR="{style_obj.pipeline_node_color}">{outputs_esc}</TD></TR>
+</TABLE>>'''
+                    elif isinstance(item, PipelineNode):
+                        # Unnamed PipelineNode - use mapped outputs
+                        pipeline_name = "pipeline"
+                        item_outputs = item.output_name
+                        if isinstance(item_outputs, tuple):
+                            outputs = ", ".join(item_outputs)
+                        else:
+                            outputs = item_outputs if item_outputs else "..."
+                        pipeline_name_esc = _escape_html(pipeline_name)
                         outputs_esc = _escape_html(outputs)
                         label = f'''<
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
@@ -687,6 +705,7 @@ def visualize(
   <TR><TD BGCOLOR="{style_obj.pipeline_node_color}">{outputs_esc}</TD></TR>
 </TABLE>>'''
                     else:
+                        # Regular Pipeline (not wrapped in PipelineNode)
                         label = _create_pipeline_label(inner_pipeline, style_obj)
                     
                     container.node(

@@ -121,16 +121,20 @@ class ProgressCallback(PipelineCallback):
 
         metadata = ctx.get_pipeline_metadata(pipeline_id)
         total_nodes = metadata.get("total_nodes", 0)
+        
+        # Get pipeline name from metadata if available
+        pipeline_name = metadata.get("pipeline_name", pipeline_id)
 
         # Use depth as position, keep all bars visible
         bar = self._create_bar(
-            desc=f"Pipeline: {pipeline_id}",
+            desc=f"{pipeline_name}",
             total=total_nodes if total_nodes > 0 else None,
             position=ctx.depth,
             leave=True,
         )
 
         ctx.set(f"progress_bar:{pipeline_id}", bar)
+        ctx.set(f"pipeline_name:{pipeline_id}", pipeline_name)
         self._bars[f"pipeline:{pipeline_id}"] = bar
 
     def on_node_start(self, node_id: str, inputs: Dict, ctx: CallbackContext) -> None:
@@ -138,12 +142,28 @@ class ProgressCallback(PipelineCallback):
         if not self.enable:
             return
 
+        # Update pipeline bar to show currently running node
+        in_map = ctx.get("_in_map", False)
+        pipeline_id = ctx.current_pipeline_id
+        pipeline_bar = ctx.get(f"progress_bar:{pipeline_id}")
+        
+        if pipeline_bar:
+            # Show current node in pipeline bar description
+            pipeline_name = ctx.get(f"pipeline_name:{pipeline_id}", pipeline_id)
+            pipeline_bar.set_description(f"{pipeline_name} → {node_id}")
+
         # Skip creating node bar if we're in a map operation
         # (map node bars are created at map_start instead)
-        if ctx.get("_in_map", False):
+        if in_map:
+            return
+        
+        # Skip creating node bar for PipelineNodes - they will create their own
+        # progress bars for their internal pipeline/map execution
+        # This is marked in context by backend when calling on_nested_pipeline_start
+        if ctx.get(f"_is_pipeline_node:{node_id}", False):
             return
 
-        # Nodes are nested (depth+1), keep visible after completion
+        # Regular nodes get a progress bar (depth+1), keep visible after completion
         bar = self._create_bar(
             desc=f"{node_id}",
             total=1,
@@ -262,7 +282,8 @@ class ProgressCallback(PipelineCallback):
 
         bar = ctx.get(f"progress_bar:{pipeline_id}")
         if bar:
-            bar.set_description(f"Pipeline: {pipeline_id} ✓ ({duration:.2f}s)")
+            pipeline_name = ctx.get(f"pipeline_name:{pipeline_id}", pipeline_id)
+            bar.set_description(f"{pipeline_name} ✓ ({duration:.2f}s)")
             bar.close()
 
             # Clean up
@@ -278,15 +299,17 @@ class ProgressCallback(PipelineCallback):
         pipeline_id = ctx.current_pipeline_id
         metadata = ctx.get_pipeline_metadata(pipeline_id)
         node_ids = metadata.get("node_ids", [])
+        pipeline_name = metadata.get("pipeline_name", pipeline_id)
 
         # Create main pipeline bar for map operation
         pipeline_bar = self._create_bar(
-            desc=f"Pipeline: {pipeline_id} (map)",
+            desc=f"Running {pipeline_name} with {total_items} examples...",
             total=total_items,
             position=ctx.depth,
             leave=True,
         )
         ctx.set(f"progress_bar:{pipeline_id}", pipeline_bar)
+        ctx.set(f"pipeline_name:{pipeline_id}", pipeline_name)
 
         # Create one progress bar for each node with unique positions
         map_bars = {}
@@ -360,9 +383,10 @@ class ProgressCallback(PipelineCallback):
 
         # Update and close pipeline bar
         pipeline_bar = ctx.get(f"progress_bar:{pipeline_id}")
+        pipeline_name = ctx.get(f"pipeline_name:{pipeline_id}", pipeline_id)
         if pipeline_bar:
             pipeline_bar.set_description(
-                f"Pipeline: {pipeline_id} ✓ ({total_duration:.2f}s, {rate:.1f} items/s)"
+                f"{pipeline_name} ✓ ({total_duration:.2f}s, {rate:.1f} items/s)"
             )
             pipeline_bar.close()
 
