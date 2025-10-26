@@ -1,6 +1,7 @@
 """Pipeline class for managing and executing DAGs of nodes."""
 import functools
-from typing import List, Dict, Any, Set
+import itertools
+from typing import List, Dict, Any, Set, Union
 import networkx as nx
 
 from .node import Node
@@ -233,3 +234,133 @@ class Pipeline:
     def __eq__(self, other) -> bool:
         """Check equality based on identity."""
         return self is other
+    
+    def map(
+        self,
+        inputs: Dict[str, Any],
+        map_over: Union[str, List[str]],
+        map_mode: str = "zip"
+    ) -> Dict[str, List[Any]]:
+        """Execute pipeline over a collection of inputs.
+        
+        This method enables batch processing where the pipeline runs multiple times
+        with different values for specified parameters. Each execution is independent
+        and can be cached separately.
+        
+        Args:
+            inputs: Dictionary mapping parameter names to values.
+                   For parameters in map_over, values must be lists.
+                   For parameters not in map_over, values are single constants.
+            map_over: Parameter name(s) that vary across executions.
+                     Can be a single string or list of strings.
+            map_mode: How to combine multiple map_over parameters:
+                     - "zip" (default): Process corresponding items together.
+                       All lists must have the same length.
+                     - "product": Create all combinations of items.
+                       Lists can have different lengths.
+        
+        Returns:
+            Dictionary where each output name maps to a list of results,
+            one per execution.
+        
+        Raises:
+            ValueError: If map_mode is "zip" and list lengths don't match
+        
+        Example:
+            >>> @node(output_name="result")
+            >>> def add_one(x: int) -> int:
+            ...     return x + 1
+            >>> 
+            >>> pipeline = Pipeline(nodes=[add_one])
+            >>> results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
+            >>> assert results == {"result": [2, 3, 4]}
+        """
+        # Normalize map_over to list
+        if isinstance(map_over, str):
+            map_over = [map_over]
+        
+        # Validate map_mode
+        if map_mode not in ("zip", "product"):
+            raise ValueError(f"map_mode must be 'zip' or 'product', got '{map_mode}'")
+        
+        # Separate varying and fixed parameters
+        varying_params = {}
+        fixed_params = {}
+        
+        for key, value in inputs.items():
+            if key in map_over:
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"Parameter '{key}' is in map_over but value is not a list"
+                    )
+                varying_params[key] = value
+            else:
+                fixed_params[key] = value
+        
+        # Validate that all map_over parameters are present
+        for param in map_over:
+            if param not in varying_params:
+                raise ValueError(
+                    f"Parameter '{param}' in map_over not found in inputs"
+                )
+        
+        # Generate execution plans based on map_mode
+        if map_mode == "zip":
+            # Validate all lists have same length
+            lengths = [len(lst) for lst in varying_params.values()]
+            if lengths and not all(length == lengths[0] for length in lengths):
+                raise ValueError(
+                    f"In zip mode, all lists must have the same length. "
+                    f"Got lengths: {dict(zip(varying_params.keys(), lengths))}"
+                )
+            
+            # Create execution plans by zipping
+            if not varying_params or not lengths or lengths[0] == 0:
+                # Empty case
+                execution_plans = []
+            else:
+                # Zip the varying parameters together
+                param_names = list(varying_params.keys())
+                param_lists = [varying_params[name] for name in param_names]
+                execution_plans = [
+                    {**fixed_params, **dict(zip(param_names, values))}
+                    for values in zip(*param_lists)
+                ]
+        
+        else:  # product mode
+            # Create all combinations
+            if not varying_params:
+                execution_plans = [fixed_params]
+            else:
+                param_names = list(varying_params.keys())
+                param_lists = [varying_params[name] for name in param_names]
+                execution_plans = [
+                    {**fixed_params, **dict(zip(param_names, values))}
+                    for values in itertools.product(*param_lists)
+                ]
+        
+        # Execute pipeline for each plan
+        results_list = [self.run(plan) for plan in execution_plans]
+        
+        # Transpose results: from list of dicts to dict of lists
+        if not results_list:
+            # Empty case: return empty lists for each output
+            # Determine output keys from pipeline structure
+            output_keys = []
+            for node in self.nodes:
+                if isinstance(node, Pipeline):
+                    # Nested pipeline - add all its outputs
+                    for inner_node in node.nodes:
+                        output_keys.append(inner_node.output_name)
+                else:
+                    output_keys.append(node.output_name)
+            return {key: [] for key in output_keys}
+        
+        # Collect all output keys from first result
+        output_keys = results_list[0].keys()
+        
+        # Transpose: dict of lists
+        return {
+            key: [result[key] for result in results_list]
+            for key in output_keys
+        }
