@@ -138,7 +138,7 @@ def encode_text(encoder: Encoder, cleaned_text: str, is_query: bool = False) -> 
 
 
 # Reusable text encoding pipeline
-text_encode = Pipeline(nodes=[clean_text, encode_text])
+text_encode = Pipeline(nodes=[clean_text, encode_text], name="text_encode")
 
 
 # ---- Passage encoding: extract -> encode -> pack ----------------------------
@@ -153,7 +153,7 @@ def pack_passage(passage: Passage, embedding: Vector) -> EncodedPassage:
 
 
 # Single passage encoding pipeline
-single_encode = Pipeline(nodes=[extract_passage_text, text_encode, pack_passage])
+single_encode = Pipeline(nodes=[extract_passage_text, text_encode, pack_passage], name="single_encode")
 
 
 def test_single_encode_visualization():
@@ -192,7 +192,7 @@ def test_encode_and_index():
         return indexer.index(encoded_corpus)
 
     # Pipeline: encode all passages, then build index
-    encode_and_index = Pipeline(nodes=[encode_corpus, build_index])
+    encode_and_index = Pipeline(nodes=[encode_corpus, build_index], name="encode_and_index")
     
     print("  Visualizing encode_and_index pipeline...")
     encode_and_index.visualize(filename="outputs/test3_encode_and_index.svg")
@@ -210,7 +210,7 @@ def test_full_pipeline(encode_and_index):
     def extract_query_text(query: Query) -> str:
         return query.text
 
-    encode_query_pipeline = Pipeline(nodes=[extract_query_text, text_encode])
+    encode_query_pipeline = Pipeline(nodes=[extract_query_text, text_encode], name="encode_query")
     encode_query_step = encode_query_pipeline.as_node(
         output_mapping={"embedding": "query_vec"}
     )
@@ -240,8 +240,8 @@ def test_full_pipeline(encode_and_index):
     ) -> List[RetrievedDoc]:
         return reranker.rerank(query, retrieved, top_k=final_top_k)
 
-    search_pipeline = Pipeline(nodes=[encode_query_step, retrieve, rerank_hits])
-    full_pipeline = Pipeline(nodes=[encode_and_index, search_pipeline])
+    search_pipeline = Pipeline(nodes=[encode_query_step, retrieve, rerank_hits], name="search")
+    full_pipeline = Pipeline(nodes=[encode_and_index, search_pipeline], name="full_rag")
     
     print("  Visualizing full_pipeline...")
     full_pipeline.visualize(filename="outputs/test4_full_pipeline.svg")

@@ -21,7 +21,7 @@ def example_basic_fluent():
     
     # Fluent way - more readable for complex configurations
     pipeline_fluent = (
-        Pipeline(nodes=[double, add_ten])
+        Pipeline(nodes=[double, add_ten], name="double_and_add")
         .with_backend(LocalBackend())
         .with_cache(DiskCache(path=".cache"))
     )
@@ -39,7 +39,7 @@ def example_chaining():
     
     # Create pipeline with chained configuration
     pipeline = (
-        Pipeline(nodes=[double, add_ten])
+        Pipeline(nodes=[double, add_ten], name="double_and_add")
         .with_backend(LocalBackend())
         .with_cache(DiskCache(path=".cache"))
     )
@@ -76,7 +76,7 @@ def example_modal_backend():
     image = modal.Image.debian_slim().pip_install("numpy")
     
     pipeline = (
-        Pipeline(nodes=[process, transform, aggregate])
+        Pipeline(nodes=[process, transform, aggregate], name="process_transform_aggregate")
         .with_backend(ModalBackend(
             image=image,
             gpu="A100",
@@ -100,7 +100,7 @@ def example_conditional_config():
     use_cache = os.getenv("USE_CACHE", "true").lower() == "true"
     
     # Start with basic pipeline
-    pipeline = Pipeline(nodes=[double, add_ten])
+    pipeline = Pipeline(nodes=[double, add_ten], name="double_and_add")
     
     # Conditionally add cache
     if use_cache:

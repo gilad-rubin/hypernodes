@@ -64,7 +64,7 @@ def test_4_2_pipeline_level_callbacks():
         return x * 2
     
     pipeline = Pipeline(
-        id="test_pipeline",
+        name="test_pipeline",
         nodes=[compute],
         callbacks=[PipelineTracker()]
     )
@@ -72,9 +72,11 @@ def test_4_2_pipeline_level_callbacks():
     result = pipeline.run(inputs={"x": 10})
     
     assert result["result"] == 20
-    assert events[0] == ("pipeline_start", "test_pipeline", ["x"])
+    # Pipeline ID is auto-generated, but should be consistent
+    pipeline_id = pipeline.id
+    assert events[0] == ("pipeline_start", pipeline_id, ["x"])
     assert events[1][0] == "pipeline_end"
-    assert events[1][1] == "test_pipeline"
+    assert events[1][1] == pipeline_id
     assert events[1][2] == ["result"]
     assert events[1][3] >= 0
 

@@ -390,8 +390,11 @@ def _create_node_label(
     if hasattr(node.func, '__name__'):
         func_name = node.func.__name__
     elif isinstance(node.func, Pipeline):
-        # PipelineNode case
-        func_name = "nested_pipeline"
+        # PipelineNode case - check if it has a custom name
+        if hasattr(node, 'name') and node.name:
+            func_name = node.name
+        else:
+            func_name = "nested_pipeline"
     else:
         func_name = str(node.func)
     output_name = node.output_name
@@ -484,13 +487,11 @@ def _create_pipeline_label(
     style: GraphvizStyle,
 ) -> str:
     """Create label for a collapsed pipeline node."""
-    # Get pipeline name - use a better default than showing ID
-    if hasattr(pipeline, 'id') and pipeline.id and not pipeline.id.startswith('pipeline_'):
-        pipeline_name = pipeline.id
-    elif hasattr(pipeline, "name") and pipeline.name:
+    # Get pipeline name - prioritize user-provided name
+    if hasattr(pipeline, "name") and pipeline.name:
         pipeline_name = pipeline.name
     else:
-        # Use output names as identifier instead of ID
+        # Use output names as identifier
         outputs = pipeline.output_name
         if outputs:
             # Take first output or join if multiple

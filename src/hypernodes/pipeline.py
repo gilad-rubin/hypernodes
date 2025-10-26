@@ -31,6 +31,7 @@ class PipelineNode:
         input_mapping: Optional[Dict[str, str]] = None,
         output_mapping: Optional[Dict[str, str]] = None,
         map_over: Optional[Union[str, List[str]]] = None,
+        name: Optional[str] = None,
     ):
         """Initialize a PipelineNode wrapper.
         
@@ -39,11 +40,13 @@ class PipelineNode:
             input_mapping: Maps {outer_name: inner_name} for inputs
             output_mapping: Maps {inner_name: outer_name} for outputs
             map_over: Parameter name(s) to map over (from outer perspective)
+            name: Optional name for this node (displayed in visualizations)
         """
         self.pipeline = pipeline
         self.input_mapping = input_mapping or {}
         self.output_mapping = output_mapping or {}
         self.map_over = map_over
+        self.name = name
         
         # Make map_over a list if it's a string
         if isinstance(self.map_over, str):
@@ -189,7 +192,7 @@ class Pipeline:
         backend: LocalBackend = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
-        id: Optional[str] = None,
+        name: Optional[str] = None,
         parent: Optional['Pipeline'] = None
     ):
         """Initialize a Pipeline from a list of nodes.
@@ -199,7 +202,7 @@ class Pipeline:
             backend: Backend for execution (default: LocalBackend())
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
-            id: Pipeline identifier for callbacks (default: auto-generated)
+            name: Human-readable name for the pipeline (used in visualization)
             parent: Parent pipeline for configuration inheritance (internal)
             
         Raises:
@@ -211,10 +214,12 @@ class Pipeline:
         self.cache = cache
         self.callbacks = callbacks
         self._parent = parent
+        self.name = name
         
-        # Generate pipeline ID (handle shadowing of built-in id())
+        # Generate deterministic pipeline ID based on object identity
+        # Same pipeline instance always gets same ID for callback tracking
         import builtins
-        self.id = id if id is not None else f"pipeline_{builtins.id(self)}"
+        self.id = f"pipeline_{builtins.id(self)}"
         
         # Build output_name -> Node mapping (inspired by pipefunc)
         self.output_to_node = {}
@@ -410,6 +415,8 @@ class Pipeline:
     
     def __repr__(self) -> str:
         """Return string representation of the Pipeline."""
+        if self.name:
+            return f"Pipeline(name={self.name!r}, nodes={len(self.nodes)})"
         return f"Pipeline({len(self.nodes)} nodes)"
     
     def __hash__(self) -> int:
@@ -526,6 +533,7 @@ class Pipeline:
         input_mapping: Optional[Dict[str, str]] = None,
         output_mapping: Optional[Dict[str, str]] = None,
         map_over: Optional[Union[str, List[str]]] = None,
+        name: Optional[str] = None,
     ) -> PipelineNode:
         """Wrap this pipeline as a node with custom input/output mapping.
         
@@ -542,6 +550,7 @@ class Pipeline:
             map_over: Parameter name(s) that should be mapped over.
                      From outer pipeline's perspective, this is a list parameter.
                      Internally, the pipeline maps over each item.
+            name: Optional name for this node (displayed in visualizations)
         
         Returns:
             PipelineNode that wraps this pipeline with the specified mapping
@@ -551,6 +560,7 @@ class Pipeline:
             >>> adapted = inner.as_node(
             ...     input_mapping={"document": "passage"},  # outer -> inner
             ...     output_mapping={"cleaned": "processed"}  # inner -> outer
+            ...     name="adapted_clean"
             ... )
             >>> outer = Pipeline(nodes=[adapted])
             >>> result = outer.run(inputs={"document": "text"})
@@ -561,6 +571,7 @@ class Pipeline:
             input_mapping=input_mapping,
             output_mapping=output_mapping,
             map_over=map_over,
+            name=name,
         )
     
     def map(

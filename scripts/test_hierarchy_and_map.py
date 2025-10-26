@@ -28,7 +28,7 @@ def normalize(cleaned: str) -> str:
 
 
 # Create inner pipeline
-inner_pipeline = Pipeline(nodes=[clean_data, normalize], id="preprocessing")
+inner_pipeline = Pipeline(nodes=[clean_data, normalize], name="preprocessing")
 
 
 # Define outer pipeline nodes

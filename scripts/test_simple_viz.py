@@ -35,7 +35,7 @@ def encode_text(encoder: Encoder, cleaned_text: str, is_query: bool = False) -> 
     return encoder.encode(cleaned_text, is_query=is_query)
 
 # Reusable text encoding pipeline
-text_encode = Pipeline(nodes=[clean_text, encode_text])
+text_encode = Pipeline(nodes=[clean_text, encode_text], name="text_encode")
 
 # ---- Passage encoding: extract -> encode -> pack ----------------------------
 @node(output_name="text")
@@ -47,7 +47,7 @@ def pack_passage(passage: Passage, embedding: Vector) -> EncodedPassage:
     return EncodedPassage(pid=passage.pid, text=passage.text, embedding=embedding)
 
 # Single passage encoding pipeline
-single_encode = Pipeline(nodes=[extract_passage_text, text_encode, pack_passage])
+single_encode = Pipeline(nodes=[extract_passage_text, text_encode, pack_passage], name="single_encode")
 
 print("Testing visualization...")
 print(f"min_arg_group_size default should be None")

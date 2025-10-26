@@ -32,7 +32,7 @@ def create_sample_pipeline():
         avg_length = sum(len(token) for token in tokens) / max(word_count, 1)
         return {"word_count": word_count, "avg_word_length": avg_length}
 
-    return Pipeline(nodes=[clean_text, tokenize, count_words, compute_stats])
+    return Pipeline(nodes=[clean_text, tokenize, count_words, compute_stats], name="text_analysis")
 
 
 def create_hierarchical_pipeline():
@@ -46,7 +46,7 @@ def create_hierarchical_pipeline():
     def trim_whitespace(lowercased: str) -> str:
         return lowercased.strip()
 
-    preprocess = Pipeline(nodes=[to_lowercase, trim_whitespace])
+    preprocess = Pipeline(nodes=[to_lowercase, trim_whitespace], name="preprocess")
 
     # Analysis pipeline
     @node(output_name="split_tokens")
@@ -57,14 +57,14 @@ def create_hierarchical_pipeline():
     def count(split_tokens: List[str]) -> int:
         return len(split_tokens)
 
-    analysis = Pipeline(nodes=[split, count])
+    analysis = Pipeline(nodes=[split, count], name="analyze")
 
     # Final aggregation
     @node(output_name="summary")
     def summarize(trimmed: str, token_count: int) -> Dict[str, Any]:
         return {"text": trimmed, "count": token_count}
 
-    return Pipeline(nodes=[preprocess, analysis, summarize])
+    return Pipeline(nodes=[preprocess, analysis, summarize], name="hierarchical")
 
 
 def main():

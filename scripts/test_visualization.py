@@ -35,7 +35,7 @@ def main():
         avg_length = sum(len(token) for token in tokens) / max(word_count, 1)
         return {"word_count": word_count, "avg_word_length": avg_length}
 
-    pipeline = Pipeline(nodes=[clean_text, tokenize, count_words, compute_stats])
+    pipeline = Pipeline(nodes=[clean_text, tokenize, count_words, compute_stats], name="text_analysis")
     print(f"✓ Pipeline created with {len(pipeline.nodes)} nodes")
     
     # Test available styles
@@ -71,13 +71,13 @@ def main():
     def process(preprocessed: str) -> str:
         return preprocessed.upper()
     
-    inner_pipeline = Pipeline(nodes=[preprocess, process])
+    inner_pipeline = Pipeline(nodes=[preprocess, process], name="inner")
     
     @node(output_name="final")
     def finalize(processed: str) -> str:
         return f"Result: {processed}"
     
-    outer_pipeline = Pipeline(nodes=[inner_pipeline, finalize])
+    outer_pipeline = Pipeline(nodes=[inner_pipeline, finalize], name="outer")
     
     try:
         # Test collapsed

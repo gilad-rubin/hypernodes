@@ -19,7 +19,7 @@ def main():
     def trim_whitespace(lowercased: str) -> str:
         return lowercased.strip()
 
-    preprocess_pipeline = Pipeline(nodes=[to_lowercase, trim_whitespace])
+    preprocess_pipeline = Pipeline(nodes=[to_lowercase, trim_whitespace], name="preprocess")
 
     @node(output_name="split_tokens")
     def split(trimmed: str) -> List[str]:
@@ -29,13 +29,13 @@ def main():
     def count(split_tokens: List[str]) -> int:
         return len(split_tokens)
 
-    analysis_pipeline = Pipeline(nodes=[split, count])
+    analysis_pipeline = Pipeline(nodes=[split, count], name="analyze")
 
     @node(output_name="summary")
     def summarize(trimmed: str, token_count: int) -> Dict[str, Any]:
         return {"text": trimmed, "count": token_count}
 
-    hierarchical = Pipeline(nodes=[preprocess_pipeline, analysis_pipeline, summarize])
+    hierarchical = Pipeline(nodes=[preprocess_pipeline, analysis_pipeline, summarize], name="hierarchical")
     
     print("✅ Fix 1: No more ID numbers")
     print("   - Pipeline nodes now use meaningful names based on outputs")
