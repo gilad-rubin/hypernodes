@@ -26,6 +26,7 @@ class GraphvizStyle:
         func_node_color: Background color for function nodes
         arg_node_color: Background color for input parameter nodes
         grouped_args_node_color: Background color for grouped input nodes
+        pipeline_node_color: Background color for collapsed pipeline nodes
         arg_edge_color: Color for edges from input parameters
         output_edge_color: Color for edges between functions
         grouped_args_edge_color: Color for edges from grouped inputs
@@ -47,6 +48,7 @@ class GraphvizStyle:
     func_node_color: str = "#87CEEB"  # Sky blue
     arg_node_color: str = "#90EE90"  # Light green
     grouped_args_node_color: str = "#90EE90"  # Light green (same as args)
+    pipeline_node_color: str = "#DDA0DD"  # Plum (purple-ish for pipelines)
     
     # Edge colors
     arg_edge_color: str = "#666666"  # Dark gray
@@ -82,6 +84,7 @@ DESIGN_STYLES = {
         func_node_color="#FFFFFF",
         arg_node_color="#F5F5F5",
         grouped_args_node_color="#F5F5F5",
+        pipeline_node_color="#E8E8E8",
         arg_edge_color="#CCCCCC",
         output_edge_color="#999999",
         grouped_args_edge_color="#CCCCCC",
@@ -98,6 +101,7 @@ DESIGN_STYLES = {
         func_node_color="#FFB6C1",  # Light pink
         arg_node_color="#98FB98",  # Pale green
         grouped_args_node_color="#FFE4B5",  # Moccasin
+        pipeline_node_color="#DDA0DD",  # Plum
         arg_edge_color="#FF6B6B",  # Light red
         output_edge_color="#4ECDC4",  # Turquoise
         grouped_args_edge_color="#FFA500",  # Orange
@@ -114,6 +118,7 @@ DESIGN_STYLES = {
         func_node_color="#E0E0E0",  # Light gray
         arg_node_color="#F5F5F5",  # Very light gray
         grouped_args_node_color="#ECECEC",  # Light gray
+        pipeline_node_color="#D0D0D0",  # Medium gray
         arg_edge_color="#999999",
         output_edge_color="#666666",
         grouped_args_edge_color="#999999",
@@ -130,6 +135,7 @@ DESIGN_STYLES = {
         func_node_color="#3A506B",  # Dark blue-gray
         arg_node_color="#5C7C99",  # Medium blue-gray
         grouped_args_node_color="#6C8CA0",  # Light blue-gray
+        pipeline_node_color="#7D5BA6",  # Purple-gray
         arg_edge_color="#A8DADC",  # Light cyan
         output_edge_color="#F1FAEE",  # Off-white
         grouped_args_edge_color="#A8DADC",
@@ -149,6 +155,7 @@ DESIGN_STYLES = {
         func_node_color="#E8F4F8",  # Very light blue
         arg_node_color="#FFF9E6",  # Very light yellow
         grouped_args_node_color="#F0F8E8",  # Very light green
+        pipeline_node_color="#F0E6F8",  # Very light purple
         arg_edge_color="#7D8A95",  # Blue-gray
         output_edge_color="#4A5568",  # Dark gray
         grouped_args_edge_color="#7D8A95",
@@ -167,6 +174,7 @@ DESIGN_STYLES = {
         func_node_color="#FFD6E8",  # Pastel pink
         arg_node_color="#C7E9F1",  # Pastel blue
         grouped_args_node_color="#E8F3D6",  # Pastel green
+        pipeline_node_color="#E6D5F0",  # Pastel purple
         arg_edge_color="#B19CD9",  # Pastel purple
         output_edge_color="#FF9AAD",  # Pastel coral
         grouped_args_edge_color="#FFD93D",  # Pastel yellow
@@ -270,19 +278,47 @@ def build_graph(
     for n in pipeline.nodes:
         # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
         inner_pipeline = None
+        is_pipeline_node = False
         if isinstance(n, Pipeline):
             inner_pipeline = n
         elif isinstance(n, PipelineNode):
             inner_pipeline = n.pipeline
+            is_pipeline_node = True
         
         if inner_pipeline is not None:
             expanded = (depth is None or _current_depth < depth)
             if expanded:
-                for inner in inner_pipeline.nodes:
-                    local_output_map[inner.output_name] = inner
+                if is_pipeline_node:
+                    # For PipelineNode, map the OUTER output names (after output_mapping)
+                    # to the inner nodes that produce them
+                    outer_outputs = n.output_name
+                    if not isinstance(outer_outputs, tuple):
+                        outer_outputs = (outer_outputs,)
+                    inner_outputs = inner_pipeline.output_name
+                    if not isinstance(inner_outputs, tuple):
+                        inner_outputs = (inner_outputs,)
+                    # Build reverse mapping: inner -> outer from PipelineNode.output_mapping
+                    inner_to_outer = {}
+                    for inner_out in inner_outputs:
+                        outer_out = n.output_mapping.get(inner_out, inner_out)
+                        inner_to_outer[inner_out] = outer_out
+                    # Map outer names to the actual inner nodes that produce them
+                    for inner_node in inner_pipeline.nodes:
+                        inner_out = inner_node.output_name
+                        if inner_out in inner_to_outer:
+                            outer_out = inner_to_outer[inner_out]
+                            local_output_map[outer_out] = inner_node
+                else:
+                    # Direct Pipeline: no output remapping
+                    for inner in inner_pipeline.nodes:
+                        local_output_map[inner.output_name] = inner
             else:
-                for inner in inner_pipeline.nodes:
-                    local_output_map[inner.output_name] = n
+                # Collapsed: map outputs from the node's perspective
+                outputs = n.output_name
+                if not isinstance(outputs, tuple):
+                    outputs = (outputs,)
+                for out in outputs:
+                    local_output_map[out] = n
         else:
             outputs = n.output_name
             if isinstance(outputs, tuple):
@@ -372,8 +408,8 @@ def _identify_grouped_inputs(
     input_consumers: Dict[str, List[Node]] = {}
     for input_node in input_nodes:
         consumers = list(g.successors(input_node))
-        # Filter to only Node/Pipeline instances
-        consumers = [c for c in consumers if isinstance(c, (Node, Pipeline))]
+        # Filter to only Node/Pipeline/PipelineNode instances
+        consumers = [c for c in consumers if isinstance(c, (Node, Pipeline, PipelineNode))]
         input_consumers[input_node] = consumers
     
     # Group inputs by their consumer
@@ -527,9 +563,8 @@ def _create_pipeline_label(
     
     label = f'''<
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
-  <TR><TD><B>{pipeline_name_esc}</B></TD></TR>
-  <TR><TD><I>(Pipeline)</I></TD></TR>
-  <TR><TD BGCOLOR="{style.func_node_color}">{outputs_esc}</TD></TR>
+  <TR><TD><B>{pipeline_name_esc}</B> ⚙</TD></TR>
+  <TR><TD BGCOLOR="{style.pipeline_node_color}">{outputs_esc}</TD></TR>
 </TABLE>>'''
     
     return label
@@ -541,7 +576,7 @@ def visualize(
     orient: Literal["TB", "LR", "BT", "RL"] = "TB",
     depth: Optional[int] = 1,
     flatten: bool = False,
-    min_arg_group_size: Optional[int] = None,  # Changed default from 2 to None to disable grouping
+    min_arg_group_size: Optional[int] = 2,
     show_legend: bool = False,
     show_types: bool = True,
     style: Union[str, GraphvizStyle] = "default",
@@ -628,14 +663,9 @@ def visualize(
                                 penwidth=str(style_obj.cluster_border_width),
                                 style="rounded,filled",
                                 fillcolor=style_obj.cluster_fill_color,
-                                labelloc="b",  # Revert: label inside cluster at bottom (previous behavior)
-                                labeljust="c",
-                                margin="16",
-                                # External title drawn ON TOP of edges with semi-transparent background
-                                xlabel=(f'''<
-<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFFFFFCC">
-  <TR><TD><B>{_escape_html(_pipeline_display_name(inner_pipeline))}</B></TD></TR>
- </TABLE>>'''),
+                                labelloc="t",  # Position label at top
+                                labeljust="c",  # Center justify the label
+                                margin="16",  # Add margin to prevent label overlap with edges
                             )
                             add_nodes_in_container(sub, inner_pipeline, current_depth + 1)
                     else:
@@ -653,9 +683,8 @@ def visualize(
                         outputs_esc = _escape_html(outputs)
                         label = f'''<
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
-  <TR><TD><B>{pipeline_name_esc}</B></TD></TR>
-  <TR><TD><I>(Pipeline)</I></TD></TR>
-  <TR><TD BGCOLOR="{style_obj.func_node_color}">{outputs_esc}</TD></TR>
+  <TR><TD><B>{pipeline_name_esc}</B> ⚙</TD></TR>
+  <TR><TD BGCOLOR="{style_obj.pipeline_node_color}">{outputs_esc}</TD></TR>
 </TABLE>>'''
                     else:
                         label = _create_pipeline_label(inner_pipeline, style_obj)
@@ -665,7 +694,7 @@ def visualize(
                         label=label,
                         shape="box",
                         style="rounded,filled",
-                        fillcolor=style_obj.func_node_color,
+                        fillcolor=style_obj.pipeline_node_color,
                         fontname=style_obj.font_name,
                         fontsize=str(style_obj.font_size),
                         penwidth=str(style_obj.node_border_width),
@@ -745,7 +774,7 @@ def visualize(
     # Add edges
     for source, target in g.edges():
         # Handle grouped inputs
-        if isinstance(target, (Node, Pipeline)):
+        if isinstance(target, (Node, Pipeline, PipelineNode)):
             if target in grouped_inputs:
                 # Check if source is one of the grouped inputs
                 if isinstance(source, str) and source in grouped_inputs[target]:
@@ -796,6 +825,7 @@ def visualize(
                 shape="box",
                 style="dashed,filled",
                 fillcolor=style_obj.arg_node_color,
+                fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )
             legend.node(
@@ -804,6 +834,7 @@ def visualize(
                 shape="box",
                 style="rounded,filled",
                 fillcolor=style_obj.func_node_color,
+                fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )
             legend.node(
@@ -812,6 +843,16 @@ def visualize(
                 shape="box",
                 style="filled",
                 fillcolor=style_obj.grouped_args_node_color,
+                fontname=style_obj.font_name,
+                fontsize=str(style_obj.legend_font_size),
+            )
+            legend.node(
+                "legend_pipeline",
+                label="Pipeline ⚙",
+                shape="box",
+                style="rounded,filled",
+                fillcolor=style_obj.pipeline_node_color,
+                fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )
     

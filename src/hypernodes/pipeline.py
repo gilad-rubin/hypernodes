@@ -14,11 +14,13 @@ from .exceptions import CycleError, DependencyError
 from .node import Node
 
 
-class PipelineNode:
+class PipelineNode(Node):
     """Wraps a Pipeline to behave like a Node with custom input/output mapping.
 
     This class adapts a Pipeline interface to work as a node in another pipeline,
     with support for parameter renaming and internal mapping.
+    
+    Inherits from Node to ensure type compatibility when used in Pipeline.nodes lists.
 
     Attributes:
         pipeline: The wrapped pipeline
@@ -44,6 +46,8 @@ class PipelineNode:
             map_over: Parameter name(s) to map over (from outer perspective)
             name: Optional name for this node (displayed in visualizations)
         """
+        # Don't call super().__init__() since we have a different initialization pattern
+        # We'll override the necessary properties instead
         self.pipeline = pipeline
         self.input_mapping = input_mapping or {}
         self.output_mapping = output_mapping or {}
@@ -188,7 +192,7 @@ class Pipeline:
 
     def __init__(
         self,
-        nodes: List[Node],
+        nodes: List[Union[Node, "Pipeline"]],
         backend: LocalBackend = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
@@ -198,7 +202,7 @@ class Pipeline:
         """Initialize a Pipeline from a list of nodes.
 
         Args:
-            nodes: List of Node instances (or nested Pipelines)
+            nodes: List of Node instances or Pipeline instances (which are auto-wrapped)
             backend: Backend for execution (default: LocalBackend())
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
