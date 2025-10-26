@@ -26,7 +26,7 @@ Example:
 
 from .node import Node, node
 from .pipeline import Pipeline
-from .backend import LocalBackend
+from .backend import LocalBackend, ModalBackend
 from .cache import DiskCache
 from .callbacks import PipelineCallback, CallbackContext
 from .exceptions import (
@@ -64,4 +64,6 @@ __all__ = [
     "CycleError",
     "DependencyError",
     "ExecutionError",
+    # Note: telemetry module is available but not exported at top level
+    # Use: from hypernodes.telemetry import ProgressCallback, TelemetryCallback
 ]

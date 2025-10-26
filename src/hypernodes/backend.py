@@ -237,3 +237,228 @@ class LocalBackend:
         finally:
             # Pop pipeline from hierarchy stack
             ctx.pop_pipeline()
+
+
+# Modal Backend Implementation
+# =============================
+
+def _import_modal():
+    """Lazy import modal with clear error message if not installed."""
+    try:
+        import modal
+        return modal
+    except ImportError as e:
+        raise ImportError(
+            "Modal is not installed. Install it with: uv pip install 'hypernodes[modal]' "
+            "or: pip install modal cloudpickle"
+        ) from e
+
+
+def _import_cloudpickle():
+    """Lazy import cloudpickle with clear error message if not installed."""
+    try:
+        import cloudpickle
+        return cloudpickle
+    except ImportError as e:
+        raise ImportError(
+            "cloudpickle is not installed. Install it with: uv pip install 'hypernodes[modal]' "
+            "or: pip install cloudpickle"
+        ) from e
+
+
+class ModalBackend:
+    """Remote execution backend on Modal Labs serverless infrastructure.
+    
+    Executes pipelines on Modal's cloud infrastructure with configurable
+    resources (GPU, memory, CPU). Each pipeline execution runs in an isolated
+    container with your specified configuration.
+    
+    This backend requires modal to be installed:
+        uv pip install 'hypernodes[modal]'
+    
+    Phase 1 Implementation:
+    - One pipeline per container (simple & predictable)
+    - Basic batching for .map() using Modal's native distribution
+    - Direct serialization approach
+    
+    Args:
+        image: Modal image with dependencies (required)
+        gpu: GPU type ("A100", "A10G", "T4", "any", None)
+        memory: Memory limit ("32GB", "256GB", etc.)
+        cpu: CPU cores (1.0, 2.0, 8.0, etc.)
+        timeout: Max execution time in seconds (default: 3600)
+        volumes: Volume mounts {"/path": modal.Volume}
+        secrets: Modal secrets for API keys, etc.
+        max_concurrent: Max parallel containers for .map() (default: 100)
+    
+    Example:
+        >>> import modal
+        >>> from hypernodes import Pipeline, ModalBackend
+        >>> 
+        >>> # Build image with dependencies
+        >>> image = (
+        ...     modal.Image.debian_slim(python_version="3.12")
+        ...     .pip_install("numpy", "pandas")
+        ... )
+        >>> 
+        >>> # Configure backend
+        >>> backend = ModalBackend(
+        ...     image=image,
+        ...     gpu="A100",
+        ...     memory="32GB"
+        ... )
+        >>> 
+        >>> pipeline = Pipeline(nodes=[...], backend=backend)
+        >>> result = pipeline.run(inputs={...})
+    """
+    
+    def __init__(
+        self,
+        image: Any,  # modal.Image - can't type hint due to optional dependency
+        gpu: Optional[str] = None,
+        memory: Optional[str] = None,
+        cpu: Optional[float] = None,
+        timeout: int = 3600,
+        volumes: Optional[Dict[str, Any]] = None,  # Dict[str, modal.Volume]
+        secrets: Optional[list] = None,
+        max_concurrent: int = 100,
+    ):
+        # Lazy import modal
+        self.modal = _import_modal()
+        self.cloudpickle = _import_cloudpickle()
+        
+        # Validate image
+        if not isinstance(image, self.modal.Image):
+            raise TypeError(f"image must be a modal.Image, got {type(image)}")
+        
+        self.image = image
+        self.gpu = gpu
+        self.memory = memory
+        self.cpu = cpu
+        self.timeout = timeout
+        self.volumes = volumes or {}
+        self.secrets = secrets or []
+        self.max_concurrent = max_concurrent
+        
+        # Create Modal app for this backend
+        self._app = self.modal.App(name="hypernodes-pipeline")
+        
+        # Create the remote function
+        self._create_remote_function()
+    
+    def _create_remote_function(self):
+        """Create Modal function with specified resources."""
+        # Build function kwargs
+        function_kwargs = {
+            "image": self.image,
+            "timeout": self.timeout,
+            "serialized": True,  # Required for functions not in global scope
+        }
+        
+        if self.gpu:
+            function_kwargs["gpu"] = self.gpu
+        if self.memory:
+            function_kwargs["memory"] = self.memory
+        if self.cpu:
+            function_kwargs["cpu"] = self.cpu
+        if self.volumes:
+            function_kwargs["volumes"] = self.volumes
+        if self.secrets:
+            function_kwargs["secrets"] = self.secrets
+        
+        # Create the remote execution function
+        @self._app.function(**function_kwargs)
+        def _remote_execute(serialized_payload: bytes) -> bytes:
+            """Executes pipeline on Modal infrastructure."""
+            # Import cloudpickle in the remote environment
+            import cloudpickle
+            
+            # Deserialize pipeline and inputs
+            pipeline, inputs, ctx_data = cloudpickle.loads(serialized_payload)
+            
+            # Reconstruct callback context
+            from hypernodes.callbacks import CallbackContext
+            ctx = CallbackContext()
+            if ctx_data:
+                # Restore context state
+                for key, value in ctx_data.items():
+                    ctx.data[key] = value
+            
+            # Execute pipeline using LocalBackend
+            # IMPORTANT: We ALWAYS use LocalBackend in the remote environment
+            # to avoid recursion (ModalBackend calling ModalBackend)
+            from hypernodes.backend import LocalBackend
+            
+            backend = LocalBackend()
+            results = backend.run(pipeline, inputs, ctx)
+            
+            # Serialize and return results
+            return cloudpickle.dumps(results)
+        
+        self._remote_execute = _remote_execute
+    
+    def _serialize_payload(
+        self, 
+        pipeline: 'Pipeline', 
+        inputs: Dict[str, Any],
+        ctx: Optional[CallbackContext] = None
+    ) -> bytes:
+        """Serialize pipeline, inputs, and context for remote execution."""
+        # Extract context data (only serializable parts)
+        ctx_data = {}
+        if ctx:
+            # Copy relevant context fields
+            ctx_data = {
+                k: v for k, v in ctx.data.items()
+                if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+            }
+        
+        # CRITICAL: Replace ModalBackend with LocalBackend to avoid recursion
+        # We need to temporarily swap the backend before serialization
+        original_backend = pipeline.backend
+        pipeline.backend = LocalBackend()
+        
+        try:
+            # Serialize everything together
+            payload = (pipeline, inputs, ctx_data)
+            result = self.cloudpickle.dumps(payload)
+        finally:
+            # Restore original backend
+            pipeline.backend = original_backend
+        
+        return result
+    
+    def run(
+        self,
+        pipeline: 'Pipeline',
+        inputs: Dict[str, Any],
+        ctx: Optional[CallbackContext] = None
+    ) -> Dict[str, Any]:
+        """Execute a single pipeline run on Modal.
+        
+        Serializes the pipeline and inputs, submits to Modal, executes remotely,
+        and returns the deserialized results.
+        
+        Args:
+            pipeline: The pipeline to execute
+            inputs: Dictionary of input values
+            ctx: Callback context (for telemetry/progress tracking)
+            
+        Returns:
+            Dictionary of pipeline outputs
+        """
+        # Create context if needed
+        if ctx is None:
+            ctx = CallbackContext()
+        
+        # Serialize payload
+        serialized_payload = self._serialize_payload(pipeline, inputs, ctx)
+        
+        # Submit to Modal and wait for result
+        with self._app.run():
+            result_bytes = self._remote_execute.remote(serialized_payload)
+        
+        # Deserialize results
+        results = self.cloudpickle.loads(result_bytes)
+        
+        return results

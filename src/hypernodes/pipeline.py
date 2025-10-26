@@ -420,6 +420,68 @@ class Pipeline:
         """Check equality based on identity."""
         return self is other
     
+    # Fluent Builder Methods
+    # ======================
+    
+    def with_backend(self, backend: 'LocalBackend') -> 'Pipeline':
+        """Configure pipeline with a specific backend.
+        
+        Returns the same pipeline instance for method chaining.
+        
+        Args:
+            backend: Backend instance (LocalBackend, ModalBackend, etc.)
+            
+        Returns:
+            Self for method chaining
+            
+        Example:
+            >>> pipeline = Pipeline(nodes=[...]).with_backend(
+            ...     ModalBackend(image=my_image, gpu="A100")
+            ... )
+        """
+        self.backend = backend
+        return self
+    
+    def with_cache(self, cache: 'Cache') -> 'Pipeline':
+        """Configure pipeline with a cache backend.
+        
+        Returns the same pipeline instance for method chaining.
+        
+        Args:
+            cache: Cache instance (DiskCache, etc.)
+            
+        Returns:
+            Self for method chaining
+            
+        Example:
+            >>> from hypernodes import DiskCache
+            >>> pipeline = Pipeline(nodes=[...]).with_cache(
+            ...     DiskCache(path="./cache")
+            ... )
+        """
+        self.cache = cache
+        return self
+    
+    def with_callbacks(self, callbacks: List['PipelineCallback']) -> 'Pipeline':
+        """Configure pipeline with lifecycle callbacks.
+        
+        Returns the same pipeline instance for method chaining.
+        
+        Args:
+            callbacks: List of callback instances
+            
+        Returns:
+            Self for method chaining
+            
+        Example:
+            >>> from hypernodes.telemetry import ProgressCallback
+            >>> pipeline = Pipeline(nodes=[...]).with_callbacks([
+            ...     ProgressCallback()
+            ... ])
+        """
+        self.callbacks = callbacks
+        return self
+    
     @property
     def effective_backend(self):
         """Get effective backend (inherited from parent if not set).
