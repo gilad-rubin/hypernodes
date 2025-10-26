@@ -1,12 +1,14 @@
 """Pipeline class for managing and executing DAGs of nodes."""
 import functools
 import itertools
+import time
 from typing import List, Dict, Any, Set, Union, Optional
 import networkx as nx
 
 from .node import Node
 from .backend import LocalBackend
 from .cache import Cache
+from .callbacks import PipelineCallback
 from .exceptions import CycleError, DependencyError
 
 
@@ -33,7 +35,9 @@ class Pipeline:
         self,
         nodes: List[Node],
         backend: LocalBackend = None,
-        cache: Optional[Cache] = None
+        cache: Optional[Cache] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
+        id: Optional[str] = None
     ):
         """Initialize a Pipeline from a list of nodes.
         
@@ -41,6 +45,8 @@ class Pipeline:
             nodes: List of Node instances (or nested Pipelines)
             backend: Backend for execution (default: LocalBackend())
             cache: Cache backend for result caching (default: None, no caching)
+            callbacks: List of callbacks for lifecycle hooks (default: None)
+            id: Pipeline identifier for callbacks (default: auto-generated)
             
         Raises:
             CycleError: If a cycle is detected in the dependency graph
@@ -49,6 +55,10 @@ class Pipeline:
         self.nodes = nodes
         self.backend = backend or LocalBackend()
         self.cache = cache
+        self.callbacks = callbacks if callbacks is not None else None
+        # Generate pipeline ID (handle shadowing of built-in id())
+        import builtins
+        self.id = id if id is not None else f"pipeline_{builtins.id(self)}"
         
         # Build output_name -> Node mapping (inspired by pipefunc)
         self.output_to_node = {}
@@ -205,18 +215,19 @@ class Pipeline:
         # Check for cycles (accessing execution_order will raise if cycle exists)
         _ = self.execution_order
     
-    def run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def run(self, inputs: Dict[str, Any], _ctx=None) -> Dict[str, Any]:
         """Execute pipeline with given inputs.
         
         Delegates execution to the configured backend.
         
         Args:
             inputs: Dictionary mapping input parameter names to values
+            _ctx: Internal callback context (used for map operations)
             
         Returns:
             Dictionary containing outputs from all nodes (not inputs)
         """
-        return self.backend.run(self, inputs)
+        return self.backend.run(self, inputs, _ctx)
     
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Make Pipeline callable like a Node.
@@ -347,8 +358,44 @@ class Pipeline:
                     for values in itertools.product(*param_lists)
                 ]
         
-        # Execute pipeline for each plan
-        results_list = [self.run(plan) for plan in execution_plans]
+        # Execute pipeline for each plan with callbacks
+        # Create callback context for map operation
+        from .callbacks import CallbackContext
+        ctx = CallbackContext()
+        ctx.push_pipeline(self.id)
+        
+        # Determine callbacks to use
+        callbacks = self.callbacks if self.callbacks is not None else []
+        
+        # Trigger map start callbacks
+        total_items = len(execution_plans)
+        map_start_time = time.time()
+        for callback in callbacks:
+            callback.on_map_start(total_items, ctx)
+        
+        results_list = []
+        for idx, plan in enumerate(execution_plans):
+            # Mark that we're in a map operation (for cache callbacks)
+            ctx.set("_in_map", True)
+            ctx.set("_map_item_index", idx)
+            ctx.set("_map_item_start_time", time.time())
+            
+            # Execute the pipeline for this item (pass context for callbacks)
+            # The backend will fire on_map_item_start/end/cached as appropriate
+            result = self.run(plan, _ctx=ctx)
+            results_list.append(result)
+            
+            # Clear map context
+            ctx.set("_in_map", False)
+            ctx.set("_map_item_index", None)
+            ctx.set("_map_item_start_time", None)
+        
+        # Trigger map end callbacks
+        map_duration = time.time() - map_start_time
+        for callback in callbacks:
+            callback.on_map_end(map_duration, ctx)
+        
+        ctx.pop_pipeline()
         
         # Transpose results: from list of dicts to dict of lists
         if not results_list:

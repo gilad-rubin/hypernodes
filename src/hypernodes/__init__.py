@@ -28,6 +28,7 @@ from .node import Node, node
 from .pipeline import Pipeline
 from .backend import LocalBackend
 from .cache import DiskCache
+from .callbacks import PipelineCallback, CallbackContext
 from .exceptions import (
     HyperNodesError,
     CycleError,
@@ -45,6 +46,8 @@ __all__ = [
     "Pipeline",
     "LocalBackend",
     "DiskCache",
+    "PipelineCallback",
+    "CallbackContext",
     # Exceptions
     "HyperNodesError",
     "CycleError",
