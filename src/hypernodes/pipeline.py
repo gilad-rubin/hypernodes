@@ -474,21 +474,86 @@ class Pipeline:
         # Check for cycles (accessing execution_order will raise if cycle exists)
         _ = self.execution_order
 
-    def run(self, inputs: Dict[str, Any], _ctx=None) -> Dict[str, Any]:
+    def _compute_required_nodes(
+        self, output_names: Union[str, List[str], None]
+    ) -> Optional[List[Node]]:
+        """Compute minimal set of nodes needed to produce requested outputs.
+
+        Args:
+            output_names: Output name(s) to compute, or None for all outputs
+
+        Returns:
+            List of nodes in execution order needed to produce outputs,
+            or None if all nodes should be executed (output_names is None)
+
+        Raises:
+            ValueError: If any output_name is not found in the pipeline
+        """
+        if output_names is None:
+            return None
+
+        # Normalize to list
+        if isinstance(output_names, str):
+            output_names = [output_names]
+
+        # Validate all output names exist
+        for output_name in output_names:
+            if output_name not in self.output_to_node:
+                available = ", ".join(sorted(self.output_to_node.keys()))
+                raise ValueError(
+                    f"Output '{output_name}' not found in pipeline. "
+                    f"Available outputs: {available}"
+                )
+
+        # Find nodes that produce the requested outputs
+        target_nodes = set()
+        for output_name in output_names:
+            target_nodes.add(self.output_to_node[output_name])
+
+        # Use NetworkX to find all ancestors (dependencies) of target nodes
+        required_nodes = set()
+        for target_node in target_nodes:
+            # Add the target node itself
+            required_nodes.add(target_node)
+            # Add all its ancestors (dependencies)
+            ancestors = nx.ancestors(self.graph, target_node)
+            # Filter to only Node/PipelineNode instances (not string inputs)
+            for ancestor in ancestors:
+                if isinstance(ancestor, (Node, PipelineNode)):
+                    required_nodes.add(ancestor)
+
+        # Return nodes in execution order
+        return [n for n in self.execution_order if n in required_nodes]
+
+    def run(
+        self,
+        inputs: Dict[str, Any],
+        output_name: Union[str, List[str], None] = None,
+        _ctx=None,
+    ) -> Dict[str, Any]:
         """Execute pipeline with given inputs.
 
         Delegates execution to the configured backend.
 
         Args:
             inputs: Dictionary mapping input parameter names to values
+            output_name: Optional output name(s) to compute. Can be:
+                - str: Single output name
+                - List[str]: Multiple output names
+                - None: Compute all outputs (default)
+                Only the specified outputs will be returned, and only the
+                minimal set of nodes needed will be executed.
             _ctx: Internal callback context (used for map operations)
 
         Returns:
-            Dictionary containing outputs from all nodes (not inputs)
+            Dictionary containing only the requested outputs (or all outputs if None)
+
+        Raises:
+            ValueError: If output_name specifies a non-existent output
         """
         # Use effective backend to support inheritance
         backend = self.effective_backend
-        return backend.run(self, inputs, _ctx)
+        return backend.run(self, inputs, _ctx, output_name=output_name)
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Make Pipeline callable like a Node.
@@ -686,6 +751,7 @@ class Pipeline:
         inputs: Dict[str, Any],
         map_over: Union[str, List[str]],
         map_mode: str = "zip",
+        output_name: Union[str, List[str], None] = None,
         _ctx=None,
     ) -> Dict[str, List[Any]]:
         """Execute pipeline over a collection of inputs.
@@ -705,13 +771,20 @@ class Pipeline:
                        All lists must have the same length.
                      - "product": Create all combinations of items.
                        Lists can have different lengths.
+            output_name: Optional output name(s) to compute. Can be:
+                - str: Single output name
+                - List[str]: Multiple output names
+                - None: Compute all outputs (default)
+                Only the specified outputs will be returned, and only the
+                minimal set of nodes needed will be executed.
 
         Returns:
             Dictionary where each output name maps to a list of results,
-            one per execution.
+            one per execution. Only requested outputs are included.
 
         Raises:
             ValueError: If map_mode is "zip" and list lengths don't match
+            ValueError: If output_name specifies a non-existent output
 
         Example:
             >>> @node(output_name="result")
@@ -843,7 +916,7 @@ class Pipeline:
 
             # Execute the pipeline for this item (pass context for callbacks)
             # The backend will fire on_map_item_start/end/cached as appropriate
-            result = self.run(plan, _ctx=ctx)
+            result = self.run(plan, output_name=output_name, _ctx=ctx)
             results_list.append(result)
 
             # Clear map context

@@ -82,6 +82,7 @@ class Backend(ABC):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with the given inputs.
 
@@ -89,9 +90,11 @@ class Backend(ABC):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
             ctx: Optional callback context
+            output_name: Optional output name(s) to compute. Only specified
+                outputs will be returned and only required nodes executed.
 
         Returns:
-            Dictionary containing the pipeline outputs
+            Dictionary containing the requested pipeline outputs
         """
         pass
 
@@ -102,6 +105,7 @@ class Backend(ABC):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute a pipeline over multiple items.
 
@@ -110,6 +114,8 @@ class Backend(ABC):
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
             ctx: Optional callback context
+            output_name: Optional output name(s) to compute. Only specified
+                outputs will be returned and only required nodes executed.
 
         Returns:
             List of output dictionaries (one per item)
@@ -162,8 +168,9 @@ class PipelineExecutionEngine:
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
-        return self._ensure_local().run(pipeline, inputs, ctx)
+        return self._ensure_local().run(pipeline, inputs, ctx, output_name=output_name)
 
     def map(
         self,
@@ -171,8 +178,9 @@ class PipelineExecutionEngine:
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
-        return self._ensure_local().map(pipeline, items, inputs, ctx)
+        return self._ensure_local().map(pipeline, items, inputs, ctx, output_name=output_name)
 
 
 class LocalBackend(Backend):
@@ -225,6 +233,7 @@ class LocalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with the configured execution strategy.
 
@@ -237,19 +246,21 @@ class LocalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute. Only specified
+                outputs will be returned and only required nodes executed.
 
         Returns:
-            Dictionary containing only the outputs from nodes (not inputs)
+            Dictionary containing only the requested outputs (or all if None)
         """
         # Dispatch based on node_execution mode
         if self.node_execution == "sequential":
-            return self._run_sequential(pipeline, inputs, ctx)
+            return self._run_sequential(pipeline, inputs, ctx, output_name=output_name)
         elif self.node_execution == "async":
-            return asyncio.run(self._run_async(pipeline, inputs, ctx))
+            return asyncio.run(self._run_async(pipeline, inputs, ctx, output_name=output_name))
         elif self.node_execution == "threaded":
-            return self._run_threaded(pipeline, inputs, ctx)
+            return self._run_threaded(pipeline, inputs, ctx, output_name=output_name)
         elif self.node_execution == "parallel":
-            return self._run_parallel(pipeline, inputs, ctx)
+            return self._run_parallel(pipeline, inputs, ctx, output_name=output_name)
         else:
             raise ValueError(f"Invalid node_execution mode: {self.node_execution}")
 
@@ -258,6 +269,7 @@ class LocalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline sequentially with caching and callbacks support.
 
@@ -269,9 +281,11 @@ class LocalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute. Only specified
+                outputs will be returned and only required nodes executed.
 
         Returns:
-            Dictionary containing only the outputs from nodes (not inputs)
+            Dictionary containing only the requested outputs (or all if None)
         """
         # Create or reuse callback context
         if ctx is None:
@@ -300,6 +314,20 @@ class LocalBackend(Backend):
         # Push this pipeline onto hierarchy stack
         ctx.push_pipeline(pipeline.id)
 
+        # Compute required nodes based on output_name
+        required_nodes = pipeline._compute_required_nodes(output_name)
+        nodes_to_execute = (
+            required_nodes if required_nodes is not None else pipeline.execution_order
+        )
+
+        # Normalize output_name to set for filtering
+        if output_name is None:
+            requested_outputs = None  # Return all
+        elif isinstance(output_name, str):
+            requested_outputs = {output_name}
+        else:
+            requested_outputs = set(output_name)
+
         # Trigger pipeline start callbacks
         pipeline_start_time = time.time()
         for callback in callbacks:
@@ -315,8 +343,8 @@ class LocalBackend(Backend):
             # Track node signatures for dependency hashing
             node_signatures = {}
 
-            # Execute nodes in topological order
-            for node in pipeline.execution_order:
+            # Execute nodes in topological order (only required nodes)
+            for node in nodes_to_execute:
                 # Handle PipelineNode (wrapped pipelines from auto-wrapping)
                 if hasattr(node, "pipeline"):  # PipelineNode
                     # PipelineNode has a __call__ method that handles mapping and map_over
@@ -548,6 +576,10 @@ class LocalBackend(Backend):
                         available_values[node.output_name] = result
                         node_signatures[node.output_name] = signature
 
+            # Filter outputs if specific outputs were requested
+            if requested_outputs is not None:
+                outputs = {k: v for k, v in outputs.items() if k in requested_outputs}
+
             # Trigger pipeline end callbacks
             pipeline_duration = time.time() - pipeline_start_time
             for callback in callbacks:
@@ -564,6 +596,7 @@ class LocalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with async execution for independent nodes.
 
@@ -574,9 +607,10 @@ class LocalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute
 
         Returns:
-            Dictionary containing only the outputs from nodes
+            Dictionary containing only the requested outputs (or all if None)
         """
         # Create or reuse callback context
         if ctx is None:
@@ -603,6 +637,20 @@ class LocalBackend(Backend):
         # Push this pipeline onto hierarchy stack
         ctx.push_pipeline(pipeline.id)
 
+        # Compute required nodes based on output_name
+        required_nodes = pipeline._compute_required_nodes(output_name)
+        nodes_to_execute = (
+            required_nodes if required_nodes is not None else pipeline.execution_order
+        )
+
+        # Normalize output_name to set for filtering
+        if output_name is None:
+            requested_outputs = None
+        elif isinstance(output_name, str):
+            requested_outputs = {output_name}
+        else:
+            requested_outputs = set(output_name)
+
         # Trigger pipeline start callbacks
         pipeline_start_time = time.time()
         for callback in callbacks:
@@ -614,8 +662,8 @@ class LocalBackend(Backend):
             outputs = {}
             node_signatures = {}
 
-            # Track pending nodes
-            pending_nodes = set(pipeline.execution_order)
+            # Track pending nodes (only required ones)
+            pending_nodes = set(nodes_to_execute)
 
             while pending_nodes:
                 # Find nodes ready to execute (all deps satisfied)
@@ -666,6 +714,10 @@ class LocalBackend(Backend):
                         outputs[node.output_name] = result
                         available_values[node.output_name] = result
                         node_signatures[node.output_name] = signature
+
+            # Filter outputs if specific outputs were requested
+            if requested_outputs is not None:
+                outputs = {k: v for k, v in outputs.items() if k in requested_outputs}
 
             # Trigger pipeline end callbacks
             pipeline_duration = time.time() - pipeline_start_time
@@ -854,6 +906,7 @@ class LocalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with threaded execution for independent nodes.
 
@@ -864,9 +917,10 @@ class LocalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute
 
         Returns:
-            Dictionary containing only the outputs from nodes
+            Dictionary containing only the requested outputs (or all if None)
         """
         # Create or reuse callback context
         if ctx is None:
@@ -893,6 +947,20 @@ class LocalBackend(Backend):
         # Push this pipeline onto hierarchy stack
         ctx.push_pipeline(pipeline.id)
 
+        # Compute required nodes based on output_name
+        required_nodes = pipeline._compute_required_nodes(output_name)
+        nodes_to_execute = (
+            required_nodes if required_nodes is not None else pipeline.execution_order
+        )
+
+        # Normalize output_name to set for filtering
+        if output_name is None:
+            requested_outputs = None
+        elif isinstance(output_name, str):
+            requested_outputs = {output_name}
+        else:
+            requested_outputs = set(output_name)
+
         # Trigger pipeline start callbacks
         pipeline_start_time = time.time()
         for callback in callbacks:
@@ -904,8 +972,8 @@ class LocalBackend(Backend):
             outputs = {}
             node_signatures = {}
 
-            # Track pending nodes
-            pending_nodes = set(pipeline.execution_order)
+            # Track pending nodes (only required ones)
+            pending_nodes = set(nodes_to_execute)
 
             # Use custom executor or create ThreadPoolExecutor
             executor = self.executor
@@ -965,6 +1033,10 @@ class LocalBackend(Backend):
                             available_values[node.output_name] = result
                             node_signatures[node.output_name] = signature
 
+                # Filter outputs if specific outputs were requested
+                if requested_outputs is not None:
+                    outputs = {k: v for k, v in outputs.items() if k in requested_outputs}
+
                 # Trigger pipeline end callbacks
                 pipeline_duration = time.time() - pipeline_start_time
                 for callback in callbacks:
@@ -988,6 +1060,7 @@ class LocalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with true parallel execution for independent nodes.
 
@@ -1000,9 +1073,10 @@ class LocalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute
 
         Returns:
-            Dictionary containing only the outputs from nodes
+            Dictionary containing only the requested outputs (or all if None)
         """
         # Create or reuse callback context
         if ctx is None:
@@ -1029,6 +1103,20 @@ class LocalBackend(Backend):
         # Push this pipeline onto hierarchy stack
         ctx.push_pipeline(pipeline.id)
 
+        # Compute required nodes based on output_name
+        required_nodes = pipeline._compute_required_nodes(output_name)
+        nodes_to_execute = (
+            required_nodes if required_nodes is not None else pipeline.execution_order
+        )
+
+        # Normalize output_name to set for filtering
+        if output_name is None:
+            requested_outputs = None
+        elif isinstance(output_name, str):
+            requested_outputs = {output_name}
+        else:
+            requested_outputs = set(output_name)
+
         # Trigger pipeline start callbacks
         pipeline_start_time = time.time()
         for callback in callbacks:
@@ -1040,8 +1128,8 @@ class LocalBackend(Backend):
             outputs = {}
             node_signatures = {}
 
-            # Track pending nodes
-            pending_nodes = set(pipeline.execution_order)
+            # Track pending nodes (only required ones)
+            pending_nodes = set(nodes_to_execute)
 
             # Use custom executor or create ProcessPoolExecutor
             executor = self.executor
@@ -1100,6 +1188,10 @@ class LocalBackend(Backend):
                             outputs[node.output_name] = result
                             available_values[node.output_name] = result
                             node_signatures[node.output_name] = signature
+
+                # Filter outputs if specific outputs were requested
+                if requested_outputs is not None:
+                    outputs = {k: v for k, v in outputs.items() if k in requested_outputs}
 
                 # Trigger pipeline end callbacks
                 pipeline_duration = time.time() - pipeline_start_time
@@ -1293,6 +1385,7 @@ class LocalBackend(Backend):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute pipeline.map() with the configured map_execution strategy.
 
@@ -1305,9 +1398,10 @@ class LocalBackend(Backend):
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
             ctx: Callback context (created if None)
+            output_name: Optional output name(s) to compute
 
         Returns:
-            List of output dictionaries (one per item)
+            List of output dictionaries (one per item, only requested outputs)
         """
         # Create or reuse callback context
         if ctx is None:
@@ -1324,18 +1418,18 @@ class LocalBackend(Backend):
         try:
             # Dispatch based on map_execution mode
             if self.map_execution == "sequential":
-                return self._map_sequential(pipeline, items, inputs, ctx)
+                return self._map_sequential(pipeline, items, inputs, ctx, output_name)
             elif self.map_execution == "async":
                 return asyncio.run(
-                    self._map_async(pipeline, items, inputs, ctx, effective_workers)
+                    self._map_async(pipeline, items, inputs, ctx, effective_workers, output_name)
                 )
             elif self.map_execution == "threaded":
                 return self._map_threaded(
-                    pipeline, items, inputs, ctx, effective_workers
+                    pipeline, items, inputs, ctx, effective_workers, output_name
                 )
             elif self.map_execution == "parallel":
                 return self._map_parallel(
-                    pipeline, items, inputs, ctx, effective_workers
+                    pipeline, items, inputs, ctx, effective_workers, output_name
                 )
             else:
                 raise ValueError(f"Invalid map_execution mode: {self.map_execution}")
@@ -1372,6 +1466,7 @@ class LocalBackend(Backend):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         ctx: CallbackContext,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute map sequentially - one item at a time.
 
@@ -1387,8 +1482,8 @@ class LocalBackend(Backend):
             # Merge item inputs with shared inputs
             item_inputs = {**inputs, **item}
 
-            # Execute pipeline for this item
-            result = self.run(pipeline, item_inputs, ctx)
+            # Execute pipeline for this item with output_name
+            result = self.run(pipeline, item_inputs, ctx, output_name=output_name)
             results.append(result)
 
             # Clear map markers
@@ -1403,6 +1498,7 @@ class LocalBackend(Backend):
         inputs: Dict[str, Any],
         ctx: CallbackContext,
         max_concurrent: int,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute map with async concurrency.
 
@@ -1434,7 +1530,7 @@ class LocalBackend(Backend):
                 # To avoid nested event loops, we run in executor
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(
-                    None, self.run, pipeline, item_inputs, item_ctx
+                    None, lambda: self.run(pipeline, item_inputs, item_ctx, output_name=output_name)
                 )
 
                 return result
@@ -1454,6 +1550,7 @@ class LocalBackend(Backend):
         inputs: Dict[str, Any],
         ctx: CallbackContext,
         max_concurrent: int,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute map with threaded execution using threads.
 
@@ -1479,7 +1576,7 @@ class LocalBackend(Backend):
             item_inputs = {**inputs, **item}
 
             # Execute pipeline for this item
-            result = self.run(pipeline, item_inputs, item_ctx)
+            result = self.run(pipeline, item_inputs, item_ctx, output_name=output_name)
 
             return (i, result)
 
@@ -1515,6 +1612,7 @@ class LocalBackend(Backend):
         inputs: Dict[str, Any],
         ctx: CallbackContext,
         max_concurrent: int,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute map with true parallel execution using processes.
 
@@ -1541,7 +1639,7 @@ class LocalBackend(Backend):
             item_inputs = {**inputs, **item}
 
             # Execute pipeline for this item
-            result = self.run(pipeline, item_inputs, item_ctx)
+            result = self.run(pipeline, item_inputs, item_ctx, output_name=output_name)
 
             return (i, result)
 
@@ -1723,8 +1821,8 @@ class ModalBackend(Backend):
             # Import cloudpickle in the remote environment
             import cloudpickle
 
-            # Deserialize pipeline and inputs
-            pipeline, inputs, ctx_data, engine_config = cloudpickle.loads(
+            # Deserialize pipeline, inputs, and output_name
+            pipeline, inputs, ctx_data, engine_config, output_name = cloudpickle.loads(
                 serialized_payload
             )
 
@@ -1748,7 +1846,7 @@ class ModalBackend(Backend):
             )
             # Assign the engine's local backend to the pipeline for inheritance
             pipeline.backend = engine._ensure_local()  # type: ignore[attr-defined]
-            results = engine.run(pipeline, inputs, ctx)
+            results = engine.run(pipeline, inputs, ctx, output_name=output_name)
 
             # Serialize and return results
             return cloudpickle.dumps(results)
@@ -1760,8 +1858,9 @@ class ModalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> bytes:
-        """Serialize pipeline, inputs, and context for remote execution."""
+        """Serialize pipeline, inputs, context, and output_name for remote execution."""
         # Extract context data (only serializable parts)
         ctx_data = {}
         if ctx:
@@ -1792,8 +1891,8 @@ class ModalBackend(Backend):
         pipeline.callbacks = []
 
         try:
-            # Serialize everything together, including engine config
-            payload = (pipeline, inputs, ctx_data, self._engine_config)
+            # Serialize everything together, including engine config and output_name
+            payload = (pipeline, inputs, ctx_data, self._engine_config, output_name)
             result = self.cloudpickle.dumps(payload)
         finally:
             # Restore original backend and callbacks
@@ -1848,6 +1947,7 @@ class ModalBackend(Backend):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> Dict[str, Any]:
         """Execute a single pipeline run on Modal.
 
@@ -1858,16 +1958,17 @@ class ModalBackend(Backend):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
             ctx: Callback context (for telemetry/progress tracking)
+            output_name: Optional output name(s) to compute
 
         Returns:
-            Dictionary of pipeline outputs
+            Dictionary of requested pipeline outputs
         """
         # Create context if needed
         if ctx is None:
             ctx = CallbackContext()
 
-        # Serialize payload
-        serialized_payload = self._serialize_payload(pipeline, inputs, ctx)
+        # Serialize payload with output_name
+        serialized_payload = self._serialize_payload(pipeline, inputs, ctx, output_name)
 
         # Submit to Modal and wait for result
         with self._app.run():
@@ -1884,6 +1985,7 @@ class ModalBackend(Backend):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         ctx: Optional[CallbackContext] = None,
+        output_name: Union[str, List[str], None] = None,
     ) -> List[Dict[str, Any]]:
         """Execute multiple runs on Modal sequentially.
 
@@ -1894,5 +1996,5 @@ class ModalBackend(Backend):
         results: List[Dict[str, Any]] = []
         for item in items:
             merged = {**inputs, **item}
-            results.append(self.run(pipeline, merged, ctx))
+            results.append(self.run(pipeline, merged, ctx, output_name=output_name))
         return results
