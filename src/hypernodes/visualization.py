@@ -2,6 +2,7 @@
 import inspect
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Literal, Union, get_type_hints
+import xml.etree.ElementTree as ET
 import networkx as nx
 import graphviz
 
@@ -16,6 +17,95 @@ MAX_LABEL_LENGTH = 30
 def _escape_html(text: str) -> str:
     """Escape HTML special characters for use in graphviz labels."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _strip_svg_prolog(svg_data: str) -> str:
+    """Remove XML/DOCTYPE declarations that break HTML embedding."""
+    lines = []
+    skipping_doctype = False
+    for line in svg_data.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("<?xml"):
+            continue
+        if stripped.startswith("<!DOCTYPE"):
+            skipping_doctype = True
+            continue
+        if skipping_doctype:
+            # Continue skipping until the doctype declaration closes
+            if stripped.endswith(">"):
+                skipping_doctype = False
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _parse_svg_length(length: Optional[str]) -> Optional[float]:
+    """Convert SVG length strings (pt, in, cm, etc.) to pixels."""
+    if not length:
+        return None
+    try:
+        length = length.strip()
+        unit = "".join(ch for ch in length if ch.isalpha())
+        value_str = "".join(ch for ch in length if (ch.isdigit() or ch in ".-"))
+        value = float(value_str)
+    except ValueError:
+        return None
+
+    unit = unit or "px"
+    unit = unit.lower()
+    if unit == "px":
+        return value
+    if unit == "pt":
+        return value * (96.0 / 72.0)
+    if unit == "in":
+        return value * 96.0
+    if unit == "cm":
+        return value * (96.0 / 2.54)
+    if unit == "mm":
+        return value * (96.0 / 25.4)
+    # Fallback: treat as pixels
+    return value
+
+
+def _make_svg_responsive(svg_data: str) -> str:
+    """Adjust Graphviz SVG output for responsive display inside Jupyter cells."""
+    cleaned_svg = _strip_svg_prolog(svg_data)
+    try:
+        ET.register_namespace("", "http://www.w3.org/2000/svg")
+        root = ET.fromstring(cleaned_svg)
+
+        width_px = _parse_svg_length(root.attrib.get("width"))
+
+        # Remove absolute sizing so the SVG scales with the notebook cell
+        for attr in ("width", "height"):
+            if attr in root.attrib:
+                root.attrib.pop(attr)
+
+        # Ensure we still have a viewBox (Graphviz includes it already)
+        if "viewBox" not in root.attrib:
+            return cleaned_svg  # Fallback to original if sizing would break
+
+        # Append styling that constrains the SVG to the cell width
+        existing_style = root.attrib.get("style", "")
+        style_bits = [bit for bit in existing_style.split(";") if bit]
+        if width_px:
+            style_bits.append(f"width:{width_px:.2f}px")
+        style_bits.extend(["max-width:100%", "height:auto", "display:block"])
+        root.attrib["style"] = ";".join(dict.fromkeys(style_bits)) + ";"
+
+        return ET.tostring(root, encoding="unicode")
+    except ET.ParseError:
+        # If parsing fails, return the SVG as-is
+        return cleaned_svg
+
+
+def _wrap_svg_html(svg_data: str) -> str:
+    """Wrap responsive SVG in a scrollable container for notebook rendering."""
+    return (
+        '<div style="width:100%; overflow-x:auto; padding-bottom:8px;">'
+        f"{svg_data}"
+        "</div>"
+    )
 
 
 @dataclass
@@ -890,7 +980,8 @@ def visualize(
         try:
             from IPython.display import HTML
             svg_data = dot.pipe(format="svg").decode("utf-8")
-            return HTML(svg_data)
+            responsive_svg = _make_svg_responsive(svg_data)
+            return HTML(_wrap_svg_html(responsive_svg))
         except ImportError:
             return dot
     elif return_type == "auto":
@@ -900,7 +991,8 @@ def visualize(
             if get_ipython() is not None:
                 from IPython.display import HTML
                 svg_data = dot.pipe(format="svg").decode("utf-8")
-                return HTML(svg_data)
+                responsive_svg = _make_svg_responsive(svg_data)
+                return HTML(_wrap_svg_html(responsive_svg))
         except ImportError:
             pass
         return dot
