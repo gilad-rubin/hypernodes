@@ -89,7 +89,10 @@ def _make_svg_responsive(svg_data: str) -> str:
         existing_style = root.attrib.get("style", "")
         style_bits = [bit for bit in existing_style.split(";") if bit]
         if width_px:
-            style_bits.append(f"width:{width_px:.2f}px")
+            adjusted_width = max(width_px - 48.0, width_px * 0.85, 120.0)
+            style_bits.append(f"width:min(100%, {adjusted_width:.2f}px)")
+        else:
+            style_bits.append("width:100%")
         style_bits.extend(["max-width:100%", "height:auto", "display:block"])
         root.attrib["style"] = ";".join(dict.fromkeys(style_bits)) + ";"
 

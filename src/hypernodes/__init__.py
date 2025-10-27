@@ -42,6 +42,13 @@ from .visualization import (
     build_graph,
 )
 
+# Optional: DaftBackend (requires daft to be installed)
+try:
+    from .daft_backend import DaftBackend
+    _DAFT_AVAILABLE = True
+except ImportError:
+    _DAFT_AVAILABLE = False
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -68,4 +75,9 @@ __all__ = [
     "ExecutionError",
     # Note: telemetry module is available but not exported at top level
     # Use: from hypernodes.telemetry import ProgressCallback, TelemetryCallback
+    # Note: DaftBackend is available if daft is installed
+    # Use: from hypernodes.daft_backend import DaftBackend
 ]
+
+if _DAFT_AVAILABLE:
+    __all__.append("DaftBackend")
