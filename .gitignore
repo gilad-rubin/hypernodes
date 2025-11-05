@@ -12,12 +12,16 @@ mlruns/*
 .cursor/rules/ruler_cursor_instructions.mdc.bak
 .github/copilot-instructions.md
 .github/copilot-instructions.md.bak
+.mcp.json
+.mcp.json.bak
 .vscode/mcp.json
 .vscode/mcp.json.bak
 .windsurf/rules/ruler_windsurf_instructions.md
 .windsurf/rules/ruler_windsurf_instructions.md.bak
 AGENTS.md
 AGENTS.md.bak
+CLAUDE.md
+CLAUDE.md.bak
 # END Ruler Generated Files
 
 .cache*
