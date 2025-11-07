@@ -553,7 +553,7 @@ class Pipeline:
         """
         # Use effective backend to support inheritance
         backend = self.effective_backend
-        return backend.run(self, inputs, _ctx, output_name=output_name)
+        return backend.run(self, inputs, output_name=output_name, _ctx=_ctx)
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Make Pipeline callable like a Node.

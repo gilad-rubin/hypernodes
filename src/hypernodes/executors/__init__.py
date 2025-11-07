@@ -1,28 +1,23 @@
-"""Pipeline execution strategies.
+"""Pipeline execution engines.
 
-This package contains executor implementations for running pipelines:
-- Executor: Abstract base class
-- LocalExecutor: Node-by-node execution with various parallelism strategies
-- PipelineExecutionEngine: Reusable execution engine wrapper
-- DaftExecutor: Distributed DataFrame-based execution
-- ModalExecutor: Remote execution on Modal serverless infrastructure
+This package contains engine implementations for running pipelines:
+- Engine: Abstract base class for all engines
+- HyperNodesEngine: Node-by-node execution with various parallelism strategies
+- DaftEngine: Distributed DataFrame-based execution (optional, requires daft)
+
+Engines are orchestrators that handle pipeline execution with different strategies.
+They manage dependency resolution, caching, callbacks, and parallelism.
 """
 
-from hypernodes.executors.base import Executor
-from hypernodes.executors.local import LocalExecutor, PipelineExecutionEngine
+from hypernodes.executors.base import Engine
+from hypernodes.executors.local import HyperNodesEngine
 
 # Build __all__ dynamically based on available dependencies
-__all__ = ["Executor", "LocalExecutor", "PipelineExecutionEngine"]
+__all__ = ["Engine", "HyperNodesEngine"]
 
-# Optional executors (may require additional dependencies)
+# Optional engines (may require additional dependencies)
 try:
-    from hypernodes.executors.daft import DaftExecutor
-    __all__.append("DaftExecutor")
-except ImportError:
-    pass
-
-try:
-    from hypernodes.executors.modal import ModalExecutor
-    __all__.append("ModalExecutor")
+    from hypernodes.executors.daft import DaftEngine
+    __all__.append("DaftEngine")
 except ImportError:
     pass

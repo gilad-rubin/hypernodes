@@ -1,6 +1,6 @@
-"""Daft executor for HyperNodes pipelines.
+"""Daft engine for HyperNodes pipelines.
 
-This executor automatically converts HyperNodes pipelines into Daft DataFrames
+This engine automatically converts HyperNodes pipelines into Daft DataFrames
 using next-generation UDFs (@daft.func, @daft.cls, @daft.func.batch).
 
 Key features:
@@ -24,7 +24,7 @@ from typing import (
     get_origin,
 )
 
-from hypernodes.executors.base import Executor
+from hypernodes.executors.base import Engine
 from hypernodes.callbacks import CallbackContext
 
 try:
@@ -59,10 +59,10 @@ if TYPE_CHECKING:
     from hypernodes.pipeline import Pipeline
 
 
-class DaftExecutor(Executor):
-    """Daft executor that converts HyperNodes pipelines to Daft DataFrames.
+class DaftEngine(Engine):
+    """Daft engine that converts HyperNodes pipelines to Daft DataFrames.
 
-    This executor translates HyperNodes pipelines into Daft operations:
+    This engine translates HyperNodes pipelines into Daft operations:
     - Nodes become @daft.func UDFs
     - Map operations become DataFrame operations
     - Pipelines are converted to lazy DataFrame transformations
@@ -74,13 +74,13 @@ class DaftExecutor(Executor):
 
     Example:
         >>> from hypernodes import node, Pipeline
-        >>> from hypernodes.executors import DaftExecutor
+        >>> from hypernodes.executors import DaftEngine
         >>>
         >>> @node(output_name="result")
         >>> def add_one(x: int) -> int:
         >>>     return x + 1
         >>>
-        >>> pipeline = Pipeline(nodes=[add_one], executor=DaftExecutor())
+        >>> pipeline = Pipeline(nodes=[add_one], engine=DaftEngine())
         >>> result = pipeline.run(inputs={"x": 5})
         >>> # result == {"result": 6}
     """
@@ -100,16 +100,16 @@ class DaftExecutor(Executor):
         self,
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
         output_name: Union[str, List[str], None] = None,
+        _ctx: Optional[CallbackContext] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline by converting it to a Daft DataFrame.
 
         Args:
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
-            ctx: Optional callback context (not used in Daft backend)
             output_name: Optional output name(s) to compute
+            _ctx: Internal callback context (not used in Daft engine)
 
         Returns:
             Dictionary containing the pipeline outputs
@@ -153,8 +153,8 @@ class DaftExecutor(Executor):
         pipeline: "Pipeline",
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
         output_name: Union[str, List[str], None] = None,
+        _ctx: Optional[CallbackContext] = None,
     ) -> List[Dict[str, Any]]:
         """Execute a pipeline over multiple items using Daft.
 
@@ -162,8 +162,8 @@ class DaftExecutor(Executor):
             pipeline: The pipeline to execute
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
-            ctx: Optional callback context (not used in Daft backend)
             output_name: Optional output name(s) to compute
+            _ctx: Internal callback context (not used in Daft engine)
 
         Returns:
             List of output dictionaries (one per item)

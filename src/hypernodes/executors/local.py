@@ -1,6 +1,6 @@
-"""Local execution strategies for pipelines.
+"""HyperNodes execution engine for pipelines.
 
-This module provides the LocalExecutor class which executes pipelines node-by-node
+This module provides the HyperNodesEngine class which executes pipelines node-by-node
 with various parallelism strategies (sequential, async, threaded, parallel).
 """
 
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set, Union
 
 from hypernodes.cache import compute_signature, hash_code, hash_inputs
 from hypernodes.callbacks import CallbackContext
-from hypernodes.executors.base import Executor as BaseExecutor
+from hypernodes.executors.base import Engine
 
 if TYPE_CHECKING:
     from hypernodes.pipeline import Pipeline
@@ -71,68 +71,11 @@ def _get_node_dependencies(node, available_values: Set[str]) -> Set[str]:
     return set()
 
 
-class PipelineExecutionEngine:
-    """Reusable execution engine for pipelines.
+class HyperNodesEngine(Engine):
+    """HyperNodes native execution engine with multiple parallelism strategies.
 
-    This engine encapsulates execution strategy (sequential/async/threaded/parallel)
-    and mapping strategy, but delegates actual logic to LocalExecutor to avoid code
-    duplication. Executors (local or remote) can reuse this engine to run pipelines
-    with identical semantics.
-    """
-
-    def __init__(
-        self,
-        node_execution: Literal[
-            "sequential", "async", "threaded", "parallel"
-        ] = "sequential",
-        map_execution: Literal[
-            "sequential", "async", "threaded", "parallel"
-        ] = "sequential",
-        max_workers: Optional[int] = None,
-        executor: Optional[Union[Executor, Any]] = None,
-    ):
-        self.node_execution = node_execution
-        self.map_execution = map_execution
-        self.max_workers = max_workers
-        self.executor = executor
-
-        # Lazy constructed LocalExecutor used to perform actual work
-        self._local_executor: Optional["LocalExecutor"] = None
-
-    def _ensure_local(self) -> "LocalExecutor":
-        if self._local_executor is None:
-            # Import here to avoid circular references during module import
-            # and to support environments where only the engine is serialized.
-            self._local_executor = LocalExecutor(
-                node_execution=self.node_execution,
-                map_execution=self.map_execution,
-                max_workers=self.max_workers,
-                executor=self.executor,
-            )
-        return self._local_executor
-
-    def run(
-        self,
-        pipeline: "Pipeline",
-        inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
-        output_name: Union[str, List[str], None] = None,
-    ) -> Dict[str, Any]:
-        return self._ensure_local().run(pipeline, inputs, ctx, output_name=output_name)
-
-    def map(
-        self,
-        pipeline: "Pipeline",
-        items: List[Dict[str, Any]],
-        inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
-        output_name: Union[str, List[str], None] = None,
-    ) -> List[Dict[str, Any]]:
-        return self._ensure_local().map(pipeline, items, inputs, ctx, output_name=output_name)
-
-
-class LocalExecutor(BaseExecutor):
-    """Local execution with multiple execution strategies.
+    This is the default engine for HyperNodes. It executes pipelines node-by-node
+    in topological order with intelligent caching and callback support.
 
     Supports four execution modes:
     - Sequential: Nodes execute one at a time (default)
@@ -158,6 +101,8 @@ class LocalExecutor(BaseExecutor):
         executor: Optional custom executor (ThreadPoolExecutor, ProcessPoolExecutor,
             or any Executor-compatible object). If provided, this overrides the
             node_execution/map_execution settings for parallel operations.
+
+    Note: In the future API, use node_executor and map_executor parameters instead.
     """
 
     def __init__(
@@ -180,8 +125,8 @@ class LocalExecutor(BaseExecutor):
         self,
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
         output_name: Union[str, List[str], None] = None,
+        _ctx: Optional[CallbackContext] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with the configured execution strategy.
 
@@ -194,22 +139,22 @@ class LocalExecutor(BaseExecutor):
         Args:
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
-            ctx: Callback context (created if None)
             output_name: Optional output name(s) to compute. Only specified
                 outputs will be returned and only required nodes executed.
+            _ctx: Internal callback context (not for public use)
 
         Returns:
             Dictionary containing only the requested outputs (or all if None)
         """
         # Dispatch based on node_execution mode
         if self.node_execution == "sequential":
-            return self._run_sequential(pipeline, inputs, ctx, output_name=output_name)
+            return self._run_sequential(pipeline, inputs, _ctx, output_name=output_name)
         elif self.node_execution == "async":
-            return asyncio.run(self._run_async(pipeline, inputs, ctx, output_name=output_name))
+            return asyncio.run(self._run_async(pipeline, inputs, _ctx, output_name=output_name))
         elif self.node_execution == "threaded":
-            return self._run_threaded(pipeline, inputs, ctx, output_name=output_name)
+            return self._run_threaded(pipeline, inputs, _ctx, output_name=output_name)
         elif self.node_execution == "parallel":
-            return self._run_parallel(pipeline, inputs, ctx, output_name=output_name)
+            return self._run_parallel(pipeline, inputs, _ctx, output_name=output_name)
         else:
             raise ValueError(f"Invalid node_execution mode: {self.node_execution}")
 
@@ -1333,8 +1278,8 @@ class LocalExecutor(BaseExecutor):
         pipeline: "Pipeline",
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
-        ctx: Optional[CallbackContext] = None,
         output_name: Union[str, List[str], None] = None,
+        _ctx: Optional[CallbackContext] = None,
     ) -> List[Dict[str, Any]]:
         """Execute pipeline.map() with the configured map_execution strategy.
 
@@ -1346,13 +1291,14 @@ class LocalExecutor(BaseExecutor):
             pipeline: The pipeline to execute
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
-            ctx: Callback context (created if None)
             output_name: Optional output name(s) to compute
+            _ctx: Internal callback context (not for public use)
 
         Returns:
             List of output dictionaries (one per item, only requested outputs)
         """
         # Create or reuse callback context
+        ctx = _ctx
         if ctx is None:
             ctx = CallbackContext()
 

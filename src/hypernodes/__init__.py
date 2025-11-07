@@ -26,7 +26,7 @@ Example:
 
 from .node import Node, node
 from .pipeline import Pipeline
-from .backend import Backend, LocalBackend, ModalBackend
+from .executors import Engine, HyperNodesEngine
 from .cache import DiskCache
 from .callbacks import PipelineCallback, CallbackContext
 from .exceptions import (
@@ -42,9 +42,9 @@ from .visualization import (
     build_graph,
 )
 
-# Optional: DaftBackend (requires daft to be installed)
+# Optional: DaftEngine (requires daft to be installed)
 try:
-    from .daft_backend import DaftBackend
+    from .executors import DaftEngine
     _DAFT_AVAILABLE = True
 except ImportError:
     _DAFT_AVAILABLE = False
@@ -57,9 +57,8 @@ __all__ = [
     # Classes
     "Node",
     "Pipeline",
-    "Backend",
-    "LocalBackend",
-    "ModalBackend",
+    "Engine",
+    "HyperNodesEngine",
     "DiskCache",
     "PipelineCallback",
     "CallbackContext",
@@ -75,9 +74,9 @@ __all__ = [
     "ExecutionError",
     # Note: telemetry module is available but not exported at top level
     # Use: from hypernodes.telemetry import ProgressCallback, TelemetryCallback
-    # Note: DaftBackend is available if daft is installed
-    # Use: from hypernodes.daft_backend import DaftBackend
+    # Note: DaftEngine is available if daft is installed
+    # Use: from hypernodes.executors import DaftEngine
 ]
 
 if _DAFT_AVAILABLE:
-    __all__.append("DaftBackend")
+    __all__.append("DaftEngine")
