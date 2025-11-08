@@ -17,7 +17,7 @@ This works for:
 import asyncio
 import os
 import threading
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
 
 # Default worker counts for different execution strategies
@@ -98,6 +98,7 @@ class AsyncExecutor:
         self._loop = None
         self._thread = None
         self._semaphore = None
+        self._thread_pool: ThreadPoolExecutor | None = None
         self._in_jupyter = self._detect_jupyter()
         self._start_loop()
 
@@ -125,15 +126,18 @@ class AsyncExecutor:
         self._thread = threading.Thread(target=run_loop, daemon=True)
         self._thread.start()
 
-        # Initialize semaphore in the loop
+        # Initialize semaphore and thread pool in the loop
         future = asyncio.run_coroutine_threadsafe(
-            self._init_semaphore(), self._loop
+            self._init_resources(), self._loop
         )
         future.result()  # Wait for initialization
 
-    async def _init_semaphore(self):
-        """Initialize semaphore in the event loop."""
+    async def _init_resources(self):
+        """Initialize semaphore and a dedicated thread pool in the event loop."""
         self._semaphore = asyncio.Semaphore(self.max_workers)
+        # Dedicated pool so run_in_executor isn't limited by default pool size
+        # Keep it tied to max_workers so users control concurrency explicitly
+        self._thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
 
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
         """Execute function concurrently using asyncio.
@@ -166,7 +170,7 @@ class AsyncExecutor:
                     # This wraps blocking operations (time.sleep, requests, etc.)
                     # so they execute concurrently via threading
                     return await self._loop.run_in_executor(
-                        None, 
+                        self._thread_pool,
                         lambda: fn(*args, **kwargs)
                     )
 
@@ -195,6 +199,18 @@ class AsyncExecutor:
             if self._thread and self._thread.is_alive():
                 self._thread.join(timeout=5)
 
+            # Close the event loop to release resources
+            try:
+                if not self._loop.is_closed():
+                    self._loop.close()
+            except Exception:
+                # Avoid noisy errors during interpreter shutdown
+                pass
+
             self._loop = None
             self._thread = None
             self._semaphore = None
+            # Shutdown thread pool if created
+            if self._thread_pool is not None:
+                self._thread_pool.shutdown(wait=wait)
+                self._thread_pool = None

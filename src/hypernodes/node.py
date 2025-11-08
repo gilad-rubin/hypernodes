@@ -1,7 +1,7 @@
 """Node decorator and Node class for wrapping functions in pipelines."""
 import functools
 import inspect
-from typing import Callable, Any
+from typing import Any, Callable
 
 
 class Node:
@@ -38,8 +38,26 @@ class Node:
         sig = inspect.signature(func)
         self.parameters = tuple(sig.parameters.keys())
         
+        # Pre-compute and cache code hash to avoid expensive recomputation
+        # This is computed once at node creation and persists through pickling
+        from .cache import hash_code
+        self._code_hash = hash_code(func)
+        
         # Preserve function metadata
         functools.update_wrapper(self, func)
+    
+    @property
+    def code_hash(self) -> str:
+        """Get cached code hash for this node's function.
+        
+        The hash is computed once at node creation and cached for reuse.
+        This avoids expensive inspect.getsource() calls on every execution.
+        The cached value persists through pickling/unpickling.
+        
+        Returns:
+            SHA256 hash of the function's source code and closure
+        """
+        return self._code_hash
     
     def __call__(self, **kwargs) -> Any:
         """Execute the wrapped function with given keyword arguments.
@@ -66,6 +84,16 @@ class Node:
             return False
         return (self.func.__name__ == other.func.__name__ and 
                 self.output_name == other.output_name)
+    
+    def __getstate__(self):
+        """Custom pickle support to preserve code hash cache."""
+        state = self.__dict__.copy()
+        return state
+    
+    def __setstate__(self, state):
+        """Custom unpickle support to restore code hash cache."""
+        self.__dict__.update(state)
+        # _code_hash is preserved through pickling
 
 
 def node(output_name: str, cache: bool = True) -> Callable[[Callable], Node]:

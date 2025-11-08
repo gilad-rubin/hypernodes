@@ -11,6 +11,7 @@ Key responsibilities:
 - Enable node-level parallelism for async and threaded executors
 """
 
+import inspect
 import os
 import time
 from abc import ABC, abstractmethod
@@ -21,7 +22,11 @@ import networkx as nx
 
 from .callbacks import CallbackContext
 from .executors import DEFAULT_WORKERS, AsyncExecutor, SequentialExecutor
-from .node_execution import _get_node_id, execute_single_node
+from .node_execution import (
+    _get_node_id,
+    execute_single_node,
+    execute_single_node_async,
+)
 
 # Import loky for robust parallel execution with cloudpickle support
 try:
@@ -79,6 +84,19 @@ def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> 
     return levels
 
 
+def _pipeline_supports_async_native(pipeline: "Pipeline") -> bool:
+    """Check if all nodes in the pipeline are native async functions."""
+    for node in pipeline.execution_order:
+        if hasattr(node, "pipeline"):
+            # Nested pipelines introduce sync boundaries for now
+            return False
+        if not hasattr(node, "func"):
+            return False
+        if not inspect.iscoroutinefunction(node.func):
+            return False
+    return len(pipeline.execution_order) > 0
+
+
 def _execute_pipeline_for_map_item(
     pipeline: "Pipeline",
     inputs: Dict[str, Any],
@@ -104,6 +122,16 @@ def _execute_pipeline_for_map_item(
     ctx = None  # Don't pass context across processes
 
     return _execute_pipeline_impl(pipeline, inputs, executor, ctx, output_name)
+
+
+async def _execute_pipeline_for_map_item_async(
+    pipeline: "Pipeline",
+    inputs: Dict[str, Any],
+    output_name: Union[str, List[str], None],
+) -> Dict[str, Any]:
+    """Async variant used when map executor natively handles coroutines."""
+    ctx = None
+    return await _execute_pipeline_impl_async(pipeline, inputs, ctx, output_name)
 
 
 def _execute_pipeline_impl(
@@ -358,6 +386,85 @@ def _execute_pipeline_impl(
     return outputs
 
 
+async def _execute_pipeline_impl_async(
+    pipeline: "Pipeline",
+    inputs: Dict[str, Any],
+    ctx: Optional[CallbackContext],
+    output_name: Union[str, List[str], None],
+) -> Dict[str, Any]:
+    """Async implementation used for native async pipelines."""
+    if ctx is None:
+        ctx = CallbackContext()
+
+    callbacks = (
+        pipeline.effective_callbacks
+        if hasattr(pipeline, "effective_callbacks")
+        else (pipeline.callbacks or [])
+    )
+
+    node_ids = [_get_node_id(n) for n in pipeline.execution_order]
+    ctx.set_pipeline_metadata(
+        pipeline.id,
+        {
+            "total_nodes": len(pipeline.execution_order),
+            "node_ids": node_ids,
+            "pipeline_name": pipeline.name or pipeline.id,
+        },
+    )
+    ctx.push_pipeline(pipeline.id)
+
+    required_nodes = pipeline._compute_required_nodes(output_name)
+    nodes_to_execute = (
+        required_nodes if required_nodes is not None else pipeline.execution_order
+    )
+
+    pipeline_start_time = time.time()
+    for callback in callbacks:
+        callback.on_pipeline_start(pipeline.id, inputs, ctx)
+
+    try:
+        available_values = dict(inputs)
+        outputs: Dict[str, Any] = {}
+        node_signatures: Dict[str, str] = {}
+
+        for node in nodes_to_execute:
+            node_inputs = {param: available_values[param] for param in node.parameters}
+            result, signature = await execute_single_node_async(
+                node,
+                node_inputs,
+                pipeline,
+                callbacks,
+                ctx,
+                node_signatures,
+                offload_sync=True,
+            )
+
+            if hasattr(node, "pipeline"):
+                outputs.update(result)
+                available_values.update(result)
+                for output_name_key in result.keys():
+                    node_signatures[output_name_key] = signature
+            else:
+                outputs[node.output_name] = result
+                available_values[node.output_name] = result
+                node_signatures[node.output_name] = signature
+
+    finally:
+        pipeline_duration = time.time() - pipeline_start_time
+        for callback in callbacks:
+            callback.on_pipeline_end(pipeline.id, outputs, pipeline_duration, ctx)
+        ctx.pop_pipeline()
+
+    if output_name is not None:
+        if isinstance(output_name, str):
+            requested_names = [output_name]
+        else:
+            requested_names = list(output_name)
+        return {name: outputs[name] for name in requested_names if name in outputs}
+
+    return outputs
+
+
 class Engine(ABC):
     """Abstract base class for pipeline engines.
 
@@ -428,6 +535,11 @@ class HypernodesEngine(Engine):
             Same options as node_executor. Defaults to "sequential".
         max_workers: Maximum workers for parallel executors.
             Defaults to CPU count.
+        async_strategy: How to await async nodes when called from sync contexts.
+            - "per_call": status quo (new event loop per await)
+            - "thread_local": reuse thread-local loop
+            - "async_native": prefer async pipelines end-to-end
+            - "auto": hybrid detection (thread_local fallback)
     """
 
     def __init__(
@@ -435,8 +547,15 @@ class HypernodesEngine(Engine):
         node_executor: Union[str, Any] = "sequential",
         map_executor: Union[str, Any] = "sequential",
         max_workers: Optional[int] = None,
+        async_strategy: str = "auto",
     ):
         self.max_workers = max_workers or os.cpu_count() or 4
+        if async_strategy not in ("per_call", "thread_local", "async_native", "auto"):
+            raise ValueError(
+                "async_strategy must be one of "
+                "('per_call', 'thread_local', 'async_native', 'auto')"
+            )
+        self.async_strategy = async_strategy
 
         # Store original specs to track ownership
         self._node_executor_spec = node_executor
@@ -566,6 +685,28 @@ class HypernodesEngine(Engine):
                 result = self._execute_pipeline(pipeline, merged_inputs, self.node_executor, _ctx, output_name)
                 results.append(result)
             return results
+
+        use_async_native = (
+            isinstance(self.map_executor, AsyncExecutor)
+            and self.async_strategy in ("async_native", "auto")
+            and _pipeline_supports_async_native(pipeline)
+        )
+
+        if use_async_native:
+            futures = []
+
+            async def run_item_async(item_inputs: Dict[str, Any]) -> Dict[str, Any]:
+                merged_inputs = {**inputs, **item_inputs}
+                return await _execute_pipeline_for_map_item_async(
+                    pipeline,
+                    merged_inputs,
+                    output_name,
+                )
+
+            for item in items:
+                futures.append(self.map_executor.submit(run_item_async, item))
+
+            return [future.result() for future in futures]
 
         # For parallel executors, submit all items and collect results
         # Use the module-level function (not bound method) so it can be pickled

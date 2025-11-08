@@ -18,6 +18,7 @@ import inspect
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
+from .async_utils import run_coroutine_sync
 from .cache import compute_signature, hash_code, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
 
@@ -57,6 +58,15 @@ def _get_node_id(node) -> str:
     return str(node)
 
 
+def _get_sync_runner_strategy(pipeline: "Pipeline") -> str:
+    """Determine how to run coroutines for this pipeline's backend."""
+    backend = getattr(pipeline, "effective_backend", None)
+    strategy = getattr(backend, "async_strategy", "per_call")
+    if strategy in ("thread_local", "auto", "async_native"):
+        return "thread_local"
+    return "per_call"
+
+
 def compute_node_signature(
     node: "Node",
     inputs: Dict[str, Any],
@@ -74,8 +84,8 @@ def compute_node_signature(
     Returns:
         64-character hex string (SHA256)
     """
-    # Hash the node's function code
-    code_hash = hash_code(node.func)
+    # Use cached code hash from Node (avoids expensive inspect.getsource() on every call)
+    code_hash = node.code_hash
 
     # Hash the input values
     inputs_hash = hash_inputs(inputs)
@@ -205,38 +215,33 @@ def execute_single_node(
     ctx: CallbackContext,
     node_signatures: Dict[str, str]
 ) -> Tuple[Any, str]:
-    """Execute a single node with caching and callbacks.
+    """Synchronous wrapper that delegates to the async implementation."""
+    runner_strategy = _get_sync_runner_strategy(pipeline)
+    return run_coroutine_sync(
+        execute_single_node_async(
+            node,
+            inputs,
+            pipeline,
+            callbacks,
+            ctx,
+            node_signatures,
+            offload_sync=False,
+        ),
+        strategy=runner_strategy,
+    )
 
-    This function handles both regular nodes and PipelineNodes. It:
-    1. Computes the node signature
-    2. Checks cache (if enabled)
-    3. Executes node if cache miss
-    4. Triggers all appropriate callbacks
-    5. Stores result in cache (if enabled)
-    6. Returns (result, signature)
 
-    Args:
-        node: The node to execute (Node or PipelineNode)
-        inputs: Input values for the node (already extracted from available_values)
-        pipeline: The pipeline this node belongs to
-        callbacks: List of callbacks to trigger
-        ctx: Callback context
-        node_signatures: Signatures of upstream nodes (for dependency tracking)
-
-    Returns:
-        Tuple of (result, signature) where:
-        - result: The node's output value (or dict of outputs for PipelineNode)
-        - signature: The computed signature for this execution
-    """
+async def execute_single_node_async(
+    node,
+    inputs: Dict[str, Any],
+    pipeline: "Pipeline",
+    callbacks: List[PipelineCallback],
+    ctx: CallbackContext,
+    node_signatures: Dict[str, str],
+    offload_sync: bool = False,
+) -> Tuple[Any, str]:
+    """Execute a single node with caching, supporting async contexts."""
     node_id = _get_node_id(node)
-
-    # Compute signature based on node type
-    if hasattr(node, "pipeline"):
-        # PipelineNode
-        signature = compute_pipeline_node_signature(node, inputs, node_signatures)
-    else:
-        # Regular node
-        signature = compute_node_signature(node, inputs, node_signatures)
 
     # Get effective cache (support inheritance)
     effective_cache = (
@@ -245,10 +250,21 @@ def execute_single_node(
         else pipeline.cache
     )
     cache_enabled = effective_cache is not None and node.cache
+    
+    # Only compute signature if caching is enabled (optimization)
+    signature = None
     result = None
-
-    # Check cache if enabled
+    
     if cache_enabled:
+        # Compute signature based on node type
+        if hasattr(node, "pipeline"):
+            # PipelineNode
+            signature = compute_pipeline_node_signature(node, inputs, node_signatures)
+        else:
+            # Regular node
+            signature = compute_node_signature(node, inputs, node_signatures)
+        
+        # Check cache
         result = effective_cache.get(signature)
 
         if result is not None:
@@ -285,21 +301,22 @@ def execute_single_node(
         # Execute based on node type
         if hasattr(node, "pipeline"):
             # PipelineNode - delegate to specialized function
-            result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
+            if offload_sync:
+                result = await asyncio.to_thread(
+                    _execute_pipeline_node, node, inputs, pipeline, callbacks, ctx
+                )
+            else:
+                result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
         else:
             # Regular node - call directly
-            result = node(**inputs)
-            # If result is a coroutine, we need to await it
+            call_async = hasattr(node, "func") and inspect.iscoroutinefunction(node.func)
+            if offload_sync and not call_async:
+                result = await asyncio.to_thread(node, **inputs)
+            else:
+                result = node(**inputs)
+            # If result is a coroutine, await it
             if inspect.iscoroutine(result):
-                # We're in a sync context, so we need to run the coroutine
-                # Check if there's already a running event loop
-                try:
-                    asyncio.get_running_loop()
-                    # We're in an async context - shouldn't happen in current design
-                    raise RuntimeError("Unexpected async context in execute_single_node")
-                except RuntimeError:
-                    # No running loop - create one and run the coroutine
-                    result = asyncio.run(result)
+                result = await result
 
         # Trigger node end callbacks
         node_duration = time.time() - node_start_time
@@ -325,8 +342,19 @@ def execute_single_node(
             callback.on_error(node_id, e, ctx)
         raise
 
+    # Compute signature only if needed (for caching or dependency tracking)
+    # If caching is disabled globally and node doesn't need signature for deps, skip computation
+    if signature is None:
+        # Check if any downstream nodes might need this signature for dependency tracking
+        # For now, always compute it to maintain correctness
+        # TODO: Optimize by tracking which nodes actually need signatures
+        if hasattr(node, "pipeline"):
+            signature = compute_pipeline_node_signature(node, inputs, node_signatures)
+        else:
+            signature = compute_node_signature(node, inputs, node_signatures)
+    
     # Store in cache if enabled
-    if cache_enabled:
+    if cache_enabled and effective_cache is not None:
         effective_cache.put(signature, result)
 
     return result, signature
