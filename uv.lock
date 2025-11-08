@@ -599,6 +599,7 @@ name = "hypernodes"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "loky" },
     { name = "networkx" },
 ]
 
@@ -643,6 +644,7 @@ requires-dist = [
     { name = "ipykernel", marker = "extra == 'viz'", specifier = "<7" },
     { name = "ipywidgets", marker = "extra == 'viz'", specifier = ">=8.1.7" },
     { name = "logfire", marker = "extra == 'telemetry'", specifier = ">=2.0.0" },
+    { name = "loky", specifier = ">=3.5.6" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64.0" },
     { name = "nbformat", marker = "extra == 'viz'", specifier = ">=5.10.4" },
     { name = "networkx", specifier = ">=3.0" },
@@ -856,6 +858,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5c/89/d26951b6b21790641720c12cfd6dca0cf7ead0f5ddd7de4299837b90b8b1/logfire-4.14.2.tar.gz", hash = "sha256:8dcedbd59c3d06a8794a93bbf09add788de3b74c45afa821750992f0c822c628", size = 548291, upload-time = "2025-10-24T20:14:39.115Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/92/4fba7b8f4f56f721ad279cb0c08164bffa14e93cfd184d1a4cc7151c52a2/logfire-4.14.2-py3-none-any.whl", hash = "sha256:caa8111b20f263f4ebb0ae380a62f2a214aeb07d5e2f03c9300fa096d0a8e692", size = 228364, upload-time = "2025-10-24T20:14:34.495Z" },
+]
+
+[[package]]
+name = "loky"
+version = "3.5.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cloudpickle" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/76/61/690a4503ede61d36cc7fa2d5fa11fe02d94f030bd82155cd8935b2694580/loky-3.5.6.tar.gz", hash = "sha256:d96935ed689aa53eeb7b329769544950fa10a52706968f5d0af3d9c33a761e77", size = 102275, upload-time = "2025-08-27T09:53:52.4Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/80/7f1f1bf8c2d5dfd8e9c0e1191aa355ff8b80b5619f84d6dcc2703fa7fd5a/loky-3.5.6-py3-none-any.whl", hash = "sha256:6d5300ac68cbd5084e89a6a0a187785d6a79950d461c80223d2c9a41d672b3d4", size = 56515, upload-time = "2025-08-27T09:53:51.145Z" },
 ]
 
 [[package]]

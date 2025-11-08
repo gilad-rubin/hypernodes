@@ -5,13 +5,14 @@ a uniform interface compatible with concurrent.futures.Executor.
 """
 
 import asyncio
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
 import pytest
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 from hypernodes.executors import (
-    SequentialExecutor,
-    AsyncExecutor,
     DEFAULT_WORKERS,
+    AsyncExecutor,
+    SequentialExecutor,
 )
 
 
@@ -66,6 +67,71 @@ class TestAsyncExecutor:
 
         future = executor.submit(sync_fn, 5)
         assert future.result() == 10
+
+    def test_async_executor_sync_blocking_function(self):
+        """Test AsyncExecutor auto-wraps blocking sync functions."""
+        import time
+
+        executor = AsyncExecutor()
+
+        def blocking_fn(x):
+            time.sleep(0.1)  # Blocking I/O
+            return x * 2
+
+        # Submit multiple blocking functions
+        start = time.time()
+        futures = [executor.submit(blocking_fn, i) for i in range(5)]
+        results = [f.result() for f in futures]
+        duration = time.time() - start
+
+        assert results == [0, 2, 4, 6, 8]
+        # Should complete in ~0.1s via threading, not 0.5s sequential
+        assert duration < 0.2
+
+        executor.shutdown(wait=True)
+
+    def test_async_executor_mixed_sync_async(self):
+        """Test AsyncExecutor handles mixed sync and async functions."""
+        executor = AsyncExecutor()
+
+        async def async_fn(x):
+            await asyncio.sleep(0.05)
+            return x * 2
+
+        def sync_fn(x):
+            import time
+            time.sleep(0.05)
+            return x * 3
+
+        # Submit both types
+        futures = []
+        for i in range(4):
+            if i % 2 == 0:
+                futures.append(executor.submit(async_fn, i))
+            else:
+                futures.append(executor.submit(sync_fn, i))
+
+        results = [f.result() for f in futures]
+        
+        # async_fn for 0, sync_fn for 1, async_fn for 2, sync_fn for 3
+        assert results[0] == 0  # 0 * 2
+        assert results[1] == 3  # 1 * 3
+        assert results[2] == 4  # 2 * 2
+        assert results[3] == 9  # 3 * 3
+
+        executor.shutdown(wait=True)
+
+    def test_async_executor_sync_with_kwargs(self):
+        """Test AsyncExecutor handles sync functions with kwargs."""
+        executor = AsyncExecutor()
+
+        def sync_fn(x, y, z=10):
+            return x + y + z
+
+        future = executor.submit(sync_fn, 1, 2, z=3)
+        assert future.result() == 6
+
+        executor.shutdown(wait=True)
 
     def test_async_executor_exception(self):
         """Test AsyncExecutor handles exceptions."""

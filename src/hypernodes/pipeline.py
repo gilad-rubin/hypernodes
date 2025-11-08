@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 import networkx as nx
 
-from .engine import Engine, HypernodesEngine
 from .cache import Cache
 from .callbacks import PipelineCallback
+from .engine import Engine, HypernodesEngine
 from .exceptions import CycleError, DependencyError
 from .node import Node
 
@@ -262,7 +262,7 @@ class Pipeline:
     def __init__(
         self,
         nodes: List[Union[Node, "Pipeline"]],
-        backend: Engine = None,
+        backend: Optional[Engine] = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
@@ -907,22 +907,17 @@ class Pipeline:
         for callback in callbacks:
             callback.on_map_start(total_items, ctx)
 
-        results_list = []
-        for idx, plan in enumerate(execution_plans):
-            # Mark that we're in a map operation (for cache callbacks)
-            ctx.set("_in_map", True)
-            ctx.set("_map_item_index", idx)
-            ctx.set("_map_item_start_time", time.time())
-
-            # Execute the pipeline for this item (pass context for callbacks)
-            # The backend will fire on_map_item_start/end/cached as appropriate
-            result = self.run(plan, output_name=output_name, _ctx=ctx)
-            results_list.append(result)
-
-            # Clear map context
-            ctx.set("_in_map", False)
-            ctx.set("_map_item_index", None)
-            ctx.set("_map_item_start_time", None)
+        # Delegate to backend's map executor for parallel execution
+        # The backend.map() method will use the configured map_executor
+        # (sequential, async, threaded, or parallel)
+        backend = self.effective_backend
+        results_list = backend.map(
+            pipeline=self,
+            items=execution_plans,  # List of input dicts (one per map item)
+            inputs={},  # No shared inputs - all inputs are in the items
+            output_name=output_name,
+            _ctx=ctx,
+        )
 
         # Trigger map end callbacks
         map_duration = time.time() - map_start_time
@@ -950,6 +945,51 @@ class Pipeline:
 
         # Transpose: dict of lists
         return {key: [result[key] for result in results_list] for key in output_keys}
+
+    def __enter__(self) -> "Pipeline":
+        """Enter context manager.
+        
+        Allows using Pipeline with 'with' statement for automatic cleanup.
+        
+        Returns:
+            Self for use in context
+            
+        Example:
+            >>> with Pipeline(nodes=[...]) as pipeline:
+            ...     results = pipeline.run(inputs={"x": 5})
+            ... # Engine automatically shut down here
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager and cleanup resources.
+        
+        Automatically shuts down the backend engine if we created it.
+        """
+        self._cleanup()
+        return False  # Don't suppress exceptions
+
+    def __del__(self):
+        """Destructor to ensure cleanup happens even without context manager.
+        
+        This is called when the Pipeline object is garbage collected,
+        ensuring engines are properly shut down.
+        """
+        self._cleanup()
+
+    def _cleanup(self):
+        """Internal method to cleanup resources (shutdown engines).
+        
+        Only shuts down backends that we created (not user-provided ones).
+        Safe to call multiple times.
+        """
+        # Only cleanup our own backend (not inherited from parent)
+        if self.backend is not None and hasattr(self.backend, 'shutdown'):
+            try:
+                self.backend.shutdown(wait=True)
+            except Exception:
+                # Ignore errors during cleanup (may already be shut down)
+                pass
 
     def visualize(
         self,

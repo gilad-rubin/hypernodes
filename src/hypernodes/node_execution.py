@@ -12,18 +12,18 @@ one node at a time. It doesn't know about orchestration, parallelism, or graph
 traversal.
 """
 
-import hashlib
-import time
 import asyncio
+import hashlib
 import inspect
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from .cache import compute_signature, hash_code, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
 
 if TYPE_CHECKING:
-    from .pipeline import Pipeline
     from .node import Node
+    from .pipeline import Pipeline
 
 
 def _get_node_id(node) -> str:

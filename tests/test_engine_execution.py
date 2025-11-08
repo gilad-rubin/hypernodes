@@ -3,7 +3,7 @@
 These tests verify that the HypernodesEngine correctly orchestrates pipeline execution
 using different executors (sequential, async, threaded, parallel).
 
-Note: After merging, the orchestrator is now internal to the engine.
+Note: After merging, the engine execution is now internal to the engine.
 """
 
 import pytest
@@ -18,10 +18,10 @@ from hypernodes.executors import SequentialExecutor, AsyncExecutor
 from hypernodes.engine import HypernodesEngine
 
 
-class TestOrchestratorBasic:
-    """Test basic orchestrator functionality."""
+class TestEngineExecutionBasic:
+    """Test basic engine execution functionality."""
 
-    def test_orchestrator_sequential(self):
+    def test_sequential(self):
         """Test engine orchestration with sequential executor."""
         @node(output_name="doubled")
         def double(x: int) -> int:
@@ -38,7 +38,7 @@ class TestOrchestratorBasic:
 
         assert result == {"doubled": 10, "result": 20}
 
-    def test_orchestrator_threaded(self):
+    def test_threaded(self):
         """Test engine orchestration with ThreadPoolExecutor."""
         @node(output_name="a")
         def slow_a(x: int) -> int:
@@ -67,7 +67,7 @@ class TestOrchestratorBasic:
 
         engine.shutdown(wait=True)
 
-    def test_orchestrator_async(self):
+    def test_async(self):
         """Test engine orchestration with AsyncExecutor."""
         @node(output_name="a")
         async def slow_a(x: int) -> int:
@@ -96,7 +96,7 @@ class TestOrchestratorBasic:
 
         engine.shutdown(wait=True)
 
-    def test_orchestrator_async_map(self):
+    def test_async_map(self):
         """Test engine map operation with AsyncExecutor."""
         @node(output_name="doubled")
         async def double(x: int) -> int:
@@ -121,13 +121,11 @@ class TestOrchestratorBasic:
 
         engine.shutdown(wait=True)
 
-    @pytest.mark.skip(reason="ProcessPoolExecutor has pickling limitations with local functions and pipeline objects")
-    def test_orchestrator_parallel(self):
-        """Test engine orchestration with ProcessPoolExecutor.
+    def test_parallel_execution(self):
+        """Test engine with parallel executor using cloudpickle.
 
-        Note: This test is skipped due to ProcessPoolExecutor's pickling limitations.
-        Nodes with closures and Pipeline objects containing locks cannot be pickled.
-        For parallel execution, use ThreadPoolExecutor or AsyncExecutor instead.
+        Uses CloudpickleProcessPoolExecutor which can handle local functions
+        and closures that standard ProcessPoolExecutor cannot pickle.
         """
         @node(output_name="a")
         def slow_a(x: int) -> int:
@@ -144,7 +142,8 @@ class TestOrchestratorBasic:
             return a + b
 
         pipeline = Pipeline(nodes=[slow_a, slow_b, combine])
-        engine = HypernodesEngine(node_executor=ProcessPoolExecutor(max_workers=2))
+        # Use "parallel" string to get CloudpickleProcessPoolExecutor
+        engine = HypernodesEngine(node_executor="parallel", max_workers=2)
 
         start = time.time()
         result = engine.run(pipeline, {"x": 5})
@@ -152,17 +151,17 @@ class TestOrchestratorBasic:
 
         assert result == {"a": 10, "b": 15, "result": 25}
         # Should execute a and b in parallel (~0.05s), then combine
-        assert duration < 0.2  # More overhead than threads, so allow more time
+        # Loky has significant initialization overhead on first use
+        assert duration < 0.7  # Loky initialization + process spawning overhead
 
         engine.shutdown(wait=True)
 
-    @pytest.mark.skip(reason="ProcessPoolExecutor has pickling limitations with local functions and pipeline objects")
-    def test_orchestrator_parallel_map(self):
-        """Test engine map operation with ProcessPoolExecutor.
+    def test_parallel_map(self):
+        """Test engine map operation with parallel executor using loky.
 
-        Note: This test is skipped due to ProcessPoolExecutor's pickling limitations.
-        Nodes with closures and Pipeline objects containing locks cannot be pickled.
-        For parallel map execution, use ThreadPoolExecutor or AsyncExecutor instead.
+        Uses loky's get_reusable_executor which provides transparent cloudpickle support,
+        enabling parallel map execution by using a module-level function instead of
+        a bound method.
         """
         @node(output_name="doubled")
         def double(x: int) -> int:
@@ -170,7 +169,8 @@ class TestOrchestratorBasic:
             return x * 2
 
         pipeline = Pipeline(nodes=[double])
-        engine = HypernodesEngine(map_executor=ProcessPoolExecutor(max_workers=3))
+        # Use "parallel" string to get loky executor
+        engine = HypernodesEngine(map_executor="parallel", max_workers=3)
 
         items = [{"x": 1}, {"x": 2}, {"x": 3}]
 
@@ -183,11 +183,12 @@ class TestOrchestratorBasic:
         assert results[1] == {"doubled": 4}
         assert results[2] == {"doubled": 6}
         # Should process items in parallel (~0.05s), not sequentially (0.15s)
-        assert duration < 0.2  # More overhead for process spawning
+        # Loky has significant initialization overhead on first use
+        assert duration < 0.8  # Loky initialization + process spawning overhead
 
         engine.shutdown(wait=True)
 
-    def test_orchestrator_linear_pipeline(self):
+    def test_linear_pipeline(self):
         """Test engine orchestration with linear dependency chain."""
         @node(output_name="step1")
         def first(x: int) -> int:
@@ -209,10 +210,10 @@ class TestOrchestratorBasic:
         assert result == {"step1": 6, "step2": 12, "step3": 22}
 
 
-class TestOrchestratorOutputFiltering:
+class TestEngineExecutionOutputFiltering:
     """Test engine output filtering."""
 
-    def test_orchestrator_output_name_filtering(self):
+    def test_output_name_filtering(self):
         """Test engine respects output_name parameter."""
         @node(output_name="a")
         def compute_a(x: int) -> int:
@@ -237,7 +238,7 @@ class TestOrchestratorOutputFiltering:
         assert "a" not in result  # Dependency was computed but not in output
         assert "c" not in result  # c was not computed
 
-    def test_orchestrator_output_name_list_filtering(self):
+    def test_output_name_list_filtering(self):
         """Test engine respects output_name parameter with list of outputs."""
         @node(output_name="a")
         def compute_a(x: int) -> int:
@@ -267,10 +268,10 @@ class TestOrchestratorOutputFiltering:
         assert "d" not in result  # Not computed
 
 
-class TestOrchestratorCaching:
+class TestEngineExecutionCaching:
     """Test engine with caching."""
 
-    def test_orchestrator_with_cache(self):
+    def test_with_cache(self):
         """Test engine leverages caching."""
         @node(output_name="a", cache=True)
         def compute_a(x: int) -> int:
@@ -298,10 +299,10 @@ class TestOrchestratorCaching:
         cache.clear()
 
 
-class TestOrchestratorCallbacks:
+class TestEngineExecutionCallbacks:
     """Test engine triggers callbacks."""
 
-    def test_orchestrator_callbacks(self):
+    def test_callbacks(self):
         """Test engine triggers callbacks."""
         events = []
 
@@ -334,7 +335,7 @@ class TestOrchestratorCallbacks:
         assert "pipeline_end" in events
 
 
-class TestOrchestratorMultipleInputs:
+class TestEngineExecutionMultipleInputs:
     """Test engine with multiple input parameters."""
 
     def test_multiple_inputs(self):

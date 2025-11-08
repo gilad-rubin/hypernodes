@@ -9,18 +9,16 @@ Key principle: Everything uses the same interface:
 
 This works for:
 - SequentialExecutor (custom adapter)
-- AsyncExecutor (custom adapter)
+- AsyncExecutor (custom adapter with auto-wrapping for sync functions)
 - ThreadPoolExecutor (stdlib)
 - ProcessPoolExecutor (stdlib)
 """
 
 import asyncio
-import inspect
 import os
 import threading
 from concurrent.futures import Future
 from typing import Any, Callable
-
 
 # Default worker counts for different execution strategies
 DEFAULT_WORKERS = {
@@ -76,8 +74,10 @@ class AsyncExecutor:
     """Adapter that provides submit() interface for asyncio-based concurrent execution.
 
     This executor runs async functions concurrently using asyncio in a background thread.
-    It can also handle sync functions by running them in the executor.
-
+    It automatically handles both async and sync functions:
+    - async functions run directly in the event loop
+    - sync functions are auto-wrapped to run in thread pool via run_in_executor
+    
     Useful for:
     - I/O-bound workloads (API calls, file I/O, database queries)
     - High-concurrency scenarios (100+ concurrent tasks)
@@ -85,6 +85,7 @@ class AsyncExecutor:
 
     Note: This executor runs an event loop in a background thread, allowing
     async tasks to execute concurrently while providing a sync interface.
+    Works in Jupyter notebooks without "event loop already running" errors.
     """
 
     def __init__(self, max_workers: int = DEFAULT_WORKERS["async"]):
@@ -97,7 +98,21 @@ class AsyncExecutor:
         self._loop = None
         self._thread = None
         self._semaphore = None
+        self._in_jupyter = self._detect_jupyter()
         self._start_loop()
+
+    def _detect_jupyter(self) -> bool:
+        """Detect if running in Jupyter/IPython environment."""
+        try:
+            # Check if IPython is available and get_ipython is defined
+            from IPython import get_ipython
+            ipython = get_ipython()
+            # Check if it's a ZMQInteractiveShell (Jupyter) or TerminalInteractiveShell
+            if ipython is not None:
+                return True
+        except (ImportError, NameError):
+            pass
+        return False
 
     def _start_loop(self):
         """Start event loop in background thread."""
@@ -123,8 +138,14 @@ class AsyncExecutor:
     def submit(self, fn: Callable, *args: Any, **kwargs: Any) -> Future:
         """Execute function concurrently using asyncio.
 
-        Handles both async and sync functions. Async functions run directly,
-        sync functions run in executor pool.
+        Automatically handles both async and sync functions:
+        - Async functions (async def): Run directly in event loop
+        - Sync functions (def): Wrapped to run in thread pool via run_in_executor
+        
+        This allows mixing async and sync functions in the same pipeline while
+        getting concurrency benefits for both. Sync functions with blocking I/O
+        (time.sleep, requests, file I/O) will run in threads without blocking
+        the event loop.
 
         Args:
             fn: Function to execute (can be async or sync)
@@ -138,11 +159,16 @@ class AsyncExecutor:
             """Run function with concurrency control."""
             async with self._semaphore:
                 if asyncio.iscoroutinefunction(fn):
-                    # Async function - await directly
+                    # Async function - await directly in event loop
                     return await fn(*args, **kwargs)
                 else:
-                    # Sync function - run in executor
-                    return await self._loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+                    # Sync function - run in thread pool to avoid blocking
+                    # This wraps blocking operations (time.sleep, requests, etc.)
+                    # so they execute concurrently via threading
+                    return await self._loop.run_in_executor(
+                        None, 
+                        lambda: fn(*args, **kwargs)
+                    )
 
         # Schedule coroutine in background loop
         future = asyncio.run_coroutine_threadsafe(run_with_semaphore(), self._loop)
