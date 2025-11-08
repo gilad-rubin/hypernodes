@@ -18,7 +18,9 @@
 
 ## Advanced
 
-* [☁️ Modal Backend](advanced/modal-backend.md)
+* [⚡ Execution Engines](advanced/execution-engines.md)
+* [🔄 Async Auto-Wrapping](advanced/async-autowrap.md)
+* [🐼 DaftEngine (Distributed DataFrames)](advanced/daft-engine.md)
 
 ## Integrations
 

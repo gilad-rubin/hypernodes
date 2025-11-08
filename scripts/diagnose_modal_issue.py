@@ -65,7 +65,7 @@ def test_2_simple_pipeline():
     )
     
     backend = ModalBackend(image=image, timeout=60)
-    pipeline = Pipeline(nodes=[add_one]).with_backend(backend)
+    pipeline = Pipeline(nodes=[add_one]).with_engine(backend)
     
     try:
         result = pipeline.run(inputs={"x": 5})
@@ -101,7 +101,7 @@ def test_3_slow_execution():
     )
     
     backend = ModalBackend(image=image, timeout=120)  # 2 minute timeout
-    pipeline = Pipeline(nodes=[slow_task]).with_backend(backend)
+    pipeline = Pipeline(nodes=[slow_task]).with_engine(backend)
     
     try:
         print("Running 30-second task on Modal...")
@@ -161,7 +161,7 @@ def test_4_image_with_dependencies():
     )
     
     backend = ModalBackend(image=image, timeout=120)
-    pipeline = Pipeline(nodes=[test_imports]).with_backend(backend)
+    pipeline = Pipeline(nodes=[test_imports]).with_engine(backend)
     
     try:
         result = pipeline.run(inputs={"x": 21})
@@ -203,7 +203,7 @@ def test_5_with_progress():
         image=image,
         timeout=120,
     )
-    pipeline = Pipeline(nodes=[process_items]).with_backend(backend)
+    pipeline = Pipeline(nodes=[process_items]).with_engine(backend)
     
     try:
         result = pipeline.run(inputs={"items": [1, 2, 3, 4, 5]})

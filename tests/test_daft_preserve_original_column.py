@@ -53,7 +53,7 @@ def test_daft_preserve_original_column_for_downstream():
     # Both mapped transform and downstream builder should coexist
     pipeline = Pipeline(
         nodes=[create_items, process_many, build_index_from_original],
-        backend=DaftEngine(),
+        engine=DaftEngine(),
         name="test_preserve_original",
     )
 

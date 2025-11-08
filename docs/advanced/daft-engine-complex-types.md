@@ -1,8 +1,8 @@
-# DaftBackend: Handling Complex Types
+# DaftEngine: Handling Complex Types
 
 ## Overview
 
-The DaftBackend automatically handles complex Python types (Pydantic models, Lists, Dicts, nested structures) by using Daft's Python object storage feature. This makes it work seamlessly with any HyperNodes pipeline without requiring code changes.
+The DaftEngine automatically handles complex Python types (Pydantic models, Lists, Dicts, nested structures) by using Daft's Python object storage feature. This makes it work seamlessly with any HyperNodes pipeline without requiring code changes.
 
 ## The Problem
 
@@ -20,7 +20,7 @@ TypeError: DataType._infer expects a DataType, string, or type
 
 ## The Solution
 
-DaftBackend automatically detects complex types and uses `daft.DataType.python()` to store them as Python objects. This approach:
+DaftEngine automatically detects complex types and uses `daft.DataType.python()` to store them as Python objects. This approach:
 
 1. **Works for all types** - No special handling needed
 2. **Zero code changes** - Existing HyperNodes code works as-is
@@ -66,7 +66,7 @@ else:
 from pydantic import BaseModel
 from typing import List
 from hypernodes import node, Pipeline
-from hypernodes.daft_backend import DaftBackend
+from hypernodes.engines import DaftEngine
 
 class Document(BaseModel):
     id: str
@@ -76,7 +76,7 @@ class Document(BaseModel):
 def create_documents(count: int) -> List[Document]:
     return [Document(id=f"doc_{i}", text=f"Text {i}") for i in range(count)]
 
-pipeline = Pipeline(nodes=[create_documents], backend=DaftBackend())
+pipeline = Pipeline(nodes=[create_documents], engine=DaftEngine())
 result = pipeline.run(inputs={"count": 3})
 # result["documents"] = [Document(...), Document(...), Document(...)]
 ```
@@ -99,7 +99,7 @@ def encode_document(document: Document) -> EncodedDocument:
 
 pipeline = Pipeline(
     nodes=[create_documents, encode_document],
-    backend=DaftBackend()
+    engine=DaftEngine()
 )
 # Works seamlessly!
 ```
@@ -113,7 +113,7 @@ from typing import Dict, Any
 def create_config(name: str) -> Dict[str, Any]:
     return {"name": name, "value": 42, "nested": {"key": "value"}}
 
-pipeline = Pipeline(nodes=[create_config], backend=DaftBackend())
+pipeline = Pipeline(nodes=[create_config], engine=DaftEngine())
 result = pipeline.run(inputs={"name": "test"})
 # result["config"] = {"name": "test", "value": 42, ...}
 ```
@@ -125,7 +125,7 @@ result = pipeline.run(inputs={"name": "test"})
 def create_single_document(text: str, idx: int) -> Document:
     return Document(id=f"doc_{idx}", text=text)
 
-pipeline = Pipeline(nodes=[create_single_document], backend=DaftBackend())
+pipeline = Pipeline(nodes=[create_single_document], engine=DaftEngine())
 
 results = pipeline.map(
     inputs={
@@ -193,7 +193,7 @@ The trade-off is that Daft can't optimize these columns as efficiently, but for 
 
 ### When to Use Each Approach
 
-**Use Python Storage (DaftBackend default):**
+**Use Python Storage (DaftEngine default):**
 - Complex nested structures
 - Pydantic models with many fields
 - Custom classes with methods
@@ -207,13 +207,13 @@ The trade-off is that Daft can't optimize these columns as efficiently, but for 
 
 ## Testing
 
-The DaftBackend includes comprehensive tests for complex types:
+The DaftEngine includes comprehensive tests for complex types:
 
 ```bash
 # Run complex type tests
 uv run pytest tests/test_daft_backend_complex_types.py -v
 
-# Run all DaftBackend tests
+# Run all DaftEngine tests
 uv run pytest tests/test_daft_backend*.py -v
 ```
 

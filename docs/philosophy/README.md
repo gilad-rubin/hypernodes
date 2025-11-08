@@ -4,5 +4,5 @@
 - Cache-first
 - Test with one, scale to many
 - Hierarchical composition
-- Backend agnostic
+- Flexible execution (choose the right executor for your workload)
 - Observable by default

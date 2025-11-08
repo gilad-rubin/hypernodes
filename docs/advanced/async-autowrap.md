@@ -39,7 +39,7 @@ def blocking_fn(x: int) -> int:
 # AsyncExecutor auto-wraps blocking_fn to run in thread pool
 pipeline = Pipeline(
     nodes=[blocking_fn],
-    backend=HypernodesEngine(map_executor="async")
+    engine=HypernodesEngine(map_executor="async")
 )
 
 # 10 items complete in ~0.1s (concurrent), not 1.0s (sequential)
@@ -73,7 +73,7 @@ def save_to_disk(enriched: dict) -> str:
 # All three node types work together seamlessly!
 pipeline = Pipeline(
     nodes=[fetch_from_disk, enrich_with_api, save_to_disk],
-    backend=HypernodesEngine(node_executor=AsyncExecutor())
+    engine=HypernodesEngine(node_executor=AsyncExecutor())
 )
 ```
 
@@ -83,7 +83,7 @@ pipeline = Pipeline(
 # Process many items concurrently with custom worker count
 pipeline = Pipeline(
     nodes=[expensive_io_node],
-    backend=HypernodesEngine(
+    engine=HypernodesEngine(
         map_executor=AsyncExecutor(max_workers=100)  # High concurrency
     )
 )
@@ -111,7 +111,7 @@ print(f"Running in Jupyter: {executor._in_jupyter}")  # True in notebooks
 
 pipeline = Pipeline(
     nodes=[my_node],
-    backend=HypernodesEngine(map_executor=executor)
+    engine=HypernodesEngine(map_executor=executor)
 )
 # No errors! 🎉
 ```
@@ -156,7 +156,7 @@ async def process_item(x: int) -> int:
 
 pipeline = Pipeline(
     nodes=[process_item],
-    backend=HypernodesEngine(map_executor="async")
+    engine=HypernodesEngine(map_executor="async")
 )
 ```
 
@@ -171,7 +171,7 @@ def process_item(x: int) -> int:
 
 pipeline = Pipeline(
     nodes=[process_item],
-    backend=HypernodesEngine(map_executor="async")
+    engine=HypernodesEngine(map_executor="async")
 )
 # Same concurrent performance! 🚀
 ```

@@ -45,7 +45,7 @@ def main():
     
     # Create pipeline
     print("\nCreating pipeline...")
-    pipeline = Pipeline(nodes=[add_one]).with_backend(backend)
+    pipeline = Pipeline(nodes=[add_one]).with_engine(backend)
     print("✓ Pipeline created")
     
     # Run on Modal

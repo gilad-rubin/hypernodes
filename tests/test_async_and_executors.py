@@ -27,13 +27,13 @@ def test_async_native_faster_than_per_call():
 
     # per_call strategy
     eng_per = HypernodesEngine(map_executor=AsyncExecutor(max_workers=60), async_strategy="per_call")
-    p_per = Pipeline(nodes=[_async_sleep], backend=eng_per)
+    p_per = Pipeline(nodes=[_async_sleep], engine=eng_per)
     t0 = time.time(); p_per.map(inputs={"d": delays}, map_over="d"); per_time = time.time() - t0
     eng_per.shutdown()
 
     # async_native strategy
     eng_nat = HypernodesEngine(map_executor=AsyncExecutor(max_workers=60), async_strategy="async_native")
-    p_nat = Pipeline(nodes=[_async_sleep], backend=eng_nat)
+    p_nat = Pipeline(nodes=[_async_sleep], engine=eng_nat)
     t0 = time.time(); p_nat.map(inputs={"d": delays}, map_over="d"); nat_time = time.time() - t0
     eng_nat.shutdown()
 
@@ -46,7 +46,7 @@ def test_async_auto_matches_pure_async_within_50_percent():
 
     # Hypernodes auto async-native
     eng = HypernodesEngine(map_executor=AsyncExecutor(max_workers=60))
-    p = Pipeline(nodes=[_async_sleep], backend=eng)
+    p = Pipeline(nodes=[_async_sleep], engine=eng)
     t0 = time.time(); p.map(inputs={"d": delays}, map_over="d"); hn_time = time.time() - t0
     eng.shutdown()
 
@@ -64,12 +64,12 @@ def test_async_executor_sync_respects_max_workers():
     delays = [0.02] * 40
 
     eng_5 = HypernodesEngine(map_executor=AsyncExecutor(max_workers=5))
-    p5 = Pipeline(nodes=[_sync_sleep], backend=eng_5)
+    p5 = Pipeline(nodes=[_sync_sleep], engine=eng_5)
     t0 = time.time(); p5.map(inputs={"d": delays}, map_over="d"); t5 = time.time() - t0
     eng_5.shutdown()
 
     eng_20 = HypernodesEngine(map_executor=AsyncExecutor(max_workers=20))
-    p20 = Pipeline(nodes=[_sync_sleep], backend=eng_20)
+    p20 = Pipeline(nodes=[_sync_sleep], engine=eng_20)
     t0 = time.time(); p20.map(inputs={"d": delays}, map_over="d"); t20 = time.time() - t0
     eng_20.shutdown()
 
@@ -80,12 +80,12 @@ def test_async_vs_threaded_equivalence_for_sync_blocking():
     delays = [0.02] * 40
 
     eng_async = HypernodesEngine(map_executor=AsyncExecutor(max_workers=20))
-    p_async = Pipeline(nodes=[_sync_sleep], backend=eng_async)
+    p_async = Pipeline(nodes=[_sync_sleep], engine=eng_async)
     t0 = time.time(); p_async.map(inputs={"d": delays}, map_over="d"); t_async = time.time() - t0
     eng_async.shutdown()
 
     eng_thread = HypernodesEngine(map_executor=ThreadPoolExecutor(max_workers=20))
-    p_thread = Pipeline(nodes=[_sync_sleep], backend=eng_thread)
+    p_thread = Pipeline(nodes=[_sync_sleep], engine=eng_thread)
     t0 = time.time(); p_thread.map(inputs={"d": delays}, map_over="d"); t_thread = time.time() - t0
     eng_thread.shutdown()
 
@@ -97,7 +97,7 @@ def test_pipeline_run_inside_running_event_loop_not_error():
     # Call sync pipeline.run from inside an event loop; should offload safely
     async def main():
         eng = HypernodesEngine(map_executor=AsyncExecutor(max_workers=10))
-        p = Pipeline(nodes=[_async_sleep], backend=eng)
+        p = Pipeline(nodes=[_async_sleep], engine=eng)
         try:
             res = p.run(inputs={"d": 0.001})
             assert res["async_out"] == 0.001
@@ -109,7 +109,7 @@ def test_pipeline_run_inside_running_event_loop_not_error():
 
 def test_parallel_executor_reuse_and_no_worker_stop_warning():
     delays = [0.02] * 24
-    p = Pipeline(nodes=[_sync_sleep], backend=HypernodesEngine(map_executor="parallel", max_workers=2,))
+    p = Pipeline(nodes=[_sync_sleep], engine=HypernodesEngine(map_executor="parallel", max_workers=2,))
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

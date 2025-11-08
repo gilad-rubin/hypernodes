@@ -116,7 +116,7 @@ text_pipeline_hn = Pipeline(
 # Test with different execution modes
 for exec_mode in ["sequential", "threaded"]:
     backend = LocalBackend(node_execution=exec_mode, map_execution=exec_mode)
-    pipeline_with_backend = text_pipeline_hn.with_backend(backend)
+    pipeline_with_backend = text_pipeline_hn.with_engine(backend)
     start = time.perf_counter()
     results_hn = pipeline_with_backend.map(inputs={"text": texts}, map_over="text")
     elapsed_hn = time.perf_counter() - start
@@ -218,7 +218,7 @@ def encode_text_hn(text: str, encoder: SimpleEncoder) -> np.ndarray:
 encode_pipeline_hn = Pipeline(nodes=[encode_text_hn], name="encode_hn")
 
 backend_seq = LocalBackend(node_execution="sequential", map_execution="sequential")
-pipeline_encode_hn = encode_pipeline_hn.with_backend(backend_seq)
+pipeline_encode_hn = encode_pipeline_hn.with_engine(backend_seq)
 start = time.perf_counter()
 results_encode_hn = pipeline_encode_hn.map(
     inputs={"text": encode_texts, "encoder": encoder_hn},
@@ -279,7 +279,7 @@ def normalize_value_hn(value: float, mean: float, std: float) -> float:
 norm_pipeline_hn = Pipeline(nodes=[normalize_value_hn], name="normalize_hn")
 
 backend_threaded = LocalBackend(node_execution="threaded", map_execution="threaded")
-pipeline_norm_hn = norm_pipeline_hn.with_backend(backend_threaded)
+pipeline_norm_hn = norm_pipeline_hn.with_engine(backend_threaded)
 start = time.perf_counter()
 results_norm_hn = pipeline_norm_hn.map(
     inputs={"value": values, "mean": mean_val, "std": std_val},
@@ -387,7 +387,7 @@ encoder_nested = FastEncoder(dim=64)
 encode_doc_pipeline = Pipeline(nodes=[encode_document_hn], name="encode_docs")
 
 backend_nested = LocalBackend(node_execution="threaded", map_execution="threaded")
-pipeline_encode_docs = encode_doc_pipeline.with_backend(backend_nested)
+pipeline_encode_docs = encode_doc_pipeline.with_engine(backend_nested)
 start_docs = time.perf_counter()
 encoded_docs_results = pipeline_encode_docs.map(
     inputs={"doc": documents, "encoder": encoder_nested},
@@ -399,7 +399,7 @@ elapsed_encode_docs = time.perf_counter() - start_docs
 # Search for each query
 search_pipeline = Pipeline(nodes=[encode_query_hn, search_hn], name="search_pipeline")
 
-pipeline_search = search_pipeline.with_backend(backend_nested)
+pipeline_search = search_pipeline.with_engine(backend_nested)
 start_search = time.perf_counter()
 search_results_hn = pipeline_search.map(
     inputs={
@@ -495,7 +495,7 @@ def tokenize_to_list_hn(text: str) -> List[str]:
 
 
 tokenize_pipeline_hn = Pipeline(nodes=[tokenize_to_list_hn], name="tokenize")
-pipeline_tokenize = tokenize_pipeline_hn.with_backend(backend_seq)
+pipeline_tokenize = tokenize_pipeline_hn.with_engine(backend_seq)
 
 start = time.perf_counter()
 results_gen_hn = pipeline_tokenize.map(inputs={"text": sentences}, map_over="text")

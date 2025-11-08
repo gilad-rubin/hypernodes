@@ -157,7 +157,7 @@ def test_modal_setup():
         timeout=120,
     )
     
-    pipeline = Pipeline(nodes=[test_imports]).with_backend(backend)
+    pipeline = Pipeline(nodes=[test_imports]).with_engine(backend)
     
     print("Testing Modal setup...")
     result = pipeline.run(inputs={})
@@ -198,7 +198,7 @@ if __name__ == "__main__":
             print("\n1. Update your pipeline code to use:")
             print("   from scripts.fix_modal_hebrew_example import create_modal_backend_recommended")
             print("   backend = create_modal_backend_recommended()")
-            print("   pipeline = pipeline.with_backend(backend)")
+            print("   pipeline = pipeline.with_engine(backend)")
             print("\n2. Run your Hebrew retrieval pipeline")
             print("\n3. If it still times out, increase timeout parameter")
             sys.exit(0)

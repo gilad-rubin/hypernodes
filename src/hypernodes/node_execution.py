@@ -59,9 +59,9 @@ def _get_node_id(node) -> str:
 
 
 def _get_sync_runner_strategy(pipeline: "Pipeline") -> str:
-    """Determine how to run coroutines for this pipeline's backend."""
-    backend = getattr(pipeline, "effective_backend", None)
-    strategy = getattr(backend, "async_strategy", "per_call")
+    """Determine how to run coroutines for this pipeline's engine."""
+    engine = getattr(pipeline, "effective_engine", None) or getattr(pipeline, "effective_backend", None)
+    strategy = getattr(engine, "async_strategy", "per_call")
     if strategy in ("thread_local", "auto", "async_native"):
         return "thread_local"
     return "per_call"

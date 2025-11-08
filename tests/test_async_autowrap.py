@@ -27,7 +27,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[blocking_fn],
-            backend=HypernodesEngine(map_executor=AsyncExecutor())
+            engine=HypernodesEngine(map_executor=AsyncExecutor())
         )
         
         # Run 5 items - should complete in ~0.1s (concurrent), not 0.5s (sequential)
@@ -48,7 +48,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[async_fn],
-            backend=HypernodesEngine(map_executor=AsyncExecutor())
+            engine=HypernodesEngine(map_executor=AsyncExecutor())
         )
         
         # Run 5 items - should complete in ~0.1s (concurrent)
@@ -78,7 +78,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[sync_node, async_node, final_node],
-            backend=HypernodesEngine(node_executor=AsyncExecutor())
+            engine=HypernodesEngine(node_executor=AsyncExecutor())
         )
         
         result = pipeline.run(inputs={"x": 5})
@@ -96,7 +96,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[complex_fn],
-            backend=HypernodesEngine(map_executor=AsyncExecutor())
+            engine=HypernodesEngine(map_executor=AsyncExecutor())
         )
         
         result = pipeline.run(inputs={"x": 42, "y": "test", "z": [1, 2, 3]})
@@ -115,7 +115,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[failing_fn],
-            backend=HypernodesEngine(map_executor=AsyncExecutor())
+            engine=HypernodesEngine(map_executor=AsyncExecutor())
         )
         
         # Should raise ValueError when processing x=2
@@ -146,7 +146,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[task1, task2, task3, combine],
-            backend=HypernodesEngine(node_executor=AsyncExecutor())
+            engine=HypernodesEngine(node_executor=AsyncExecutor())
         )
         
         # 3 independent tasks should run concurrently in ~0.1s, not 0.3s
@@ -167,7 +167,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[quick_fn],
-            backend=HypernodesEngine(map_executor=AsyncExecutor(max_workers=50))
+            engine=HypernodesEngine(map_executor=AsyncExecutor(max_workers=50))
         )
         
         # Run 20 items - should complete in ~0.05s if concurrent
@@ -195,7 +195,7 @@ class TestAsyncExecutorAutoWrapping:
         
         pipeline = Pipeline(
             nodes=[test_fn],
-            backend=HypernodesEngine(map_executor=executor)
+            engine=HypernodesEngine(map_executor=executor)
         )
         
         result = pipeline.run(inputs={"x": 5})

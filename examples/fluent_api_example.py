@@ -22,7 +22,7 @@ def example_basic_fluent():
     # Fluent way - more readable for complex configurations
     pipeline_fluent = (
         Pipeline(nodes=[double, add_ten], name="double_and_add")
-        .with_backend(LocalBackend())
+        .with_engine(LocalBackend())
         .with_cache(DiskCache(path=".cache"))
     )
     
@@ -40,7 +40,7 @@ def example_chaining():
     # Create pipeline with chained configuration
     pipeline = (
         Pipeline(nodes=[double, add_ten], name="double_and_add")
-        .with_backend(LocalBackend())
+        .with_engine(LocalBackend())
         .with_cache(DiskCache(path=".cache"))
     )
     
@@ -77,7 +77,7 @@ def example_modal_backend():
     
     pipeline = (
         Pipeline(nodes=[process, transform, aggregate], name="process_transform_aggregate")
-        .with_backend(ModalBackend(
+        .with_engine(ModalBackend(
             image=image,
             gpu="A100",
             memory="32GB"

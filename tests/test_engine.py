@@ -52,13 +52,10 @@ class TestEngineExecutorResolution:
         engine = HypernodesEngine(node_executor="threaded")
         assert isinstance(engine.node_executor, ThreadPoolExecutor)
 
-    def test_engine_string_executor_parallel(self):
-        """Test engine resolves 'parallel' executor to CloudpickleProcessPoolExecutor."""
-        engine = HypernodesEngine(node_executor="parallel")
-        # Parallel executor is loky or ProcessPoolExecutor
-        # Verify it has the concurrent.futures.Executor interface
-        assert hasattr(engine.node_executor, "submit") and hasattr(engine.node_executor, "shutdown")
-        engine.node_executor.shutdown(wait=True)
+    def test_engine_string_executor_parallel_disabled_for_node(self):
+        """Node-level 'parallel' is disabled; users must use 'threaded' or map_executor='parallel'."""
+        with pytest.raises(ValueError):
+            HypernodesEngine(node_executor="parallel")
 
     def test_engine_string_executor_async(self):
         """Test engine resolves 'async' executor."""

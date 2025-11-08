@@ -1,16 +1,16 @@
-# DaftBackend Implementation Summary
+# DaftEngine Implementation Summary
 
 ## Overview
 
-The `DaftBackend` is a new execution backend for HyperNodes that automatically converts pipelines into [Daft](https://www.getdaft.io/) DataFrames using next-generation UDFs. This provides lazy evaluation, automatic optimization, and high-performance execution with zero code changes to existing pipelines.
+The `DaftEngine` is a new execution backend for HyperNodes that automatically converts pipelines into [Daft](https://www.getdaft.io/) DataFrames using next-generation UDFs. This provides lazy evaluation, automatic optimization, and high-performance execution with zero code changes to existing pipelines.
 
 ## What Was Built
 
 ### Core Implementation
 
-**File**: `src/hypernodes/daft_backend.py`
+**File**: `src/hypernodes/integrations/daft/engine.py`
 
-The DaftBackend class implements the `Backend` interface and provides:
+The DaftEngine class implements the `Backend` interface and provides:
 
 1. **Automatic Node-to-UDF Conversion**: Regular HyperNodes nodes are automatically converted to `@daft.func` UDFs
 2. **Map Operation Translation**: `.map()` calls become DataFrame operations over multiple rows
@@ -28,7 +28,7 @@ The DaftBackend class implements the `Backend` interface and provides:
 
 ### Test Coverage
 
-**File**: `tests/test_daft_backend.py`
+**File**: `tests/test_integrations/daft/engine.py`
 
 Comprehensive test suite with 12 tests covering:
 - Single node execution
@@ -41,8 +41,8 @@ Comprehensive test suite with 12 tests covering:
 - Selective output
 - String operations
 
-**Results**: ✅ All 12 DaftBackend tests pass
-**Compatibility**: ✅ All 15 existing Phase 1 & 2 tests pass with LocalBackend
+**Results**: ✅ All 12 DaftEngine tests pass
+**Compatibility**: ✅ All 15 existing Phase 1 & 2 tests pass with HypernodesEngine
 
 ## Usage Examples
 
@@ -50,13 +50,13 @@ Comprehensive test suite with 12 tests covering:
 
 ```python
 from hypernodes import node, Pipeline
-from hypernodes.daft_backend import DaftBackend
+from hypernodes.engines import DaftEngine
 
 @node(output_name="result")
 def add_one(x: int) -> int:
     return x + 1
 
-pipeline = Pipeline(nodes=[add_one], backend=DaftBackend())
+pipeline = Pipeline(nodes=[add_one], engine=DaftEngine())
 result = pipeline.run(inputs={"x": 5})
 # result == {"result": 6}
 ```
@@ -68,7 +68,7 @@ result = pipeline.run(inputs={"x": 5})
 def double(x: int) -> int:
     return x * 2
 
-pipeline = Pipeline(nodes=[double], backend=DaftBackend())
+pipeline = Pipeline(nodes=[double], engine=DaftEngine())
 results = pipeline.map(inputs={"x": [1, 2, 3, 4, 5]}, map_over="x")
 # results == {"doubled": [2, 4, 6, 8, 10]}
 ```
@@ -76,7 +76,7 @@ results = pipeline.map(inputs={"x": [1, 2, 3, 4, 5]}, map_over="x")
 ### Execution Plan Visualization
 
 ```python
-backend = DaftBackend(show_plan=True)
+backend = DaftEngine(show_plan=True)
 pipeline = Pipeline(nodes=[...], backend=backend)
 result = pipeline.run(inputs={...})
 # Prints optimized execution plan
@@ -97,7 +97,7 @@ result = pipeline.run(inputs={...})
 
 3. **Translation Guide**: `notebooks/DAFT_TRANSLATION_GUIDE.md`
    - Existing guide showing HyperNodes → Daft patterns
-   - Complementary to DaftBackend implementation
+   - Complementary to DaftEngine implementation
 
 ## Architecture
 
@@ -106,7 +106,7 @@ result = pipeline.run(inputs={...})
 ```
 HyperNodes Pipeline
     ↓
-DaftBackend.run() / .map()
+DaftEngine.run() / .map()
     ↓
 Create DataFrame from inputs
     ↓
@@ -173,14 +173,14 @@ The current implementation focuses on correctness and compatibility. Future opti
 
 ### Test Organization
 
-1. **Unit Tests**: `tests/test_daft_backend.py`
+1. **Unit Tests**: `tests/test_integrations/daft/engine.py`
    - Test each feature in isolation
    - Cover edge cases (empty maps, nested pipelines)
    - Verify output correctness
 
 2. **Integration Tests**: Run existing test suite
    - Ensures backward compatibility
-   - Validates that DaftBackend behaves like LocalBackend
+   - Validates that DaftEngine behaves like HypernodesEngine
 
 3. **Example Scripts**: `examples/daft_backend_example.py`
    - End-to-end validation
@@ -190,8 +190,8 @@ The current implementation focuses on correctness and compatibility. Future opti
 ### Running Tests
 
 ```bash
-# DaftBackend tests only
-uv run pytest tests/test_daft_backend.py -v
+# DaftEngine tests only
+uv run pytest tests/test_integrations/daft/engine.py -v
 
 # All tests
 uv run pytest tests/ -v
@@ -202,7 +202,7 @@ uv run python examples/daft_backend_example.py
 
 ## Comparison with Other Backends
 
-| Feature | LocalBackend | DaftBackend | ModalBackend |
+| Feature | HypernodesEngine | DaftEngine | ModalBackend |
 |---------|--------------|-------------|--------------|
 | Execution | Configurable | Lazy + Optimized | Remote |
 | Parallelization | Manual | Automatic | Remote |
@@ -212,7 +212,7 @@ uv run python examples/daft_backend_example.py
 
 ## Integration with HyperNodes Ecosystem
 
-The DaftBackend integrates seamlessly with:
+The DaftEngine integrates seamlessly with:
 
 - ✅ **Pipeline**: Drop-in backend replacement
 - ✅ **Node**: All node types supported
@@ -224,7 +224,7 @@ The DaftBackend integrates seamlessly with:
 
 ## Conclusion
 
-The DaftBackend successfully demonstrates automatic conversion of HyperNodes pipelines to Daft DataFrames. It provides:
+The DaftEngine successfully demonstrates automatic conversion of HyperNodes pipelines to Daft DataFrames. It provides:
 
 - **Zero-friction adoption**: Works with existing code
 - **Performance benefits**: Lazy evaluation and optimization

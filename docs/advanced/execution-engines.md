@@ -4,327 +4,338 @@ HyperNodes supports multiple execution strategies to optimize pipeline performan
 
 ## Overview
 
-The `LocalBackend` provides four execution modes that can be independently configured for **node execution** (within a single pipeline run) and **map execution** (across multiple items):
+The `HypernodesEngine` provides execution modes through different **executors**:
 
-### Execution Modes
-
-1. **Sequential** (default): Nodes/items execute one at a time
+1. **Sequential**: Nodes/items execute one at a time (default, great for debugging)
 2. **Async**: Concurrent execution using `asyncio` (best for I/O-bound work)
-3. **Threaded**: Parallel execution using `ThreadPoolExecutor` (good for I/O + some CPU)
-4. **Parallel**: True multi-core parallelism using `ProcessPoolExecutor` (best for CPU-bound work)
+3. **Threaded**: Parallel execution using threads (good for I/O + some CPU)
+4. **Parallel (map only)**: True multi-core parallelism across map items using processes (best for CPU-bound per-item work)
 
-## Configuration
+You can independently configure:
+- **node_executor**: How nodes execute within a single pipeline run (sequential/async/threaded)
+- **map_executor**: How items execute across `pipeline.map()` calls (sequential/async/threaded/parallel)
+
+## Quick Start
 
 ```python
-from hypernodes import LocalBackend
+from hypernodes import Pipeline, HypernodesEngine
 
-# Configure node execution mode
-backend = LocalBackend(
-    node_execution="threaded",    # How nodes execute within pipeline.run()
-    map_execution="async",         # How items execute in pipeline.map()
-    max_workers=8                  # Max concurrent workers
+# Sequential execution (default)
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine()
 )
 
-pipeline.backend = backend
+# Async execution for I/O-bound workloads
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine(node_executor="async")
+)
+
+# Parallel map for CPU-bound workloads (node-level parallel is disabled)
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine(
+        node_executor="threaded",
+        map_executor="parallel",
+    )
+)
 ```
 
-## Node Execution Modes
-
-Controls how **independent nodes** within a single `pipeline.run()` execute:
+## Executor Types
 
 ### Sequential (Default)
+
 ```python
-backend = LocalBackend(node_execution="sequential")
+engine = HypernodesEngine(node_executor="sequential")
 ```
+
+**Behavior:**
 - Nodes execute one at a time in topological order
+- Items in `.map()` processed sequentially
 - Predictable, easy to debug
-- Best for: Development, debugging, simple pipelines
+- No concurrency overhead
+
+**Best for:**
+- Development and debugging
+- Simple pipelines
+- Small batches (<10 items)
 
 ### Async
+
 ```python
-backend = LocalBackend(node_execution="async")
+engine = HypernodesEngine(
+    node_executor="async",
+    map_executor="async"
+)
 ```
-- Independent nodes execute concurrently using `asyncio`
-- Nodes with no dependencies run at the same time
-- Single-process, no true parallelism
-- Best for: I/O-bound pipelines (API calls, file I/O, database queries)
+
+**Behavior:**
+- Uses asyncio for concurrent execution
+- Auto-wraps sync functions (no need to write async code!)
+- Independent nodes run concurrently
+- High concurrency (default: 100 concurrent tasks)
+
+**Best for:**
+- I/O-bound pipelines (API calls, file I/O, database queries)
+- High-latency operations
+- Large batches (100s+ items) with I/O
 
 **Example:**
 ```python
-# Pipeline: A → (B, C) → D
-# Sequential: A → B → C → D  (~0.4s if each takes 0.1s)
-# Async: A → (B || C) → D     (~0.3s, B and C run concurrently)
-```
+from hypernodes import Pipeline, node, HypernodesEngine
 
-### Threaded
-```python
-backend = LocalBackend(node_execution="threaded", max_workers=4)
-```
-- Independent nodes execute in parallel using threads
-- Overcomes GIL for I/O operations
-- Best for: Mixed I/O and CPU workloads
+@node(output_name="data")
+def fetch_api(url: str) -> dict:
+    """Sync function - auto-wrapped for async execution"""
+    import requests
+    return requests.get(url).json()
 
-### Parallel
-```python
-backend = LocalBackend(node_execution="parallel", max_workers=4)
-```
-- Independent nodes execute in true parallel using processes
-- Multiple CPU cores utilized
-- **Requires picklable functions and data**
-- Best for: CPU-bound work that can benefit from multiple cores
+@node(output_name="processed")
+def process(data: dict) -> dict:
+    return {"count": len(data)}
 
-**Note:** Process-based parallelism has overhead. Test to ensure it provides speedup for your workload.
+pipeline = Pipeline(
+    nodes=[fetch_api, process],
+    engine=HypernodesEngine(map_executor="async")
+)
 
-## Map Execution Modes
-
-Controls how **multiple items** are processed in `pipeline.map()`:
-
-### Sequential (Default)
-```python
-backend = LocalBackend(map_execution="sequential")
-```
-- Items processed one at a time
-- Simple loop: `for item in items: pipeline.run(item)`
-- Best for: Development, debugging, rate-limited APIs
-
-### Async
-```python
-backend = LocalBackend(map_execution="async", max_workers=10)
-```
-- Multiple items processed concurrently using `asyncio`
-- Items don't block each other during I/O
-- Best for: I/O-bound per-item work (e.g., API calls for each item)
-
-```python
-# Process 100 items with API calls
-backend = LocalBackend(map_execution="async", max_workers=20)
+# Process 100 URLs concurrently (not sequentially!)
 results = pipeline.map(
-    inputs={"url": urls},  # 100 URLs
+    inputs={"url": [f"https://api.example.com/item/{i}" for i in range(100)]},
     map_over="url"
 )
-# Sequential: ~100s (1s per item)
-# Async: ~5s (20 concurrent requests)
 ```
 
 ### Threaded
-```python
-backend = LocalBackend(map_execution="threaded", max_workers=8)
-```
-- Multiple items processed in parallel using threads
-- Good for I/O + CPU mixed workloads
-- Best for: Moderate CPU work per item with some I/O
 
-### Parallel
 ```python
-backend = LocalBackend(map_execution="parallel", max_workers=8)
+engine = HypernodesEngine(
+    node_executor="threaded",
+    map_executor="threaded"
+)
 ```
-- Multiple items processed in true parallel using processes
-- Utilizes multiple CPU cores
+
+**Behavior:**
+- Uses `ThreadPoolExecutor` for parallelism
+- Overcomes GIL for I/O operations
+- Moderate concurrency (default: CPU count)
+
+**Best for:**
+- Mixed I/O and CPU workloads
+- Operations that release the GIL (numpy, pandas, C extensions)
+- Moderate batch sizes (10-100 items)
+
+**Example:**
+```python
+import numpy as np
+from hypernodes import Pipeline, node, HypernodesEngine
+
+@node(output_name="matrix")
+def compute(size: int) -> np.ndarray:
+    """Numpy releases GIL - benefits from threading"""
+    return np.random.rand(size, size) @ np.random.rand(size, size)
+
+pipeline = Pipeline(
+    nodes=[compute],
+    engine=HypernodesEngine(map_executor="threaded")
+)
+
+# Process 20 matrix multiplications in parallel
+results = pipeline.map(
+    inputs={"size": [1000] * 20},
+    map_over="size"
+)
+```
+
+### Parallel Map (Multiprocessing)
+
+```python
+engine = HypernodesEngine(map_executor="parallel")
+```
+
+**Behavior:**
+- Uses `loky` (or `ProcessPoolExecutor` as fallback)
+- True multicore parallelism
 - **Requires picklable functions and data**
-- Best for: CPU-intensive per-item work, large batches
+- Higher startup overhead (~0.1-0.5s)
 
-## Mixing Execution Modes
+**Best for:**
+- CPU-bound per-item work (pure Python computation)
+- Large batches (100s+ items) with CPU-intensive per-item work
+- Operations >1s per item
 
-You can independently configure node and map execution:
-
+**Example:**
 ```python
-# Pattern 1: I/O-bound pipeline, small batch
-# Async nodes for I/O efficiency, sequential map to avoid overwhelming API
-backend = LocalBackend(
-    node_execution="async",
-    map_execution="sequential"
-)
+from hypernodes import Pipeline, node, HypernodesEngine
 
-# Pattern 2: CPU-bound nodes, large batch
-# Sequential nodes for simplicity, parallel map to distribute items
-backend = LocalBackend(
-    node_execution="sequential",
-    map_execution="parallel",
-    max_workers=8
-)
+@node(output_name="result")
+def cpu_intensive(n: int) -> int:
+    """Pure Python - benefits from multiprocessing"""
+    def fib(x):
+        return x if x < 2 else fib(x-1) + fib(x-2)
+    return fib(n)
 
-# Pattern 3: Maximum concurrency
-# Both async for I/O-heavy workloads
-backend = LocalBackend(
-    node_execution="async",
-    map_execution="async",
-    max_workers=20
+pipeline = Pipeline(nodes=[cpu_intensive], engine=HypernodesEngine(map_executor="parallel"))
+
+# Compute 8 fibonacci numbers in parallel across CPU cores
+results = pipeline.map(
+    inputs={"n": [35, 36, 37, 38, 35, 36, 37, 38]},
+    map_over="n"
 )
 ```
 
-## Intelligent Resource Management
+## Node-Level Parallelism
 
-HyperNodes automatically manages resources for **nested map operations** to prevent exponential explosion of concurrent tasks:
-
-```python
-# Outer: 100 items, each with inner: 50 sub-items = 5000 total operations
-# Without management: 5000 parallel tasks (overwhelms system!)
-# With management: Intelligently limits concurrency
-
-backend = LocalBackend(map_execution="threaded", max_workers=8)
-
-# Top-level map: Uses full 8 workers
-# Nested map (depth=1): Reduces to sqrt(8) ≈ 3 workers
-# Deeper nesting (depth=2+): Sequential to prevent explosion
-```
-
-**Algorithm:**
-- **Depth 0** (top level): `min(max_workers, num_items)`
-- **Depth 1** (first nested): `min(sqrt(max_workers), num_items)`
-- **Depth 2+** (deeper nesting): `1` (sequential)
-
-## Custom Executors
-
-You can provide your own executor (e.g., from `concurrent.futures` or `joblib`):
+The engine automatically detects independent nodes and runs them in parallel:
 
 ```python
-from concurrent.futures import ThreadPoolExecutor
-
-# Create custom executor with specific configuration
-custom_executor = ThreadPoolExecutor(
-    max_workers=4,
-    thread_name_prefix="HyperNodes-"
-)
-
-backend = LocalBackend(
-    map_execution="threaded",
-    executor=custom_executor  # Use your executor
-)
-
-# HyperNodes will use your executor for threaded/parallel operations
-# You're responsible for shutting it down
-custom_executor.shutdown(wait=True)
-```
-
-## Performance Considerations
-
-### When to Use Each Mode
-
-| Workload Type | Node Execution | Map Execution | Why |
-|---------------|----------------|---------------|-----|
-| Pure I/O (API calls) | `async` | `async` | Maximum concurrency for I/O |
-| Pure CPU (ML inference) | `sequential` | `parallel` | Avoid GIL, use multiple cores |
-| Mixed I/O + CPU | `threaded` | `threaded` | Balance between both |
-| Development/Debug | `sequential` | `sequential` | Predictable, easy to trace |
-| Small batches (<10) | `sequential` | `sequential` | Overhead not worth it |
-| Large batches (100s+) | `sequential` | `parallel/async` | Amortize overhead |
-
-### Measuring Performance
-
-Always measure! Parallelism overhead varies:
-
-```python
+from hypernodes import Pipeline, node, HypernodesEngine
 import time
 
-modes = ["sequential", "async", "threaded", "parallel"]
-for mode in modes:
-    backend = LocalBackend(map_execution=mode, max_workers=8)
-    pipeline.backend = backend
-    
-    start = time.time()
-    results = pipeline.map(inputs={"data": items}, map_over="data")
-    duration = time.time() - start
-    
-    print(f"{mode}: {duration:.2f}s")
-```
-
-### Limitations
-
-**Parallel Mode (ProcessPoolExecutor):**
-- Functions and data must be picklable
-- Cannot pickle lambda functions, local functions, or certain objects
-- Has startup overhead (~0.1-0.5s)
-- Best for workloads >1s per item
-
-**Async Mode:**
-- Functions still run synchronously (not truly async I/O)
-- Concurrency, not parallelism
-- Won't speed up CPU-bound work
-- Best combined with async-aware libraries
-
-**Threaded Mode:**
-- Subject to Python's GIL for CPU work
-- Good for I/O, limited for pure CPU
-- Lower overhead than processes
-
-## Examples
-
-### Example 1: Text Processing Pipeline
-
-```python
-from hypernodes import Pipeline, node, LocalBackend
-
-@node(output_name="text")
-def load_text(file_path):
-    """I/O-bound: Read file"""
-    with open(file_path) as f:
-        return f.read()
-
-@node(output_name="tokens")
-def tokenize(text):
-    """CPU-bound: Process text"""
-    return text.split()
-
-@node(output_name="count")
-def count_words(tokens):
-    """CPU-light: Count"""
-    return len(tokens)
-
-pipeline = Pipeline(nodes=[load_text, tokenize, count_words])
-
-# Async map for I/O efficiency across many files
-backend = LocalBackend(
-    node_execution="sequential",  # Simple within each file
-    map_execution="async",        # Process many files concurrently
-    max_workers=20
-)
-pipeline.backend = backend
-
-file_paths = [f"doc_{i}.txt" for i in range(100)]
-results = pipeline.map(
-    inputs={"file_path": file_paths},
-    map_over="file_path"
-)
-```
-
-### Example 2: Independent Nodes
-
-```python
 @node(output_name="data")
-def load_data():
+def load_data() -> list:
     time.sleep(0.1)
     return [1, 2, 3, 4, 5]
 
-@node(output_name="stats_a")
-def compute_stats_a(data):
-    """Independent computation A"""
+@node(output_name="stat_a")
+def compute_a(data: list) -> int:
+    """Independent from compute_b"""
     time.sleep(0.1)
     return sum(data)
 
-@node(output_name="stats_b")
-def compute_stats_b(data):
-    """Independent computation B (runs in parallel with A)"""
+@node(output_name="stat_b")
+def compute_b(data: list) -> int:
+    """Independent from compute_a - can run in parallel!"""
     time.sleep(0.1)
     return max(data)
 
 @node(output_name="result")
-def combine(stats_a, stats_b):
+def combine(stat_a: int, stat_b: int) -> dict:
     """Depends on both A and B"""
-    return {"sum": stats_a, "max": stats_b}
+    return {"sum": stat_a, "max": stat_b}
 
-pipeline = Pipeline(nodes=[load_data, compute_stats_a, compute_stats_b, combine])
-
-# Use threaded execution to run stats_a and stats_b in parallel
-backend = LocalBackend(node_execution="threaded", max_workers=4)
-pipeline.backend = backend
+# DAG: load_data → (compute_a || compute_b) → combine
+pipeline = Pipeline(nodes=[load_data, compute_a, compute_b, combine], engine=HypernodesEngine(node_executor="threaded"))
 
 result = pipeline.run(inputs={})
 # Sequential: ~0.4s (0.1 + 0.1 + 0.1 + 0.1)
-# Threaded: ~0.3s (0.1 + max(0.1, 0.1) + 0.1)
+# Threaded: ~0.3s (0.1 + max(0.1, 0.1) + 0.1)  # A and B run in parallel!
 ```
+
+The engine uses NetworkX's `topological_generations` to compute dependency levels and execute independent nodes concurrently.
+
+## Independent Configuration
+
+You can configure node and map execution independently:
+
+### Pattern 1: I/O Pipeline, Small Batch
+
+```python
+# Async nodes for efficiency, sequential map to avoid overwhelming API
+engine = HypernodesEngine(
+    node_executor="async",     # Concurrent nodes within each item
+    map_executor="sequential"  # One item at a time (rate limiting)
+)
+```
+
+### Pattern 2: CPU Pipeline, Large Batch
+
+```python
+# Sequential nodes for simplicity, parallel map to distribute items
+engine = HypernodesEngine(
+    node_executor="sequential",  # Simple execution per item
+    map_executor="parallel"      # Multiple items across cores
+)
+```
+
+### Pattern 3: Maximum Concurrency
+
+```python
+# Both async for I/O-heavy workloads
+engine = HypernodesEngine(
+    node_executor="async",
+    map_executor="async"
+)
+```
+
+## Performance Tuning
+
+### Choosing the Right Executor
+
+| Workload Type | Node Executor | Map Executor | Why |
+|---------------|---------------|--------------|-----|
+| Pure I/O (API calls) | `async` | `async` | Maximum concurrency for I/O |
+| Pure CPU (ML inference) | `sequential` | `parallel` | Avoid GIL, use multiple cores |
+| Mixed I/O + CPU | `threaded` | `threaded` | Balance both |
+| Development/Debug | `sequential` | `sequential` | Predictable, easy to trace |
+| Small batches (<10) | `sequential` | `sequential` | Overhead not worth it |
+| Large batches (100s+) | `sequential` | `parallel/async` | Amortize overhead |
+
+### Always Measure!
+
+```python
+import time
+from hypernodes import Pipeline, HypernodesEngine
+
+executors = ["sequential", "async", "threaded", "parallel"]
+items = [...]  # Your data
+
+for executor in executors:
+    pipeline = Pipeline(
+        nodes=[...],
+        engine=HypernodesEngine(map_executor=executor)
+    )
+
+    start = time.time()
+    results = pipeline.map(inputs={"data": items}, map_over="data")
+    duration = time.time() - start
+
+    print(f"{executor:12s}: {duration:.2f}s")
+```
+
+### Limitations
+
+**Node-level Parallel:**
+- ⚠️ Disabled to avoid pickling/locking complexity with nested pipelines
+- ✅ Use `node_executor="threaded"` for intra-item concurrency
+- ✅ Use `map_executor="parallel"` to scale across items (data-parallel)
+
+**Parallel Map Mode:**
+- ⚠️ Functions and data must be picklable
+- ⚠️ Cannot pickle lambda functions or local functions
+- ⚠️ Startup overhead (~0.1-0.5s)
+- ✅ Best for workloads >1s per item
+
+**Async Mode:**
+- ⚠️ Sync functions don't truly benefit from async I/O
+- ⚠️ Won't speed up CPU-bound work
+- ✅ Great for high-latency I/O operations
+
+**Threaded Mode:**
+- ⚠️ Subject to Python's GIL for CPU work
+- ✅ Good for I/O and GIL-releasing operations
+- ✅ Lower overhead than parallel
+
+## DaftEngine (Distributed DataFrames)
+
+For distributed execution using Daft DataFrames:
+
+```python
+from hypernodes.engines import DaftEngine
+
+pipeline = Pipeline(
+    nodes=[...],
+    engine=DaftEngine(collect=True)
+)
+
+# Executes pipeline as a lazy Daft DataFrame computation
+```
+
+See [DaftEngine documentation](daft-backend.md) for details.
 
 ## See Also
 
-- [Modal Backend](modal-backend.md) - Remote GPU execution
+- [Async Auto-Wrapping](async-autowrap.md) - How sync functions work with async executor
 - [Caching](../in-depth/caching.md) - Cache results across runs
-- [Progress Tracking](../in-depth/callbacks.md) - Monitor execution
+- [Callbacks](../in-depth/callbacks.md) - Monitor execution progress

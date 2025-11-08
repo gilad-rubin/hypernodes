@@ -75,17 +75,14 @@ def test_hypernodes_engine_has_executor_parameters():
 
 
 def test_hypernodes_engine_basic_execution():
-    """Verify HypernodesEngine can execute a simple pipeline.
-
-    Note: Using backend= for now. Phase 5 will update Pipeline to use engine=.
-    """
+    """Verify HypernodesEngine can execute a simple pipeline."""
 
     @node(output_name="result")
     def double(x: int) -> int:
         return x * 2
 
     engine = HypernodesEngine()
-    pipeline = Pipeline(nodes=[double], backend=engine)  # Phase 5 will change to engine=
+    pipeline = Pipeline(nodes=[double], engine=engine)
 
     result = pipeline.run(inputs={"x": 5})
     assert result["result"] == 10
@@ -134,10 +131,7 @@ def test_ctx_parameter_is_private():
 
 
 def test_hypernodes_engine_sequential_execution():
-    """Verify HypernodesEngine executes nodes in correct order.
-
-    Note: Using backend= for now. Phase 5 will update Pipeline to use engine=.
-    """
+    """Verify HypernodesEngine executes nodes in correct order."""
     execution_order = []
 
     @node(output_name="a")
@@ -156,7 +150,7 @@ def test_hypernodes_engine_sequential_execution():
         return b + "c"
 
     engine = HypernodesEngine()
-    pipeline = Pipeline(nodes=[step_a, step_b, step_c], backend=engine)  # Phase 5 will change to engine=
+    pipeline = Pipeline(nodes=[step_a, step_b, step_c], engine=engine)
 
     result = pipeline.run(inputs={})
 
@@ -165,17 +159,14 @@ def test_hypernodes_engine_sequential_execution():
 
 
 def test_hypernodes_engine_map_execution():
-    """Verify HypernodesEngine can execute map operations.
-
-    Note: Using backend= for now. Phase 5 will update Pipeline to use engine=.
-    """
+    """Verify HypernodesEngine can execute map operations."""
 
     @node(output_name="doubled")
     def double(x: int) -> int:
         return x * 2
 
     engine = HypernodesEngine()
-    pipeline = Pipeline(nodes=[double], backend=engine)  # Phase 5 will change to engine=
+    pipeline = Pipeline(nodes=[double], engine=engine)
 
     result = pipeline.map(
         inputs={"x": [1, 2, 3]},
@@ -183,6 +174,20 @@ def test_hypernodes_engine_map_execution():
     )
 
     assert result["doubled"] == [2, 4, 6]
+
+
+def test_pipeline_with_engine_builder():
+    """Verify the fluent .with_engine() API configures and runs the pipeline."""
+
+    @node(output_name="result")
+    def add_one(x: int) -> int:
+        return x + 1
+
+    engine = HypernodesEngine(node_executor="sequential")
+    pipeline = Pipeline(nodes=[add_one]).with_engine(engine)
+
+    assert pipeline.engine is engine
+    assert pipeline.run(inputs={"x": 1}) == {"result": 2}
 
 
 if __name__ == "__main__":

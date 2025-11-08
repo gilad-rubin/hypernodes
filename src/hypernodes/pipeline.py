@@ -141,7 +141,7 @@ class PipelineNode(Node):
         Returns:
             Mapped outputs (single value or dict depending on output_name)
         """
-        # Get execution context if available (set by backend)
+        # Get execution context if available (set by engine)
         exec_ctx = getattr(self, "_exec_ctx", None)
 
         # Check if we need to map over parameters
@@ -252,7 +252,7 @@ class Pipeline:
 
     Attributes:
         nodes: List of Node instances or nested Pipelines
-        backend: Engine for executing the pipeline (default: HypernodesEngine)
+        engine: Engine for executing the pipeline (default: HypernodesEngine)
         output_to_node: Mapping from output names to nodes
         graph: NetworkX DiGraph representing dependencies (cached)
         execution_order: Topologically sorted list of nodes (cached)
@@ -262,21 +262,23 @@ class Pipeline:
     def __init__(
         self,
         nodes: List[Union[Node, "Pipeline"]],
-        backend: Optional[Engine] = None,
+        engine: Optional[Engine] = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
         parent: Optional["Pipeline"] = None,
+        backend: Optional[Engine] = None,
     ):
         """Initialize a Pipeline from a list of nodes.
 
         Args:
             nodes: List of Node instances or Pipeline instances (which are auto-wrapped)
-            backend: Engine for execution (default: HypernodesEngine())
+            engine: Engine for execution (default: HypernodesEngine())
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
             name: Human-readable name for the pipeline (used in visualization)
             parent: Parent pipeline for configuration inheritance (internal)
+            backend: Deprecated alias for engine (will be removed in a future release)
 
         Raises:
             CycleError: If a cycle is detected in the dependency graph
@@ -292,7 +294,11 @@ class Pipeline:
                 wrapped_nodes.append(node)
 
         self.nodes = wrapped_nodes
-        self.backend = backend
+        if engine is not None and backend is not None:
+            raise ValueError("Specify either engine or backend, not both")
+
+        selected_engine = engine if engine is not None else backend
+        self._engine = selected_engine
         self.cache = cache
         self.callbacks = callbacks
         self._parent = parent
@@ -533,7 +539,7 @@ class Pipeline:
     ) -> Dict[str, Any]:
         """Execute pipeline with given inputs.
 
-        Delegates execution to the configured backend.
+        Delegates execution to the configured engine.
 
         Args:
             inputs: Dictionary mapping input parameter names to values
@@ -551,9 +557,9 @@ class Pipeline:
         Raises:
             ValueError: If output_name specifies a non-existent output
         """
-        # Use effective backend to support inheritance
-        backend = self.effective_backend
-        return backend.run(self, inputs, output_name=output_name, _ctx=_ctx)
+        # Use effective engine to support inheritance
+        engine = self.effective_engine
+        return engine.run(self, inputs, output_name=output_name, _ctx=_ctx)
 
     def __call__(self, **kwargs) -> Dict[str, Any]:
         """Make Pipeline callable like a Node.
@@ -585,24 +591,46 @@ class Pipeline:
     # Fluent Builder Methods
     # ======================
 
-    def with_backend(self, backend: "Engine") -> "Pipeline":
-        """Configure pipeline with a specific backend.
+    @property
+    def engine(self) -> Optional[Engine]:
+        """Current execution engine for the pipeline."""
+        return self._engine
+
+    @engine.setter
+    def engine(self, engine: Optional[Engine]) -> None:
+        self._engine = engine
+
+    @property
+    def backend(self) -> Optional[Engine]:
+        """Deprecated alias for engine (kept for backward compatibility)."""
+        return self._engine
+
+    @backend.setter
+    def backend(self, engine: Optional[Engine]) -> None:
+        self._engine = engine
+
+    def with_engine(self, engine: "Engine") -> "Pipeline":
+        """Configure pipeline with a specific engine.
 
         Returns the same pipeline instance for method chaining.
 
         Args:
-            backend: Engine instance (HypernodesEngine, DaftEngine, etc.)
+            engine: Engine instance (HypernodesEngine, DaftEngine, etc.)
 
         Returns:
             Self for method chaining
 
         Example:
-            >>> pipeline = Pipeline(nodes=[...]).with_backend(
+            >>> pipeline = Pipeline(nodes=[...]).with_engine(
             ...     HypernodesEngine(node_executor="threaded")
             ... )
         """
-        self.backend = backend
+        self.engine = engine
         return self
+
+    def with_backend(self, backend: "Engine") -> "Pipeline":
+        """Deprecated alias for :meth:`with_engine`."""
+        return self.with_engine(backend)
 
     def with_cache(self, cache: "Cache") -> "Pipeline":
         """Configure pipeline with a cache backend.
@@ -662,17 +690,18 @@ class Pipeline:
         return self
 
     @property
-    def effective_backend(self):
-        """Get effective engine (inherited from parent if not set).
-
-        Returns:
-            Engine to use for execution
-        """
-        if self.backend is not None:
-            return self.backend
+    def effective_engine(self):
+        """Get effective engine (inherited from parent if not set)."""
+        if self.engine is not None:
+            return self.engine
         if self._parent is not None:
-            return self._parent.effective_backend
-        return HypernodesEngine()  # Default
+            return self._parent.effective_engine
+        return HypernodesEngine()  # Default engine
+
+    @property
+    def effective_backend(self):
+        """Deprecated alias for :meth:`effective_engine`."""
+        return self.effective_engine
 
     @property
     def effective_cache(self):
@@ -873,7 +902,7 @@ class Pipeline:
         callbacks = self.effective_callbacks
 
         # Set pipeline metadata so callbacks can access node information
-        # Use same logic as backend._get_node_id() for consistency
+        # Use same logic as engine._get_node_id() for consistency
         node_ids = []
         for n in self.execution_order:
             # PipelineNode with explicit name
@@ -907,11 +936,11 @@ class Pipeline:
         for callback in callbacks:
             callback.on_map_start(total_items, ctx)
 
-        # Delegate to backend's map executor for parallel execution
-        # The backend.map() method will use the configured map_executor
+        # Delegate to the engine's map executor for parallel execution
+        # The engine.map() method will use the configured map_executor
         # (sequential, async, threaded, or parallel)
-        backend = self.effective_backend
-        results_list = backend.map(
+        engine = self.effective_engine
+        results_list = engine.map(
             pipeline=self,
             items=execution_plans,  # List of input dicts (one per map item)
             inputs={},  # No shared inputs - all inputs are in the items
@@ -963,8 +992,8 @@ class Pipeline:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit context manager and cleanup resources.
-        
-        Automatically shuts down the backend engine if we created it.
+
+        Automatically shuts down the configured engine if we created it.
         """
         self._cleanup()
         return False  # Don't suppress exceptions
@@ -980,13 +1009,13 @@ class Pipeline:
     def _cleanup(self):
         """Internal method to cleanup resources (shutdown engines).
         
-        Only shuts down backends that we created (not user-provided ones).
+        Only shuts down engines that we created (not user-provided ones).
         Safe to call multiple times.
         """
-        # Only cleanup our own backend (not inherited from parent)
-        if self.backend is not None and hasattr(self.backend, 'shutdown'):
+        # Only cleanup our own engine (not inherited from parent)
+        if self.engine is not None and hasattr(self.engine, 'shutdown'):
             try:
-                self.backend.shutdown(wait=True)
+                self.engine.shutdown(wait=True)
             except Exception:
                 # Ignore errors during cleanup (may already be shut down)
                 pass

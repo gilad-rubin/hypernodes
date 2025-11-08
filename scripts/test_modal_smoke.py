@@ -23,7 +23,7 @@ def test_1_simplest():
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install("cloudpickle")
     backend = ModalBackend(image=image, timeout=60)
     
-    pipeline = Pipeline(nodes=[add_one]).with_backend(backend)
+    pipeline = Pipeline(nodes=[add_one]).with_engine(backend)
     result = pipeline.run(inputs={"x": 5})
     
     print(f"Input: x=5")
@@ -45,7 +45,7 @@ def test_2_map_operation():
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install("cloudpickle")
     backend = ModalBackend(image=image, timeout=60)
     
-    pipeline = Pipeline(nodes=[square]).with_backend(backend)
+    pipeline = Pipeline(nodes=[square]).with_engine(backend)
     results = pipeline.map(inputs={"x": [1, 2, 3, 4]}, map_over="x")
     
     print(f"Input: x=[1, 2, 3, 4]")
@@ -82,7 +82,7 @@ def test_3_as_node_with_map():
     image = modal.Image.debian_slim(python_version="3.12").uv_pip_install("cloudpickle")
     backend = ModalBackend(image=image, timeout=60)
     
-    pipeline = Pipeline(nodes=[mapped_node, sum_results]).with_backend(backend)
+    pipeline = Pipeline(nodes=[mapped_node, sum_results]).with_engine(backend)
     result = pipeline.run(inputs={"items": [1, 2, 3, 4, 5]})
     
     print(f"Input: items=[1, 2, 3, 4, 5]")
@@ -144,7 +144,7 @@ def test_4_pydantic_models():
     
     pipeline = Pipeline(
         nodes=[create_docs, process_all, aggregate]
-    ).with_backend(backend)
+    ).with_engine(backend)
     
     result = pipeline.run(inputs={})
     
@@ -175,7 +175,7 @@ def test_5_execution_config():
         timeout=60
     )
     
-    pipeline = Pipeline(nodes=[process]).with_backend(backend)
+    pipeline = Pipeline(nodes=[process]).with_engine(backend)
     
     # Single run
     result = pipeline.run(inputs={"x": 21})

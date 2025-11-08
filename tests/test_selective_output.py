@@ -205,7 +205,7 @@ class TestSelectiveOutputExecutionModes:
     def test_different_execution_modes(self, node_execution):
         """Test selective output works with different execution modes."""
         engine = HypernodesEngine(node_executor=node_execution)
-        pipeline = Pipeline(nodes=[node_a, node_b, node_c], backend=engine)
+        pipeline = Pipeline(nodes=[node_a, node_b, node_c], engine=engine)
 
         result = pipeline.run(inputs={"x": 5}, output_name="b")
 

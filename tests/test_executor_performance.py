@@ -36,7 +36,7 @@ def test_async_executor_map_performance():
     # Sequential execution
     pipeline_seq = Pipeline(
         nodes=[async_fetch_data, async_parse_data],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor="sequential",
         ),
@@ -54,7 +54,7 @@ def test_async_executor_map_performance():
     # Async execution
     pipeline_async = Pipeline(
         nodes=[async_fetch_data, async_parse_data],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",  # Nodes run in sequence (fetch then parse)
             map_executor="async",  # But map items run concurrently
         ),
@@ -104,7 +104,7 @@ def test_async_executor_node_performance():
     # Sequential execution
     pipeline_seq = Pipeline(
         nodes=[fetch_api1, fetch_api2, fetch_api3, combine],
-        backend=HypernodesEngine(node_executor="sequential"),
+        engine=HypernodesEngine(node_executor="sequential"),
     )
 
     start = time.time()
@@ -114,7 +114,7 @@ def test_async_executor_node_performance():
     # Async execution - independent nodes run concurrently
     pipeline_async = Pipeline(
         nodes=[fetch_api1, fetch_api2, fetch_api3, combine],
-        backend=HypernodesEngine(node_executor="async"),
+        engine=HypernodesEngine(node_executor="async"),
     )
 
     start = time.time()
@@ -157,7 +157,7 @@ def test_threaded_executor_map_performance():
     # Sequential execution
     pipeline_seq = Pipeline(
         nodes=[blocking_read_file, process_file],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor="sequential",
         ),
@@ -175,7 +175,7 @@ def test_threaded_executor_map_performance():
     # Threaded execution
     pipeline_threaded = Pipeline(
         nodes=[blocking_read_file, process_file],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor=ThreadPoolExecutor(max_workers=4),
         ),
@@ -226,7 +226,7 @@ def test_parallel_executor_map_performance():
     # Sequential execution
     pipeline_seq = Pipeline(
         nodes=[cpu_intensive, double_result],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor="sequential",
         ),
@@ -245,7 +245,7 @@ def test_parallel_executor_map_performance():
     # Parallel execution (use "parallel" string to get loky executor)
     pipeline_parallel = Pipeline(
         nodes=[cpu_intensive, double_result],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor="parallel",  # Use loky for robust pickling
             max_workers=4,
@@ -301,7 +301,7 @@ def test_mixed_executors():
     # Use async for nodes (fetch can be async) and parallel for map (CPU compute)
     pipeline = Pipeline(
         nodes=[fetch_url, heavy_compute],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="async",  # Async for the async fetch node
             map_executor="parallel",  # Parallel for map items (uses loky)
             max_workers=2,
@@ -341,7 +341,7 @@ def test_string_aliases():
     # Test "sequential" alias
     pipeline_seq = Pipeline(
         nodes=[async_work],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",
             map_executor="sequential",
         ),
@@ -352,7 +352,7 @@ def test_string_aliases():
     # Test "async" alias
     pipeline_async = Pipeline(
         nodes=[async_work],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="async",
             map_executor="async",
         ),
@@ -368,7 +368,7 @@ def test_string_aliases():
 
     pipeline_threaded = Pipeline(
         nodes=[sync_work],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="threaded",
             map_executor="threaded",
         ),
@@ -380,7 +380,7 @@ def test_string_aliases():
     # Note: parallel node_executor requires complex pickling, so we only test map_executor
     pipeline_parallel = Pipeline(
         nodes=[sync_work],
-        backend=HypernodesEngine(
+        engine=HypernodesEngine(
             node_executor="sequential",  # Use sequential for node execution
             map_executor="parallel",  # Test parallel for map execution
         ),

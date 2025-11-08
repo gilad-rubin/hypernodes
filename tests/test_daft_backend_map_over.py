@@ -76,7 +76,7 @@ def test_daft_backend_simple_map_over():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_items, process_many],
-        backend=DaftEngine(),
+        engine=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -135,7 +135,7 @@ def test_daft_backend_map_over_with_flatten():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_items, process_many, flatten_results],
-        backend=DaftEngine(),
+        engine=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -183,7 +183,7 @@ def test_daft_backend_nested_map_over():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_values, double_many, sum_values],
-        backend=DaftEngine(),
+        engine=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -226,7 +226,7 @@ def test_daft_backend_map_over_with_multiple_outputs():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_texts, process_many],
-        backend=DaftEngine(),
+        engine=DaftEngine(),
         name="full_pipeline"
     )
     

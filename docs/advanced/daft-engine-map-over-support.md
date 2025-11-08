@@ -1,8 +1,8 @@
-# DaftBackend `.as_node(map_over=...)` Support
+# DaftEngine `.as_node(map_over=...)` Support
 
 ## Overview
 
-DaftBackend now fully supports `.as_node(map_over=...)` for batch processing patterns! This feature enables efficient distributed data processing using Daft's DataFrame operations.
+DaftEngine now fully supports `.as_node(map_over=...)` for batch processing patterns! This feature enables efficient distributed data processing using Daft's DataFrame operations.
 
 ## How It Works
 
@@ -49,7 +49,7 @@ Input DataFrame:
 
 ```python
 from hypernodes import Pipeline, node
-from hypernodes.daft_backend import DaftBackend
+from hypernodes.engines import DaftEngine
 
 # Single-item node
 @node(output_name="doubled")
@@ -78,7 +78,7 @@ def sum_all(all_doubled: list[int]) -> int:
 
 pipeline = Pipeline(
     nodes=[create_numbers, double_many, sum_all],
-    backend=DaftBackend(),
+    engine=DaftEngine(),
     name="map_example"
 )
 
@@ -104,7 +104,7 @@ scale_many = scale_single.as_node(
 
 pipeline = Pipeline(
     nodes=[create_numbers, scale_many, sum_all],
-    backend=DaftBackend()
+    engine=DaftEngine()
 )
 
 result = pipeline.run(inputs={"count": 3, "factor": 10})
@@ -139,7 +139,7 @@ process_many = process_single.as_node(
 
 pipeline = Pipeline(
     nodes=[create_texts, process_many],
-    backend=DaftBackend()
+    engine=DaftEngine()
 )
 
 result = pipeline.run(inputs={"count": 3})
@@ -162,9 +162,9 @@ result = pipeline.run(inputs={"count": 3})
 ⚠️ **Complex Objects**: Pydantic models may be converted to PyArrow structs
 ⚠️ **Single Column**: Currently supports mapping over one column at a time
 
-## Comparison with LocalBackend
+## Comparison with HypernodesEngine
 
-| Feature | DaftBackend | LocalBackend |
+| Feature | DaftEngine | HypernodesEngine |
 |---------|-------------|--------------|
 | Parallelism | Automatic | Manual configuration |
 | Optimization | Query planning | Runtime scheduling |
@@ -194,20 +194,20 @@ def process(item: MyModel) -> MyModel:
 # ✅ Good - large batch processing
 pipeline = Pipeline(
     nodes=[encode_thousands_of_items],
-    backend=DaftBackend()
+    engine=DaftEngine()
 )
 
 # ⚠️ Overkill - small batch
 pipeline = Pipeline(
     nodes=[process_three_items],
-    backend=DaftBackend()  # LocalBackend might be simpler
+    engine=DaftEngine()  # HypernodesEngine might be simpler
 )
 ```
 
 ### 3. Monitor Query Plans
 
 ```python
-backend = DaftBackend(show_plan=True)
+backend = DaftEngine(show_plan=True)
 
 pipeline = Pipeline(nodes=[...], backend=backend)
 pipeline.run(inputs={...})
@@ -254,25 +254,25 @@ The `_convert_mapped_pipeline_node()` method:
 - **Lines**: ~315-463
 - **Tests**: `tests/test_daft_backend_map_over.py`
 
-## Migration from LocalBackend
+## Migration from HypernodesEngine
 
-If you're currently using LocalBackend with `.as_node(map_over=...)`, you can now use DaftBackend:
+If you're currently using HypernodesEngine with `.as_node(map_over=...)`, you can now use DaftEngine:
 
 ```python
 # Before
-from hypernodes.backend import LocalBackend
+from hypernodes.backend import HypernodesEngine
 
 pipeline = Pipeline(
     nodes=[encode_passages_mapped, retrieve_queries_mapped],
-    backend=LocalBackend(map_execution="parallel", max_workers=8)
+    backend=HypernodesEngine(map_execution="parallel", max_workers=8)
 )
 
 # After
-from hypernodes.daft_backend import DaftBackend
+from hypernodes.engines import DaftEngine
 
 pipeline = Pipeline(
     nodes=[encode_passages_mapped, retrieve_queries_mapped],
-    backend=DaftBackend()  # Automatic parallelization!
+    engine=DaftEngine()  # Automatic parallelization!
 )
 ```
 
@@ -287,10 +287,10 @@ Potential improvements:
 
 ## Summary
 
-DaftBackend now provides full support for `.as_node(map_over=...)`, enabling:
+DaftEngine now provides full support for `.as_node(map_over=...)`, enabling:
 - ✅ Batch processing with automatic parallelization
 - ✅ Query optimization and lazy evaluation
 - ✅ Memory-efficient streaming execution
 - ✅ Distributed processing capabilities
 
-Use DaftBackend when you need distributed data processing with DataFrame optimizations, and LocalBackend or ModalBackend when you need maximum flexibility with complex object types.
+Use DaftEngine when you need distributed data processing with DataFrame optimizations, and HypernodesEngine or ModalBackend when you need maximum flexibility with complex object types.

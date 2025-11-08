@@ -525,7 +525,7 @@ def test_5_12_configuration_inheritance_backend_only():
     inner = Pipeline(nodes=[double, add_one])
 
     # Parent defines backend
-    outer = Pipeline(nodes=[inner], backend=HypernodesEngine())
+    outer = Pipeline(nodes=[inner], engine=HypernodesEngine())
 
     result = outer.run(inputs={"x": 5})
     assert result["result"] == 11
@@ -555,12 +555,12 @@ def test_5_13_configuration_inheritance_selective_override():
     # Parent with configuration
     parent_callback = PipelineCallback()
     parent = Pipeline(
-        nodes=[process], backend=HypernodesEngine(), callbacks=[parent_callback]
+        nodes=[process], engine=HypernodesEngine(), callbacks=[parent_callback]
     )
 
     # Child overrides only backend
     child_backend = HypernodesEngine()
-    child = Pipeline(nodes=[process], backend=child_backend, parent=parent)
+    child = Pipeline(nodes=[process], engine=child_backend, parent=parent)
 
     # Verify inheritance
     assert child.effective_backend == child_backend  # Overridden
@@ -589,12 +589,12 @@ def test_5_14_configuration_inheritance_recursive_chain():
     level_1_backend = HypernodesEngine()
     level_1_callback = PipelineCallback()
     level_1 = Pipeline(
-        nodes=[process], backend=level_1_backend, callbacks=[level_1_callback]
+        nodes=[process], engine=level_1_backend, callbacks=[level_1_callback]
     )
 
     # Level 2: Override backend only
     level_2_backend = HypernodesEngine()
-    level_2 = Pipeline(nodes=[process], backend=level_2_backend, parent=level_1)
+    level_2 = Pipeline(nodes=[process], engine=level_2_backend, parent=level_1)
 
     # Level 3: No overrides, inherits from level_2
     level_3 = Pipeline(nodes=[process], parent=level_2)
@@ -707,7 +707,7 @@ def test_5_17_configuration_inheritance_full_inheritance():
     outer_callback = PipelineCallback()
     outer = Pipeline(
         nodes=[process],
-        backend=outer_backend,
+        engine=outer_backend,
         cache=outer_cache,
         callbacks=[outer_callback],
     )

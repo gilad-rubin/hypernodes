@@ -55,7 +55,7 @@ backend = ModalBackend(
 )
 
 # Attach backend to pipeline
-pipeline.with_backend(backend)
+pipeline.with_engine(backend)
 
 print("\n1. Testing single run...")
 result = pipeline.run(inputs={"x": 5})

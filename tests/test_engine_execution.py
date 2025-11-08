@@ -121,12 +121,8 @@ class TestEngineExecutionBasic:
 
         engine.shutdown(wait=True)
 
-    def test_parallel_execution(self):
-        """Test engine with parallel executor using cloudpickle.
-
-        Uses CloudpickleProcessPoolExecutor which can handle local functions
-        and closures that standard ProcessPoolExecutor cannot pickle.
-        """
+    def test_parallel_execution_disabled_for_node(self):
+        """Node-level 'parallel' is disabled in favor of 'threaded' and map-level parallel."""
         @node(output_name="a")
         def slow_a(x: int) -> int:
             time.sleep(0.05)
@@ -142,19 +138,8 @@ class TestEngineExecutionBasic:
             return a + b
 
         pipeline = Pipeline(nodes=[slow_a, slow_b, combine])
-        # Use "parallel" string to get CloudpickleProcessPoolExecutor
-        engine = HypernodesEngine(node_executor="parallel", max_workers=2)
-
-        start = time.time()
-        result = engine.run(pipeline, {"x": 5})
-        duration = time.time() - start
-
-        assert result == {"a": 10, "b": 15, "result": 25}
-        # Should execute a and b in parallel (~0.05s), then combine
-        # Loky has significant initialization overhead on first use
-        assert duration < 0.7  # Loky initialization + process spawning overhead
-
-        engine.shutdown(wait=True)
+        with pytest.raises(ValueError):
+            HypernodesEngine(node_executor="parallel", max_workers=2)
 
     def test_parallel_map(self):
         """Test engine map operation with parallel executor using loky.

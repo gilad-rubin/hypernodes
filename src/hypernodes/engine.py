@@ -9,6 +9,13 @@ Key responsibilities:
 - Manage map operations (prepare items, transpose results)
 - Handle depth tracking for nested maps (future feature)
 - Enable node-level parallelism for async and threaded executors
+
+Design note on "parallel" executors:
+- Node-level "parallel" (process-based) execution is intentionally disabled.
+  Use node_executor="threaded" for intra-pipeline concurrency, and
+  map_executor="parallel" to parallelize across map items. This avoids
+  pickling/locking complexity with nested pipelines while still enabling
+  robust parallel throughput for data-parallel workloads.
 """
 
 import inspect
@@ -57,30 +64,29 @@ def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> 
                  Level 1: c depends on a or b (must wait for level 0)
                  Level 2: d,e depend on c (can run parallel after level 1)
     """
-    # Build a subgraph containing only the nodes we're executing
+    # Build a subgraph where vertices are actual node objects (not output names)
+    # This handles nodes that produce multiple outputs by keeping a single vertex
+    # and connecting dependencies based on pipeline.output_to_node mapping.
     subgraph = nx.DiGraph()
-    
-    # Create mapping from output name to node
-    output_to_node = {n.output_name: n for n in nodes_to_execute}
-    
-    # Add nodes and edges
+
+    # Add all nodes as vertices
     for node in nodes_to_execute:
-        subgraph.add_node(node.output_name)
-        
-        # Add edges for dependencies that are within our execution set
-        for param in node.parameters:
-            if param in output_to_node:
-                # This parameter is produced by another node in our execution set
-                subgraph.add_edge(param, node.output_name)
-    
-    # Use NetworkX to compute topological generations
-    # Each generation contains nodes with no dependencies on each other
+        subgraph.add_node(node)
+
+    # Build dependency edges: producer_node -> consumer_node
+    for consumer in nodes_to_execute:
+        for param in consumer.parameters:
+            # If this param is produced by another node in the same execution set
+            producer = pipeline.output_to_node.get(param)
+            if producer is not None and producer in nodes_to_execute:
+                subgraph.add_edge(producer, consumer)
+
+    # Compute topological generations (levels)
     levels = []
     for generation in nx.topological_generations(subgraph):
-        # Map output names back to node objects
-        level_nodes = [output_to_node[name] for name in generation]
-        levels.append(level_nodes)
-    
+        # generation already contains node objects
+        levels.append(list(generation))
+
     return levels
 
 
@@ -568,15 +574,16 @@ class HypernodesEngine(Engine):
         self._map_executor_is_reusable = False
 
         # Resolve executors
-        self.node_executor, self._node_executor_is_reusable = self._resolve_executor(node_executor)
-        self.map_executor, self._map_executor_is_reusable = self._resolve_executor(map_executor)
+        self.node_executor, self._node_executor_is_reusable = self._resolve_executor(node_executor, role="node")
+        self.map_executor, self._map_executor_is_reusable = self._resolve_executor(map_executor, role="map")
 
-    def _resolve_executor(self, executor_spec: Union[str, Any]) -> tuple[Any, bool]:
+    def _resolve_executor(self, executor_spec: Union[str, Any], role: str) -> tuple[Any, bool]:
         """Resolve an executor specification to an executor instance.
 
         Args:
             executor_spec: Either a string ("sequential", "async", "threaded",
                 "parallel") or an executor instance
+            role: "node" when resolving node_executor, "map" for map_executor
 
         Returns:
             Tuple of (executor instance, is_reusable)
@@ -595,18 +602,23 @@ class HypernodesEngine(Engine):
                 workers = self.max_workers if hasattr(self, 'max_workers') else DEFAULT_WORKERS["threaded"]
                 return ThreadPoolExecutor(max_workers=workers), False
             elif executor_spec == "parallel":
+                if role == "node":
+                    # Node-level parallel is intentionally disabled: it introduces
+                    # pickling and resource-management complexity with nested pipelines.
+                    # Prefer node_executor="threaded" for intra-pipeline concurrency and
+                    # map_executor="parallel" for cross-item parallelism.
+                    raise ValueError(
+                        "Node-level 'parallel' is disabled. Use node_executor='threaded' "
+                        "for node concurrency or map_executor='parallel' for parallel map."
+                    )
                 workers = self.max_workers if hasattr(self, 'max_workers') else DEFAULT_WORKERS["parallel"]
                 # Use loky for robust parallel execution with automatic cloudpickle support
                 if _LOKY_AVAILABLE:
-                    # get_reusable_executor returns a singleton - don't shut it down!
-                    # Increase timeout to avoid workers stopping between quick cell reruns
                     try:
                         return get_reusable_executor(max_workers=workers, timeout=self.loky_timeout), True  # type: ignore
                     except TypeError:
-                        # Older loky versions may not support timeout; fallback
                         return get_reusable_executor(max_workers=workers), True  # type: ignore
                 else:
-                    # Fallback to standard ProcessPoolExecutor (will have pickling limitations)
                     return ProcessPoolExecutor(max_workers=workers), False
             else:
                 raise ValueError(
@@ -735,10 +747,21 @@ class HypernodesEngine(Engine):
         # For parallel executors, submit all items and collect results
         # Use the module-level function (not bound method) so it can be pickled
 
-        # Create a copy of the pipeline without the backend to avoid pickling locks
-        # Save original backend and temporarily remove it
-        original_backend = pipeline.backend
+        # Create a copy of the pipeline without references that break pickling
+        # Save original attributes and temporarily detach them to avoid locks
+        original_backend = getattr(pipeline, 'backend', None)
+        original_parent = getattr(pipeline, '_parent', None)
+        # Preserve effective settings locally so the worker can use them
+        effective_cache = getattr(pipeline, 'effective_cache', None)
+        effective_callbacks = getattr(pipeline, 'effective_callbacks', [])
+        # Detach backend and parent (parent may hold executors/locks through its backend)
         pipeline.backend = None  # type: ignore[assignment]
+        pipeline._parent = None  # type: ignore[attr-defined]
+        # Materialize inherited config to keep behavior identical inside workers
+        if effective_cache is not None:
+            pipeline.cache = effective_cache
+        if effective_callbacks is not None:
+            pipeline.callbacks = list(effective_callbacks)
 
         try:
             futures = []
@@ -756,8 +779,9 @@ class HypernodesEngine(Engine):
             results = [future.result() for future in futures]
             return results
         finally:
-            # Restore original backend
+            # Restore original references
             pipeline.backend = original_backend
+            pipeline._parent = original_parent  # type: ignore[attr-defined]
 
     def shutdown(self, wait: bool = True):
         """Shutdown executors that we own.

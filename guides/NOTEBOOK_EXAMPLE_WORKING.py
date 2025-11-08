@@ -65,7 +65,7 @@ pipeline = Pipeline(
 pipeline.visualize()
 
 # Set backend
-pipeline = pipeline.with_backend(backend)
+pipeline = pipeline.with_engine(backend)
 
 print("✓ Pipeline created and visualized")
 

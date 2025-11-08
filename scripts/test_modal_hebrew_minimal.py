@@ -262,7 +262,7 @@ def create_pipeline(use_modal: bool = False, use_cache: bool = True):
             map_execution="sequential",  # Start simple
             timeout=300,
         )
-        pipeline = pipeline.with_backend(backend)
+        pipeline = pipeline.with_engine(backend)
     
     return pipeline
 

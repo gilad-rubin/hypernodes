@@ -13,4 +13,4 @@ outer = Pipeline(nodes=[adapted, build_index])
 result = outer.run(inputs={"corpus": ["Hello", "World"]})
 ```
 
-Configuration (backend, cache, callbacks) is inherited unless overridden.
+Configuration (engine, cache, callbacks) is inherited unless overridden.

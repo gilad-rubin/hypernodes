@@ -124,13 +124,13 @@ async_pipeline = Pipeline(
     engine=HypernodesEngine(node_executor="async"),
 )
 
-# Parallel execution for CPU-bound workloads
-parallel_pipeline = Pipeline(
-    nodes=[load_data, compute_intensive_task, aggregate],
-    engine=HypernodesEngine(node_executor="parallel"),
+# Parallel map for CPU-bound workloads (node-level parallel is disabled; use threaded for node concurrency)
+parallel_map_pipeline = Pipeline(
+    nodes=[compute_intensive_task],
+    engine=HypernodesEngine(map_executor="parallel"),
 )
 
-result = parallel_pipeline.run(inputs={"data": [1, 2, 3, 4, 5]})
+result = parallel_map_pipeline.map(inputs={"data": [1, 2, 3, 4, 5]}, map_over="data")
 ```
 
 ---
@@ -255,18 +255,15 @@ pipeline = Pipeline(
     engine=HypernodesEngine(node_executor="threaded")
 )
 
-# Parallel execution (CPU-bound, multiprocessing)
-pipeline = Pipeline(
-    nodes=[...],
-    engine=HypernodesEngine(node_executor="parallel")
-)
+# Parallel map (CPU-bound, multiprocessing)
+pipeline = Pipeline(nodes=[...], engine=HypernodesEngine(map_executor="parallel"))
 ```
 
 **Executor Types:**
 - `sequential`: Runs nodes one at a time (good for debugging)
 - `async`: Concurrent execution using asyncio (auto-wraps sync functions)
 - `threaded`: Thread-based parallelism (good for I/O-bound with some CPU work)
-- `parallel`: Process-based parallelism using loky or multiprocessing (CPU-bound)
+- `parallel`: Process-based parallelism across map items using loky (CPU-bound per item)
 
 ### DaftEngine (Distributed DataFrames)
 
@@ -387,10 +384,10 @@ child_pipeline = Pipeline(
     # Inherits: HypernodesEngine, DiskCache, ProgressCallback
 )
 
-# Grandchild overrides engine only (e.g., to parallel execution)
+# Grandchild overrides engine only (e.g., to parallel map)
 grandchild_pipeline = Pipeline(
     nodes=[cpu_intensive_step],
-    engine=HypernodesEngine(node_executor="parallel"),  # Override
+    engine=HypernodesEngine(map_executor="parallel"),  # Override to parallel map
     # Inherits: DiskCache, ProgressCallback
 )
 ```

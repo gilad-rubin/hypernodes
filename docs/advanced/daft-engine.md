@@ -1,10 +1,10 @@
-# DaftBackend - Automatic Conversion to Daft
+# DaftEngine - Automatic Conversion to Daft
 
-The `DaftBackend` automatically converts HyperNodes pipelines into [Daft](https://www.getdaft.io/) DataFrames, providing lazy evaluation, automatic optimization, and high-performance execution.
+The `DaftEngine` automatically converts HyperNodes pipelines into [Daft](https://www.getdaft.io/) DataFrames, providing lazy evaluation, automatic optimization, and high-performance execution.
 
 ## Overview
 
-DaftBackend translates HyperNodes pipelines into Daft operations:
+DaftEngine translates HyperNodes pipelines into Daft operations:
 - **Nodes** → Daft UDFs (`@daft.func`)
 - **Map operations** → DataFrame operations
 - **Pipelines** → Lazy DataFrame transformations
@@ -15,7 +15,7 @@ DaftBackend translates HyperNodes pipelines into Daft operations:
 2. **Automatic Parallelization**: No manual configuration needed
 3. **Performance**: Optimized execution with vectorization
 4. **Scalability**: Designed for distributed execution
-5. **Zero Code Changes**: Drop-in replacement for LocalBackend
+5. **Zero Code Changes**: Drop-in replacement for HypernodesEngine
 
 ## Installation
 
@@ -31,14 +31,14 @@ uv add daft
 
 ```python
 from hypernodes import node, Pipeline
-from hypernodes.daft_backend import DaftBackend
+from hypernodes.engines import DaftEngine
 
 @node(output_name="result")
 def add_one(x: int) -> int:
     return x + 1
 
-# Use DaftBackend
-pipeline = Pipeline(nodes=[add_one], backend=DaftBackend())
+# Use DaftEngine
+pipeline = Pipeline(nodes=[add_one], engine=DaftEngine())
 result = pipeline.run(inputs={"x": 5})
 # result == {"result": 6}
 ```
@@ -50,7 +50,7 @@ result = pipeline.run(inputs={"x": 5})
 def double(x: int) -> int:
     return x * 2
 
-pipeline = Pipeline(nodes=[double], backend=DaftBackend())
+pipeline = Pipeline(nodes=[double], engine=DaftEngine())
 
 # Process multiple items
 results = pipeline.map(inputs={"x": [1, 2, 3, 4, 5]}, map_over="x")
@@ -61,7 +61,7 @@ results = pipeline.map(inputs={"x": [1, 2, 3, 4, 5]}, map_over="x")
 
 ### Nested Pipelines
 
-DaftBackend automatically handles nested pipelines:
+DaftEngine automatically handles nested pipelines:
 
 ```python
 @node(output_name="cleaned")
@@ -79,10 +79,10 @@ preprocess = Pipeline(nodes=[clean_text, count_words])
 def classify(word_count: int) -> bool:
     return word_count > 3
 
-# Outer pipeline with DaftBackend
+# Outer pipeline with DaftEngine
 full_pipeline = Pipeline(
     nodes=[preprocess, classify],
-    backend=DaftBackend()
+    engine=DaftEngine()
 )
 
 result = full_pipeline.run(inputs={"text": "  Hello World  "})
@@ -94,8 +94,8 @@ result = full_pipeline.run(inputs={"text": "  Hello World  "})
 View Daft's execution plan before running:
 
 ```python
-backend = DaftBackend(show_plan=True)
-pipeline = Pipeline(nodes=[...], backend=backend)
+engine = DaftEngine(show_plan=True)
+pipeline = Pipeline(nodes=[...], engine=engine)
 result = pipeline.run(inputs={...})
 # Prints the optimized execution plan
 ```
@@ -117,7 +117,7 @@ def step_two(step1: int) -> int:
 def step_three(step2: int) -> int:
     return step2 ** 2
 
-pipeline = Pipeline(nodes=[step_one, step_two, step_three], backend=DaftBackend())
+pipeline = Pipeline(nodes=[step_one, step_two, step_three], engine=DaftEngine())
 
 # Get only final result
 result = pipeline.run(inputs={"x": 5}, output_name="final")
@@ -130,10 +130,10 @@ result = pipeline.run(inputs={"x": 5}, output_name=["step1", "final"])
 
 ## Configuration Options
 
-### DaftBackend Parameters
+### DaftEngine Parameters
 
 ```python
-DaftBackend(
+DaftEngine(
     collect=True,      # Auto-collect results (default: True)
     show_plan=False    # Print execution plan (default: False)
 )
@@ -144,16 +144,16 @@ DaftBackend(
 
 ## Performance Considerations
 
-### When to Use DaftBackend
+### When to Use DaftEngine
 
-✅ **Use DaftBackend when:**
+✅ **Use DaftEngine when:**
 - Processing large datasets (>1GB)
 - Performance is critical
 - You want automatic optimization
 - You need distributed execution
 - Operations can be vectorized
 
-❌ **Use LocalBackend when:**
+❌ **Use HypernodesEngine when:**
 - You need explicit DAG visualization
 - Fine-grained caching at node level is important
 - Complex branching logic with inspection
@@ -167,16 +167,16 @@ DaftBackend(
 3. **Selective Outputs**: Request only needed outputs to skip unnecessary computation
 4. **Type Hints**: Provide type hints for better optimization
 
-## Comparison with LocalBackend
+## Comparison with HypernodesEngine
 
-| Feature | LocalBackend | DaftBackend |
-|---------|--------------|-------------|
+| Feature | HypernodesEngine | DaftEngine |
+|---------|------------------|------------|
 | Execution | Sequential/Async/Threaded/Parallel | Lazy + Optimized |
 | Parallelization | Manual configuration | Automatic |
 | Optimization | None | Query optimization |
 | Caching | Node-level | DataFrame-level |
 | Visualization | DAG graphs | Execution plans |
-| Distributed | Via ModalBackend | Native support |
+| Distributed | Custom executors | Native support |
 | Best for | Development, debugging | Production, performance |
 
 ## Translation Patterns
