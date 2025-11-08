@@ -694,9 +694,9 @@ class HypernodesEngine(Engine):
             List of output dictionaries (one per item)
         """
         # For sequential executor, process items one by one
-        is_sequential = (hasattr(self.map_executor, '__class__') and 
-                        self.map_executor.__class__.__name__ == 'SequentialExecutor')
-        
+        is_sequential = isinstance(self.map_executor, SequentialExecutor)
+        is_thread_pool = isinstance(self.map_executor, ThreadPoolExecutor)
+
         if is_sequential:
             # Sequential map: run items one by one while annotating context
             # so per-item callbacks (start/end/cached) can fire correctly.
@@ -744,20 +744,30 @@ class HypernodesEngine(Engine):
 
             return [future.result() for future in futures]
 
-        # For parallel executors, submit all items and collect results
-        # Use the module-level function (not bound method) so it can be pickled
+        # Thread pools can execute map items without detaching pipeline metadata
+        if is_thread_pool:
+            def run_item(item_inputs: Dict[str, Any]) -> Dict[str, Any]:
+                merged_inputs = {**inputs, **item_inputs}
+                return _execute_pipeline_impl(
+                    pipeline,
+                    merged_inputs,
+                    SequentialExecutor(),
+                    None,
+                    output_name,
+                )
 
-        # Create a copy of the pipeline without references that break pickling
-        # Save original attributes and temporarily detach them to avoid locks
-        original_backend = getattr(pipeline, 'backend', None)
-        original_parent = getattr(pipeline, '_parent', None)
-        # Preserve effective settings locally so the worker can use them
-        effective_cache = getattr(pipeline, 'effective_cache', None)
-        effective_callbacks = getattr(pipeline, 'effective_callbacks', [])
-        # Detach backend and parent (parent may hold executors/locks through its backend)
+            futures = [self.map_executor.submit(run_item, item) for item in items]
+            return [future.result() for future in futures]
+
+        # For process-based executors (or unknown ones that likely need pickling),
+        # submit all items and collect results via the standalone helper.
+        original_backend = getattr(pipeline, "backend", None)
+        original_parent = getattr(pipeline, "_parent", None)
+        effective_cache = getattr(pipeline, "effective_cache", None)
+        effective_callbacks = getattr(pipeline, "effective_callbacks", [])
+
         pipeline.backend = None  # type: ignore[assignment]
         pipeline._parent = None  # type: ignore[attr-defined]
-        # Materialize inherited config to keep behavior identical inside workers
         if effective_cache is not None:
             pipeline.cache = effective_cache
         if effective_callbacks is not None:
@@ -768,18 +778,14 @@ class HypernodesEngine(Engine):
             for item in items:
                 merged_inputs = {**inputs, **item}
                 future = self.map_executor.submit(
-                    _execute_pipeline_for_map_item,  # Use standalone function for pickling
-                    pipeline,  # Pipeline without backend can be pickled
+                    _execute_pipeline_for_map_item,
+                    pipeline,
                     merged_inputs,
-                    output_name
+                    output_name,
                 )
                 futures.append(future)
-
-            # Collect results in order
-            results = [future.result() for future in futures]
-            return results
+            return [future.result() for future in futures]
         finally:
-            # Restore original references
             pipeline.backend = original_backend
             pipeline._parent = original_parent  # type: ignore[attr-defined]
 
