@@ -17,7 +17,7 @@ from hypernodes import node, Pipeline
 from pydantic import BaseModel
 
 if DAFT_AVAILABLE:
-    from hypernodes.daft_backend import DaftBackend
+    from hypernodes.engines import DaftEngine
 
 pytestmark = pytest.mark.skipif(not DAFT_AVAILABLE, reason="Daft not installed")
 
@@ -76,7 +76,7 @@ def test_daft_backend_simple_map_over():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_items, process_many],
-        backend=DaftBackend(),
+        backend=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -135,7 +135,7 @@ def test_daft_backend_map_over_with_flatten():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_items, process_many, flatten_results],
-        backend=DaftBackend(),
+        backend=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -183,7 +183,7 @@ def test_daft_backend_nested_map_over():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_values, double_many, sum_values],
-        backend=DaftBackend(),
+        backend=DaftEngine(),
         name="full_pipeline"
     )
     
@@ -218,6 +218,7 @@ def test_daft_backend_map_over_with_multiple_outputs():
         name="process_many"
     )
     
+    
     @node(output_name="texts")
     def create_texts(count: int) -> List[str]:
         return [f"text_{i}" for i in range(count)]
@@ -225,7 +226,7 @@ def test_daft_backend_map_over_with_multiple_outputs():
     # Build full pipeline
     pipeline = Pipeline(
         nodes=[create_texts, process_many],
-        backend=DaftBackend(),
+        backend=DaftEngine(),
         name="full_pipeline"
     )
     

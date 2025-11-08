@@ -266,23 +266,3 @@ class TestSelectiveOutputNestedPipelines:
 
         assert result == {"b": 12}
         assert "final" not in result
-
-
-# Note: ModalBackend tests would require Modal setup
-# These are placeholder tests that can be run when Modal is configured
-class TestSelectiveOutputModalBackend:
-    """Test selective output with ModalBackend."""
-
-    @pytest.mark.skip(reason="Requires Modal configuration")
-    def test_modal_backend_selective_output(self):
-        """Test that selective output works with ModalBackend."""
-        # This test would require Modal setup
-        # Keeping as placeholder for future testing
-        pass
-
-    @pytest.mark.skip(reason="Requires Modal configuration")
-    def test_modal_backend_map_selective_output(self):
-        """Test that selective output works with ModalBackend.map()."""
-        # This test would require Modal setup
-        # Keeping as placeholder for future testing
-        pass

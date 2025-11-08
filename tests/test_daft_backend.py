@@ -15,7 +15,7 @@ except ImportError:
 from hypernodes import node, Pipeline
 
 if DAFT_AVAILABLE:
-    from hypernodes.daft_backend import DaftBackend
+    from hypernodes.engines import DaftEngine
 
 pytestmark = pytest.mark.skipif(not DAFT_AVAILABLE, reason="Daft not installed")
 
@@ -26,7 +26,7 @@ def test_daft_backend_single_node():
     def add_one(x: int) -> int:
         return x + 1
     
-    pipeline = Pipeline(nodes=[add_one], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[add_one], backend=DaftEngine())
     result = pipeline.run(inputs={"x": 5})
     
     assert result == {"result": 6}
@@ -42,7 +42,7 @@ def test_daft_backend_two_sequential_nodes():
     def add_one(doubled: int) -> int:
         return doubled + 1
     
-    pipeline = Pipeline(nodes=[double, add_one], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[double, add_one], backend=DaftEngine())
     result = pipeline.run(inputs={"x": 5})
     
     assert result == {"doubled": 10, "result": 11}
@@ -62,7 +62,7 @@ def test_daft_backend_diamond_pattern():
     def add(doubled: int, tripled: int) -> int:
         return doubled + tripled
     
-    pipeline = Pipeline(nodes=[double, triple, add], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[double, triple, add], backend=DaftEngine())
     result = pipeline.run(inputs={"x": 5})
     
     assert result == {"doubled": 10, "tripled": 15, "result": 25}
@@ -74,7 +74,7 @@ def test_daft_backend_map_single_parameter():
     def add_one(x: int) -> int:
         return x + 1
     
-    pipeline = Pipeline(nodes=[add_one], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[add_one], backend=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     
     assert results == {"result": [2, 3, 4]}
@@ -90,7 +90,7 @@ def test_daft_backend_map_two_sequential_nodes():
     def add_one(doubled: int) -> int:
         return doubled + 1
     
-    pipeline = Pipeline(nodes=[double, add_one], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[double, add_one], backend=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     
     assert results == {"doubled": [2, 4, 6], "result": [3, 5, 7]}
@@ -102,7 +102,7 @@ def test_daft_backend_map_with_fixed_parameter():
     def multiply(x: int, factor: int) -> int:
         return x * factor
     
-    pipeline = Pipeline(nodes=[multiply], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[multiply], backend=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
     
     assert results == {"result": [10, 20, 30]}
@@ -114,7 +114,7 @@ def test_daft_backend_empty_map():
     def add_one(x: int) -> int:
         return x + 1
     
-    pipeline = Pipeline(nodes=[add_one], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[add_one], backend=DaftEngine())
     results = pipeline.map(inputs={"x": []}, map_over="x")
     
     assert results == {"result": []}
@@ -134,7 +134,7 @@ def test_daft_backend_multiple_inputs():
     def combine(sum: int, product: int) -> int:
         return sum + product
     
-    pipeline = Pipeline(nodes=[add, multiply, combine], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[add, multiply, combine], backend=DaftEngine())
     result = pipeline.run(inputs={"x": 5, "y": 3})
     
     assert result == {"sum": 8, "product": 15, "result": 23}
@@ -156,7 +156,7 @@ def test_daft_backend_nested_pipeline():
     def square(incremented: int) -> int:
         return incremented ** 2
     
-    outer_pipeline = Pipeline(nodes=[inner_pipeline, square], backend=DaftBackend())
+    outer_pipeline = Pipeline(nodes=[inner_pipeline, square], backend=DaftEngine())
     result = outer_pipeline.run(inputs={"x": 5})
     
     assert result == {"doubled": 10, "incremented": 11, "result": 121}
@@ -176,7 +176,7 @@ def test_daft_backend_selective_output():
     def add(doubled: int, tripled: int) -> int:
         return doubled + tripled
     
-    pipeline = Pipeline(nodes=[double, triple, add], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[double, triple, add], backend=DaftEngine())
     
     # Only request final result
     result = pipeline.run(inputs={"x": 5}, output_name="result")
@@ -201,7 +201,7 @@ def test_daft_backend_string_operations():
     def count_tokens(tokens: list) -> int:
         return len(tokens)
     
-    pipeline = Pipeline(nodes=[clean_text, tokenize, count_tokens], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[clean_text, tokenize, count_tokens], backend=DaftEngine())
     result = pipeline.run(inputs={"text": "  Hello World  "})
     
     assert result["cleaned"] == "hello world"
@@ -219,7 +219,7 @@ def test_daft_backend_map_string_operations():
     def count_chars(cleaned: str) -> int:
         return len(cleaned)
     
-    pipeline = Pipeline(nodes=[clean_text, count_chars], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[clean_text, count_chars], backend=DaftEngine())
     results = pipeline.map(
         inputs={"text": ["  Hello  ", "  World  ", "  Test  "]},
         map_over="text"

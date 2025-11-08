@@ -66,11 +66,34 @@ The system has a recursive structure where:
 - Handles `output_mapping` (inner → outer output names)
 - Supports `map_over` parameter to vectorize operations
 
-#### Backend (`src/hypernodes/backend.py`)
-- Abstract execution strategy
-- **LocalBackend**: Sequential, async, threaded, or parallel execution
-- **ModalBackend**: Remote execution on Modal infrastructure (optional: `pip install 'hypernodes[modal]'`)
-- **DaftBackend**: Distributed DataFrame-based execution (optional: `pip install 'hypernodes[viz]'` + daft)
+#### Engine (`src/hypernodes/engine.py`, `src/hypernodes/engines.py`)
+- Abstract base class defining execution interface
+- **HypernodesEngine**: Main implementation for node-by-node execution
+  - Orchestrates pipeline execution (dependency resolution, topological ordering)
+  - Manages map operations (item preparation, result transposition)
+  - Supports node-level parallelism via executors
+  - Computes dependency levels for parallel execution within pipeline
+- **DaftEngine** (`integrations/daft/engine.py`): Distributed DataFrame-based execution (optional: `pip install 'hypernodes[viz]'` + daft)
+
+#### Executors (`src/hypernodes/executors.py`)
+- Uniform concurrent.futures-like interface for different execution strategies
+- **SequentialExecutor**: Immediate synchronous execution (debugging, simple pipelines)
+- **AsyncExecutor**: Asyncio-based concurrent execution with auto-wrapping for sync functions
+  - Runs event loop in background thread (Jupyter-compatible)
+  - High concurrency for I/O-bound workloads (default: 100 workers)
+- **ThreadPoolExecutor**: Standard library thread-based parallelism
+- **ProcessPoolExecutor**: Standard library process-based parallelism
+- **loky**: Optional robust parallel execution with cloudpickle support
+
+#### Node Execution (`src/hypernodes/node_execution.py`)
+- Single-responsibility module for executing individual nodes
+- Handles signature computation, cache get/put, callbacks
+- Supports both sync and async node execution
+- Error handling and node identification
+
+#### Async Utilities (`src/hypernodes/async_utils.py`)
+- Utilities for async/sync interoperability
+- Event loop management for different contexts (Jupyter, standalone)
 
 #### Cache (`src/hypernodes/cache.py`)
 - Content-addressed caching via computation signatures
@@ -82,6 +105,7 @@ The system has a recursive structure where:
 - Hooks into pipeline execution lifecycle
 - **ProgressCallback** (`telemetry/progress.py`): Live progress bars with tqdm/rich
 - **TelemetryCallback** (`telemetry/tracing.py`): Distributed tracing with Logfire
+- **WaterfallCallback** (`telemetry/waterfall.py`): Waterfall visualization of execution timing
 
 ### Dependency Resolution
 
@@ -121,22 +145,70 @@ outer = Pipeline(nodes=[load, outer_node, save])
 ## Code Conventions
 
 ### Module Organization
-- Core logic: `src/hypernodes/`
-- Tests: `tests/` (organized by feature phases: core, map, caching, callbacks, nested)
-- Scripts: `scripts/` (for testing and debugging)
-- Examples: `examples/`
-- Documentation: `docs/`
+```
+src/hypernodes/
+├── node.py                 # Node class and @node decorator
+├── pipeline.py             # Pipeline and PipelineNode classes
+├── engine.py               # Engine base class and HypernodesEngine
+├── engines.py              # Unified engine imports
+├── executors.py            # SequentialExecutor, AsyncExecutor
+├── node_execution.py       # Single node execution logic
+├── async_utils.py          # Async/sync interop utilities
+├── cache.py                # DiskCache and signature computation
+├── callbacks.py            # PipelineCallback base class
+├── visualization.py        # DAG visualization
+├── exceptions.py           # Custom exceptions
+├── telemetry/              # Observability modules
+│   ├── progress.py         # ProgressCallback
+│   ├── tracing.py          # TelemetryCallback (OpenTelemetry)
+│   ├── waterfall.py        # WaterfallCallback
+│   └── environment.py      # Environment detection
+└── integrations/
+    └── daft/
+        └── engine.py       # DaftEngine (optional)
+
+tests/
+├── test_phase1_core_execution.py        # Basic pipeline execution
+├── test_phase2_map_operations.py        # .map() functionality
+├── test_phase2_engine_renaming.py       # Engine API
+├── test_phase3_caching.py               # Cache behavior
+├── test_phase3_class_caching.py         # Class-based caching
+├── test_phase4_callbacks.py             # Callback system
+├── test_phase5_nested_pipelines.py      # Nested composition
+├── test_engine.py                       # Engine functionality
+├── test_engine_execution.py             # Engine execution modes
+├── test_executor_adapters.py            # Executor interfaces
+├── test_executor_performance.py         # Performance benchmarks
+├── test_async_and_executors.py          # Async execution
+├── test_async_autowrap.py               # Async auto-wrapping
+├── test_node_execution.py               # Node-level execution
+├── test_selective_output.py             # Selective node execution
+├── test_cache_encoder_like_objects.py   # Cache key generation
+├── test_cache_mapped_pipeline_items.py  # Per-item caching
+├── test_daft_backend.py                 # DaftEngine integration
+├── test_daft_backend_complex_types.py   # Complex type handling
+├── test_daft_backend_map_over.py        # Daft map operations
+├── test_daft_preserve_original_column.py # Daft column preservation
+├── test_parallel_reuse.py               # Executor reuse
+├── test_pipeline_naming_and_nesting.py  # Pipeline naming
+├── test_visualization_depth.py          # Visualization depth control
+└── test_telemetry_basic.py              # Telemetry integration
+```
 
 ### Testing Philosophy
 - Test with single inputs first, then scale to multiple
 - Tests should verify both functionality and caching behavior
 - Use `DiskCache` in tests to verify cache hits/misses
+- ~112 test functions across 24 test files
+- Tests organized by phases (1-5) and features
 
 ### When Making Changes
 1. Run relevant tests after changes: `uv run pytest tests/<file>.py`
 2. For caching changes, run: `tests/test_phase3_caching.py` and `tests/test_phase3_class_caching.py`
 3. For map operations, run: `tests/test_phase2_map_operations.py`
 4. For nested pipelines, run: `tests/test_phase5_nested_pipelines.py`
+5. For engine/executor changes, run: `tests/test_engine*.py` and `tests/test_executor*.py`
+6. For async changes, run: `tests/test_async*.py`
 
 ## Development Workflow
 
@@ -163,15 +235,23 @@ Install with: `pip install 'hypernodes[viz,modal]'`
 
 ## Architecture Deep Dive
 
-### Execution Flow (LocalBackend)
+### Execution Flow (HypernodesEngine)
 
 1. **Dependency Graph Construction**: Pipeline builds NetworkX DAG from nodes
 2. **Topological Sort**: Compute execution order respecting dependencies
 3. **Selective Execution**: If `output_name` specified, only execute required nodes
-4. **Node Execution Loop**:
+4. **Executor Selection**: Resolve executor specification (string or instance)
+   - `"sequential"` → SequentialExecutor
+   - `"async"` → AsyncExecutor (auto-wraps sync functions)
+   - `"threaded"` → ThreadPoolExecutor
+   - `"parallel"` → ProcessPoolExecutor or loky
+5. **Parallel Level Computation**: For async/threaded executors, compute dependency levels
+   - Uses NetworkX topological_generations
+   - Nodes at same level have no dependencies on each other → can run in parallel
+6. **Node Execution Loop**:
    - Check cache (if enabled)
    - Collect dependencies from available values
-   - Execute node function
+   - Execute node function via executor
    - Store output in cache (if enabled)
    - Fire callbacks (before/after node, before/after pipeline)
 
@@ -180,9 +260,14 @@ Install with: `pip install 'hypernodes[viz,modal]'`
 For `.map()` operations:
 1. Items are transformed into list of input dicts
 2. Each item gets its own cache signature
-3. Backend executes items (sequential/async/threaded/parallel based on `map_execution`)
-4. Cached items are skipped automatically
-5. Results aggregated and returned
+3. Engine uses map_executor (defaults to node_executor if not specified)
+4. Executor processes items:
+   - `sequential`: One at a time
+   - `async`: Up to 100 concurrent items (I/O-bound)
+   - `threaded`: CPU-count concurrent items (mixed workload)
+   - `parallel`: CPU-count concurrent processes (CPU-bound)
+5. Cached items are skipped automatically during execution
+6. Results aggregated and returned
 
 ### Signature Computation
 

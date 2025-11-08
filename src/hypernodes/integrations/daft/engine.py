@@ -169,13 +169,8 @@ class DaftEngine(Engine):
             List of output dictionaries (one per item)
         """
         if not items:
-            # Handle empty case
-            output_keys = self._get_output_names(pipeline)
-            if output_name is not None:
-                if isinstance(output_name, str):
-                    output_name = [output_name]
-                output_keys = [k for k in output_keys if k in output_name]
-            return {k: [] for k in output_keys}
+            # Handle empty case: return an empty list of per-item dicts
+            return []
 
         # Merge items with shared inputs
         # Each item gets its own row with shared inputs broadcast
@@ -210,20 +205,30 @@ class DaftEngine(Engine):
         # Extract results as dictionary of lists
         result_dict = df.to_pydict()
 
-        # Filter to only outputs (not inputs) and normalize values
+        # Determine which output keys to keep (outputs only, optional filter)
         output_keys = self._get_output_names(pipeline)
-        result: Dict[str, List[Any]] = {}
-        for key, values in result_dict.items():
-            if key in output_keys:
-                result[key] = [self._convert_output_value(value) for value in values]
-
-        # Filter by output_name if specified
         if output_name is not None:
             if isinstance(output_name, str):
                 output_name = [output_name]
-            result = {k: v for k, v in result.items() if k in output_name}
+            output_keys = {k for k in output_keys if k in set(output_name)}
 
-        return result
+        # Keep only present keys
+        present_output_keys = [k for k in result_dict.keys() if k in output_keys]
+        if not present_output_keys:
+            return []
+
+        # Number of rows/items
+        num_rows = len(result_dict[present_output_keys[0]])
+
+        # Build list of per-item dicts and normalize values
+        results_list: List[Dict[str, Any]] = []
+        for i in range(num_rows):
+            row: Dict[str, Any] = {}
+            for k in present_output_keys:
+                row[k] = self._convert_output_value(result_dict[k][i])
+            results_list.append(row)
+
+        return results_list
 
     def _convert_pipeline_to_daft(
         self, pipeline: "Pipeline", df: "daft.DataFrame", input_keys: Set[str]
@@ -715,9 +720,9 @@ class DaftEngine(Engine):
                         # Call original function
                         result = original_func(*converted_args, **converted_kwargs)
 
-                        # Convert Pydantic output to dict
-                        if is_pydantic_return and hasattr(result, "model_dump"):
-                            return result.model_dump()
+                        # For Pydantic outputs, prefer returning the object itself
+                        # so downstream nodes can work with models directly.
+                        # Daft will store these as Python objects when needed.
                         return result
                     except Exception as e:
                         # Log the error with context

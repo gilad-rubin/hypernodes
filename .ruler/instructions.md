@@ -6,6 +6,11 @@
 - prefer to search online and in documentations before acting
 - tests go to tests folder. scripts go to scripts folder
 
+## Coding Principles
+- When designing and implementing features - always prefer using SOLID principles.
+- Use simple, human readable functions rather than massive long indented functions.
+- Split classes functions into helper functions if needed
+
 ## Tools
 - use tavily web search and context7 MCP servers whenever you're stuck or want to understand how a library works
 

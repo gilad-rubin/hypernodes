@@ -5,14 +5,15 @@ and callbacks) works correctly for both regular nodes and PipelineNodes.
 """
 
 import pytest
-from hypernodes import node, Pipeline
+
+from hypernodes import Pipeline, node
 from hypernodes.cache import DiskCache
-from hypernodes.callbacks import PipelineCallback, CallbackContext
+from hypernodes.callbacks import CallbackContext, PipelineCallback
 from hypernodes.node_execution import (
-    execute_single_node,
+    _get_node_id,
     compute_node_signature,
     compute_pipeline_node_signature,
-    _get_node_id,
+    execute_single_node,
 )
 
 
@@ -102,20 +103,6 @@ class TestExecuteSingleNode:
         result2, _ = execute_single_node(not_cached, {"x": 5}, pipeline, [], ctx, {})
         assert result2 == 10
         assert call_count == 2  # Called again!
-
-    @pytest.mark.skip(reason="PipelineNode execution will be fully tested in integration phase")
-    def test_execute_pipeline_node(self):
-        """Test executing a PipelineNode (nested pipeline)."""
-        # This will be properly tested in Phase 5 integration tests
-        # when the full orchestrator + engine is in place
-        pass
-
-    @pytest.mark.skip(reason="PipelineNode execution will be fully tested in integration phase")
-    def test_execute_pipeline_node_with_map_over(self):
-        """Test PipelineNode with map_over parameter."""
-        # This will be properly tested in Phase 5 integration tests
-        # when the full orchestrator + engine is in place
-        pass
 
 
 class TestNodeSignatures:

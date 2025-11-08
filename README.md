@@ -29,9 +29,9 @@ During development, we run pipelines dozens of times with minor tweaks. HyperNod
 
 Functions are nodes. Pipelines are made out of nodes, and Pipelines are nodes themselves. Build complex workflows from simple, reusable pieces.
 
-**☁️ Backend Agnostic**
+**⚡ Flexible Execution**
 
-Write once, run locally or scale to cloud infrastructure. The same pipeline code works on your laptop, a GPU cluster, or serverless functions.
+Run pipelines with different execution strategies: sequential for debugging, async for I/O-bound workloads, threaded for mixed workloads, or parallel for CPU-intensive tasks. Choose the right executor for your use case.
 
 **📊 Observable by Default**
 
@@ -113,26 +113,24 @@ main_pipeline = Pipeline(
 result = main_pipeline.run(inputs={"data_path": "corpus.txt"})
 ```
 
-### Remote Execution (Modal)
+### Async and Parallel Execution
 
 ```python
-# Optional dependency: pip install 'hypernodes[modal]'
-import modal
-from hypernodes import Pipeline
-from hypernodes import ModalBackend
+from hypernodes import Pipeline, HypernodesEngine
 
-# Build a Modal image with your dependencies
-image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install("numpy")
+# Async execution for I/O-bound workloads
+async_pipeline = Pipeline(
+    nodes=[fetch_data, process_data, save_results],
+    engine=HypernodesEngine(node_executor="async"),
 )
 
-gpu_pipeline = Pipeline(
-    nodes=[encode_text, embed_image],
-    backend=ModalBackend(image=image, gpu="A100", memory="32GB"),
+# Parallel execution for CPU-bound workloads
+parallel_pipeline = Pipeline(
+    nodes=[load_data, compute_intensive_task, aggregate],
+    engine=HypernodesEngine(node_executor="parallel"),
 )
 
-result = gpu_pipeline.run(inputs={"text": "Hello", "image": b"..."})
+result = parallel_pipeline.run(inputs={"data": [1, 2, 3, 4, 5]})
 ```
 
 ---
@@ -228,27 +226,60 @@ results2 = pipeline.map(
 
 ---
 
-## 🖥️ Backends
+## 🖥️ Execution Engines
 
-Backends determine **how** (execution strategy) and **where** (infrastructure) nodes execute.
+Engines determine **how** (execution strategy) and **where** (infrastructure) nodes execute.
 
-### LocalBackend
+### HypernodesEngine
+
+The default engine with support for multiple execution strategies:
 
 ```python
-from hypernodes import LocalBackend
+from hypernodes import Pipeline, HypernodesEngine
 
 # Sequential execution (default)
 pipeline = Pipeline(
     nodes=[...],
-    backend=LocalBackend()
+    engine=HypernodesEngine(node_executor="sequential")
+)
+
+# Async execution (I/O-bound workloads, high concurrency)
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine(node_executor="async")
+)
+
+# Threaded execution (CPU-bound with GIL-friendly operations)
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine(node_executor="threaded")
+)
+
+# Parallel execution (CPU-bound, multiprocessing)
+pipeline = Pipeline(
+    nodes=[...],
+    engine=HypernodesEngine(node_executor="parallel")
 )
 ```
 
-### Remote Backend (Modal)
+**Executor Types:**
+- `sequential`: Runs nodes one at a time (good for debugging)
+- `async`: Concurrent execution using asyncio (auto-wraps sync functions)
+- `threaded`: Thread-based parallelism (good for I/O-bound with some CPU work)
+- `parallel`: Process-based parallelism using loky or multiprocessing (CPU-bound)
+
+### DaftEngine (Distributed DataFrames)
+
+For distributed DataFrame-based execution:
 
 ```python
-# See example above in "Remote Execution (Modal)".
-# Requires: pip install 'hypernodes[modal]'
+from hypernodes.engines import DaftEngine
+
+# Requires: pip install 'hypernodes[viz]' and daft
+pipeline = Pipeline(
+    nodes=[...],
+    engine=DaftEngine(collect=True)
+)
 ```
 
 ---
@@ -289,7 +320,7 @@ pipeline = Pipeline(
     callbacks=[TelemetryCallback()],
 )
 
-# Traces are automatically sent to OpenTelemetry-compatible backends
+# Traces are automatically sent to OpenTelemetry-compatible systems
 # (Jaeger, Zipkin, Logfire, etc.)
 ```
 
@@ -340,12 +371,12 @@ Nested pipelines inherit configuration from parents but can override:
 
 ```python
 # Parent defines defaults
-from hypernodes import LocalBackend, DiskCache
+from hypernodes import Pipeline, HypernodesEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 parent = Pipeline(
     nodes=[preprocess, child_pipeline, postprocess],
-    backend=LocalBackend(),
+    engine=HypernodesEngine(node_executor="sequential"),
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()],
 )
@@ -353,16 +384,15 @@ parent = Pipeline(
 # Child inherits all configuration
 child_pipeline = Pipeline(
     nodes=[step1, step2]
-    # Inherits: LocalBackend, DiskCache, ProgressCallback
+    # Inherits: HypernodesEngine, DiskCache, ProgressCallback
 )
 
-# Grandchild overrides backend only (e.g., to Modal)
-# from hypernodes import ModalBackend
-# grandchild_pipeline = Pipeline(
-#     nodes=[gpu_step],
-#     backend=ModalBackend(image=image, gpu="A100"),  # Override
-#     # Inherits: DiskCache, ProgressCallback
-# )
+# Grandchild overrides engine only (e.g., to parallel execution)
+grandchild_pipeline = Pipeline(
+    nodes=[cpu_intensive_step],
+    engine=HypernodesEngine(node_executor="parallel"),  # Override
+    # Inherits: DiskCache, ProgressCallback
+)
 ```
 
 ---
@@ -405,7 +435,7 @@ def test_with_cache():
 2. **Cache-first** - Treat caching as core functionality, not an afterthought
 3. **Test with one, scale to many** - Same code for single items and batch processing
 4. **Hierarchical everything** - Composition through nesting at all levels
-5. **Backend agnostic** - Write once, run anywhere
+5. **Flexible execution** - Choose the right execution strategy for your workload
 6. **Observable** - Visibility into execution is built-in
 
 ---

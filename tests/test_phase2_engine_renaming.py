@@ -5,14 +5,16 @@ Following TDD: These tests are written first, then implementation follows.
 """
 
 import pytest
+
 from hypernodes import Pipeline, node
-from hypernodes.engines import Engine, HypernodesEngine, DaftEngine
+from hypernodes.engines import HypernodesEngine
 
 
 def test_engine_base_class_exists():
     """Verify Engine ABC exists and can be imported."""
-    from hypernodes.engine import Engine
     from abc import ABC
+
+    from hypernodes.engine import Engine
 
     assert issubclass(Engine, ABC)
     assert hasattr(Engine, 'run')
@@ -21,8 +23,9 @@ def test_engine_base_class_exists():
 
 def test_engine_abstract_methods():
     """Verify Engine has required abstract methods with correct signatures."""
-    from hypernodes.engine import Engine
     import inspect
+
+    from hypernodes.engine import Engine
 
     # Check run method signature
     run_sig = inspect.signature(Engine.run)
@@ -42,8 +45,8 @@ def test_engine_abstract_methods():
 
 def test_hypernodes_engine_exists():
     """Verify HypernodesEngine exists and inherits from Engine."""
-    from hypernodes.engines import HypernodesEngine
     from hypernodes.engine import Engine
+    from hypernodes.engines import HypernodesEngine
 
     assert issubclass(HypernodesEngine, Engine)
 
@@ -88,29 +91,6 @@ def test_hypernodes_engine_basic_execution():
     assert result["result"] == 10
 
 
-def test_daft_engine_exists():
-    """Verify DaftEngine exists and inherits from Engine."""
-    try:
-        from hypernodes.executors import DaftEngine
-        from hypernodes.engine import Engine
-
-        assert issubclass(DaftEngine, Engine)
-    except ImportError:
-        pytest.skip("Daft not installed")
-
-
-def test_daft_engine_creation():
-    """Verify DaftEngine can be created."""
-    try:
-        from hypernodes.executors import DaftEngine
-
-        engine = DaftEngine(collect=True)
-        assert engine is not None
-        assert hasattr(engine, 'collect')
-    except ImportError:
-        pytest.skip("Daft not installed")
-
-
 def test_engine_exports():
     """Verify correct classes are exported from hypernodes.engines."""
     from hypernodes import engines
@@ -138,8 +118,9 @@ def test_main_package_exports():
 
 def test_ctx_parameter_is_private():
     """Verify _ctx parameter is clearly marked as internal in Engine interface."""
-    from hypernodes.engine import Engine
     import inspect
+
+    from hypernodes.engine import Engine
 
     # Check run method
     run_sig = inspect.signature(Engine.run)

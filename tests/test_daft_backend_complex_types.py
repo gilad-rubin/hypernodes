@@ -17,7 +17,7 @@ from hypernodes import node, Pipeline
 from pydantic import BaseModel
 
 if DAFT_AVAILABLE:
-    from hypernodes.daft_backend import DaftBackend
+    from hypernodes.engines import DaftEngine
 
 pytestmark = pytest.mark.skipif(not DAFT_AVAILABLE, reason="Daft not installed")
 
@@ -48,7 +48,7 @@ def test_daft_backend_list_of_pydantic_models():
             for i in range(count)
         ]
     
-    pipeline = Pipeline(nodes=[create_documents], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[create_documents], backend=DaftEngine())
     result = pipeline.run(inputs={"count": 3})
     
     assert "documents" in result
@@ -81,7 +81,7 @@ def test_daft_backend_pydantic_to_pydantic():
     
     pipeline = Pipeline(
         nodes=[create_documents, encode_documents],
-        backend=DaftBackend()
+        backend=DaftEngine()
     )
     result = pipeline.run(inputs={"count": 2})
     
@@ -108,7 +108,7 @@ def test_daft_backend_map_with_pydantic():
     
     pipeline = Pipeline(
         nodes=[create_document, encode_document],
-        backend=DaftBackend()
+        backend=DaftEngine()
     )
     
     results = pipeline.map(
@@ -135,7 +135,7 @@ def test_daft_backend_dict_return_type():
     def create_config(name: str, value: int) -> Dict[str, Any]:
         return {"name": name, "value": value, "computed": value * 2}
     
-    pipeline = Pipeline(nodes=[create_config], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[create_config], backend=DaftEngine())
     result = pipeline.run(inputs={"name": "test", "value": 5})
     
     assert "config" in result
@@ -151,7 +151,7 @@ def test_daft_backend_nested_list():
     def create_matrix(rows: int, cols: int) -> List[List[int]]:
         return [[i * cols + j for j in range(cols)] for i in range(rows)]
     
-    pipeline = Pipeline(nodes=[create_matrix], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[create_matrix], backend=DaftEngine())
     result = pipeline.run(inputs={"rows": 2, "cols": 3})
     
     assert "matrix" in result
@@ -172,7 +172,7 @@ def test_daft_backend_any_type():
         else:
             return [i for i in range(value)]
     
-    pipeline = Pipeline(nodes=[flexible_function], backend=DaftBackend())
+    pipeline = Pipeline(nodes=[flexible_function], backend=DaftEngine())
     
     # Test different return types
     result = pipeline.run(inputs={"value": -1})
@@ -207,7 +207,7 @@ def test_daft_backend_mixed_simple_and_complex():
     
     pipeline = Pipeline(
         nodes=[create_documents, count_documents, get_first_text],
-        backend=DaftBackend()
+        backend=DaftEngine()
     )
     result = pipeline.run(inputs={"count": 3})
     

@@ -686,11 +686,28 @@ class HypernodesEngine(Engine):
                         self.map_executor.__class__.__name__ == 'SequentialExecutor')
         
         if is_sequential:
+            # Sequential map: run items one by one while annotating context
+            # so per-item callbacks (start/end/cached) can fire correctly.
             results = []
-            for item in items:
+            # Create a context if none provided (should be provided by Pipeline.map)
+            ctx = _ctx if _ctx is not None else CallbackContext()
+            for idx, item in enumerate(items):
+                # Mark this execution as part of a map operation
+                ctx.set("_in_map", True)
+                ctx.set("_map_item_index", idx)
+                ctx.set("_map_item_start_time", time.time())
+
                 merged_inputs = {**inputs, **item}
-                result = self._execute_pipeline(pipeline, merged_inputs, self.node_executor, _ctx, output_name)
+                result = self._execute_pipeline(
+                    pipeline, merged_inputs, self.node_executor, ctx, output_name
+                )
                 results.append(result)
+
+                # Clear per-item markers to avoid leaking state
+                ctx.set("_map_item_start_time", None)
+            # Unset the in-map flag after processing all items
+            ctx.set("_in_map", False)
+            ctx.set("_map_item_index", None)
             return results
 
         use_async_native = (
