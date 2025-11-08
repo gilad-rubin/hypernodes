@@ -548,6 +548,7 @@ class HypernodesEngine(Engine):
         map_executor: Union[str, Any] = "sequential",
         max_workers: Optional[int] = None,
         async_strategy: str = "auto",
+        loky_timeout: Optional[int] = 1200,
     ):
         self.max_workers = max_workers or os.cpu_count() or 4
         if async_strategy not in ("per_call", "thread_local", "async_native", "auto"):
@@ -556,6 +557,7 @@ class HypernodesEngine(Engine):
                 "('per_call', 'thread_local', 'async_native', 'auto')"
             )
         self.async_strategy = async_strategy
+        self.loky_timeout = loky_timeout
 
         # Store original specs to track ownership
         self._node_executor_spec = node_executor
@@ -597,7 +599,12 @@ class HypernodesEngine(Engine):
                 # Use loky for robust parallel execution with automatic cloudpickle support
                 if _LOKY_AVAILABLE:
                     # get_reusable_executor returns a singleton - don't shut it down!
-                    return get_reusable_executor(max_workers=workers), True  # type: ignore
+                    # Increase timeout to avoid workers stopping between quick cell reruns
+                    try:
+                        return get_reusable_executor(max_workers=workers, timeout=self.loky_timeout), True  # type: ignore
+                    except TypeError:
+                        # Older loky versions may not support timeout; fallback
+                        return get_reusable_executor(max_workers=workers), True  # type: ignore
                 else:
                     # Fallback to standard ProcessPoolExecutor (will have pickling limitations)
                     return ProcessPoolExecutor(max_workers=workers), False
