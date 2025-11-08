@@ -781,8 +781,9 @@ class Pipeline:
         map_over: Union[str, List[str]],
         map_mode: str = "zip",
         output_name: Union[str, List[str], None] = None,
+        return_format: str = "python",
         _ctx=None,
-    ) -> Dict[str, List[Any]]:
+    ) -> Any:
         """Execute pipeline over a collection of inputs.
 
         This method enables batch processing where the pipeline runs multiple times
@@ -800,6 +801,9 @@ class Pipeline:
                        All lists must have the same length.
                      - "product": Create all combinations of items.
                        Lists can have different lengths.
+            return_format: Output representation. Defaults to "python" which
+                returns a dict of lists. Engines may provide additional formats
+                such as "daft" or "arrow" for columnar fast-paths.
             output_name: Optional output name(s) to compute. Can be:
                 - str: Single output name
                 - List[str]: Multiple output names
@@ -808,8 +812,8 @@ class Pipeline:
                 minimal set of nodes needed will be executed.
 
         Returns:
-            Dictionary where each output name maps to a list of results,
-            one per execution. Only requested outputs are included.
+            Dict of lists when ``return_format="python"`` (default). Engines may
+            return engine-native objects for other formats (e.g., Daft DataFrame).
 
         Raises:
             ValueError: If map_mode is "zip" and list lengths don't match
@@ -832,6 +836,13 @@ class Pipeline:
         if map_mode not in ("zip", "product"):
             raise ValueError(f"map_mode must be 'zip' or 'product', got '{map_mode}'")
 
+        allowed_return_formats = {"python", "daft", "arrow"}
+        if return_format not in allowed_return_formats:
+            raise ValueError(
+                f"return_format must be one of {sorted(allowed_return_formats)}, "
+                f"got '{return_format}'"
+            )
+
         # Separate varying and fixed parameters
         varying_params = {}
         fixed_params = {}
@@ -851,40 +862,77 @@ class Pipeline:
             if param not in varying_params:
                 raise ValueError(f"Parameter '{param}' in map_over not found in inputs")
 
-        # Generate execution plans based on map_mode
+        engine = self.effective_engine
+        columnar_result = None
+        columnar_error: Optional[Exception] = None
+        total_items_hint: Optional[int] = None
+
+        zip_lengths: List[int] = []
         if map_mode == "zip":
-            # Validate all lists have same length
-            lengths = [len(lst) for lst in varying_params.values()]
-            if lengths and not all(length == lengths[0] for length in lengths):
+            zip_lengths = [len(lst) for lst in varying_params.values()]
+            if zip_lengths and not all(length == zip_lengths[0] for length in zip_lengths):
                 raise ValueError(
                     f"In zip mode, all lists must have the same length. "
-                    f"Got lengths: {dict(zip(varying_params.keys(), lengths))}"
+                    f"Got lengths: {dict(zip(varying_params.keys(), zip_lengths))}"
                 )
+            total_items_hint = zip_lengths[0] if zip_lengths else 0
 
-            # Create execution plans by zipping
-            if not varying_params or not lengths or lengths[0] == 0:
-                # Empty case
-                execution_plans = []
-            else:
-                # Zip the varying parameters together
-                param_names = list(varying_params.keys())
-                param_lists = [varying_params[name] for name in param_names]
-                execution_plans = [
-                    {**fixed_params, **dict(zip(param_names, values))}
-                    for values in zip(*param_lists)
-                ]
+        if (
+            map_mode == "zip"
+            and hasattr(engine, "map_columnar")
+            and callable(getattr(engine, "map_columnar"))
+        ):
+            try:
+                columnar_result = engine.map_columnar(
+                    pipeline=self,
+                    varying_inputs=varying_params,
+                    fixed_inputs=fixed_params,
+                    output_name=output_name,
+                    return_format=return_format,
+                    _ctx=_ctx,
+                )
+            except Exception as exc:
+                columnar_result = None
+                columnar_error = exc
 
-        else:  # product mode
-            # Create all combinations
-            if not varying_params:
-                execution_plans = [fixed_params]
-            else:
-                param_names = list(varying_params.keys())
-                param_lists = [varying_params[name] for name in param_names]
-                execution_plans = [
-                    {**fixed_params, **dict(zip(param_names, values))}
-                    for values in itertools.product(*param_lists)
-                ]
+        if columnar_result is None:
+            if return_format != "python":
+                detail = (
+                    f"return_format='{return_format}' requires an engine with a "
+                    f"columnar fast-path (e.g., DaftEngine.map_columnar)"
+                )
+                if columnar_error is not None:
+                    raise ValueError(detail) from columnar_error
+                raise ValueError(detail)
+
+            # Generate execution plans based on map_mode
+            if map_mode == "zip":
+                # Create execution plans by zipping
+                if not varying_params or not zip_lengths or zip_lengths[0] == 0:
+                    # Empty case
+                    execution_plans = []
+                else:
+                    # Zip the varying parameters together
+                    param_names = list(varying_params.keys())
+                    param_lists = [varying_params[name] for name in param_names]
+                    execution_plans = [
+                        {**fixed_params, **dict(zip(param_names, values))}
+                        for values in zip(*param_lists)
+                    ]
+
+            else:  # product mode
+                # Create all combinations
+                if not varying_params:
+                    execution_plans = [fixed_params]
+                else:
+                    param_names = list(varying_params.keys())
+                    param_lists = [varying_params[name] for name in param_names]
+                    execution_plans = [
+                        {**fixed_params, **dict(zip(param_names, values))}
+                        for values in itertools.product(*param_lists)
+                    ]
+        else:
+            execution_plans = None
 
         # Execute pipeline for each plan with callbacks
         # Use provided context or create new one for map operation
@@ -931,49 +979,62 @@ class Pipeline:
         )
 
         # Trigger map start callbacks
-        total_items = len(execution_plans)
+        if columnar_result is not None:
+            total_items = total_items_hint if total_items_hint is not None else 0
+        else:
+            total_items = len(execution_plans)
         map_start_time = time.time()
         for callback in callbacks:
             callback.on_map_start(total_items, ctx)
 
-        # Delegate to the engine's map executor for parallel execution
-        # The engine.map() method will use the configured map_executor
-        # (sequential, async, threaded, or parallel)
-        engine = self.effective_engine
-        results_list = engine.map(
-            pipeline=self,
-            items=execution_plans,  # List of input dicts (one per map item)
-            inputs={},  # No shared inputs - all inputs are in the items
-            output_name=output_name,
-            _ctx=ctx,
-        )
+        if columnar_result is None:
+            # Delegate to the engine's map executor for parallel execution
+            # The engine.map() method will use the configured map_executor
+            # (sequential, async, threaded, or parallel)
+            results_list = engine.map(
+                pipeline=self,
+                items=execution_plans,  # List of input dicts (one per map item)
+                inputs={},  # No shared inputs - all inputs are in the items
+                output_name=output_name,
+                _ctx=ctx,
+            )
+        else:
+            results_list = columnar_result
 
         # Trigger map end callbacks
         map_duration = time.time() - map_start_time
         for callback in callbacks:
             callback.on_map_end(map_duration, ctx)
 
-        ctx.pop_pipeline()
+        if columnar_result is not None:
+            if return_format == "python":
+                if not columnar_result:
+                    output_keys = []
+                    for node in self.nodes:
+                        if isinstance(node, Pipeline):
+                            for inner_node in node.nodes:
+                                output_keys.append(inner_node.output_name)
+                        else:
+                            output_keys.append(node.output_name)
+                    columnar_result = {key: [] for key in output_keys}
+            ctx.pop_pipeline()
+            return columnar_result
 
         # Transpose results: from list of dicts to dict of lists
         if not results_list:
-            # Empty case: return empty lists for each output
-            # Determine output keys from pipeline structure
             output_keys = []
             for node in self.nodes:
                 if isinstance(node, Pipeline):
-                    # Nested pipeline - add all its outputs
                     for inner_node in node.nodes:
                         output_keys.append(inner_node.output_name)
                 else:
                     output_keys.append(node.output_name)
             return {key: [] for key in output_keys}
 
-        # Collect all output keys from first result
         output_keys = results_list[0].keys()
-
-        # Transpose: dict of lists
-        return {key: [result[key] for result in results_list] for key in output_keys}
+        result = {key: [result[key] for result in results_list] for key in output_keys}
+        ctx.pop_pipeline()
+        return result
 
     def __enter__(self) -> "Pipeline":
         """Enter context manager.

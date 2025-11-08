@@ -22,6 +22,7 @@ from typing import (
     Union,
     get_args,
     get_origin,
+    get_type_hints,
 )
 
 from hypernodes.engine import Engine
@@ -37,8 +38,12 @@ except ImportError:
 PYARROW_AVAILABLE = importlib.util.find_spec("pyarrow") is not None
 if PYARROW_AVAILABLE:
     import pyarrow  # type: ignore
+    import pyarrow.types as pa_types  # type: ignore
 else:
     pyarrow = None  # type: ignore
+    pa_types = None  # type: ignore
+
+PANDAS_AVAILABLE = importlib.util.find_spec("pandas") is not None
 
 PYDANTIC_AVAILABLE = importlib.util.find_spec("pydantic") is not None
 PYDANTIC_TO_PYARROW_AVAILABLE = (
@@ -71,6 +76,12 @@ class DaftEngine(Engine):
         collect: Whether to automatically collect results (default: True)
         show_plan: Whether to print the execution plan (default: False)
         debug: Whether to enable debug mode (default: False)
+        python_return_strategy: How to materialize Python outputs when
+            ``return_format='python'``. Options:
+            - "auto": prefer Arrow conversion when available, fallback to pydict
+            - "pydict": previous behavior using ``to_pydict()``
+            - "arrow": force Arrow-based conversion (requires pyarrow)
+            - "pandas": materialize via ``to_pandas()`` (requires pandas)
 
     Example:
         >>> from hypernodes import node, Pipeline
@@ -85,8 +96,14 @@ class DaftEngine(Engine):
         >>> # result == {"result": 6}
     """
 
+    PYTHON_STRATEGIES = {"auto", "pydict", "arrow", "pandas"}
+
     def __init__(
-        self, collect: bool = True, show_plan: bool = False, debug: bool = False
+        self,
+        collect: bool = True,
+        show_plan: bool = False,
+        debug: bool = False,
+        python_return_strategy: str = "auto",
     ):
         if not DAFT_AVAILABLE:
             raise ImportError(
@@ -95,6 +112,20 @@ class DaftEngine(Engine):
         self.collect = collect
         self.show_plan = show_plan
         self.debug = debug
+        if python_return_strategy not in self.PYTHON_STRATEGIES:
+            raise ValueError(
+                f"python_return_strategy must be one of "
+                f"{sorted(self.PYTHON_STRATEGIES)}, got '{python_return_strategy}'"
+            )
+        if python_return_strategy in {"arrow"} and not PYARROW_AVAILABLE:
+            raise RuntimeError(
+                "python_return_strategy='arrow' requires pyarrow to be installed"
+            )
+        if python_return_strategy == "pandas" and not PANDAS_AVAILABLE:
+            raise RuntimeError(
+                "python_return_strategy='pandas' requires pandas to be installed"
+            )
+        self.python_return_strategy = python_return_strategy
 
     def run(
         self,
@@ -118,35 +149,34 @@ class DaftEngine(Engine):
         df = daft.from_pydict({k: [v] for k, v in inputs.items()})
 
         # Convert pipeline to DataFrame operations
-        df = self._convert_pipeline_to_daft(pipeline, df, inputs.keys())
+        stateful_inputs = dict(inputs)
+        df = self._convert_pipeline_to_daft(
+            pipeline, df, inputs.keys(), stateful_inputs
+        )
 
         if self.show_plan:
             print("Daft Execution Plan:")
             print(df.explain())
 
+        requested_outputs = self._resolve_requested_outputs(pipeline, output_name)
+        if not requested_outputs:
+            return {}
+
+        df = self._select_output_columns(df, requested_outputs)
+
         # Collect results
         if self.collect:
             df = df.collect()
 
-        # Extract results as dictionary (first row only for single run)
+        # Extract requested results (single row)
         result_dict = df.to_pydict()
+        row_values = {}
+        for key in requested_outputs:
+            column = result_dict.get(key)
+            if column:
+                row_values[key] = self._convert_output_value(column[0])
 
-        row_values = {k: v[0] for k, v in result_dict.items()}
-
-        # Filter to only outputs (not inputs)
-        output_keys = self._get_output_names(pipeline)
-        result = {k: row_values[k] for k in row_values if k in output_keys}
-
-        # Filter by output_name if specified
-        if output_name is not None:
-            if isinstance(output_name, str):
-                output_name = [output_name]
-            result = {k: v for k, v in result.items() if k in output_name}
-
-        # Normalize Daft/PyArrow values to standard Python types
-        result = {k: self._convert_output_value(v) for k, v in result.items()}
-
-        return result
+        return row_values
 
     def map(
         self,
@@ -185,53 +215,111 @@ class DaftEngine(Engine):
             if key not in data_dict:
                 data_dict[key] = [value] * len(items)
 
-        # Create DataFrame
-        df = daft.from_pydict(data_dict)
+        # Track stateful/shared inputs (explicit inputs + detected constants)
+        stateful_inputs = dict(inputs)
 
-        # Get input keys (both varying and fixed)
-        input_keys = set(data_dict.keys())
+        stateful_constant_cols: List[str] = []
+        for key, values in data_dict.items():
+            if not values:
+                continue
+            first_value = values[0]
+            is_constant = True
+            for value in values[1:]:
+                equal = value is first_value
+                if not equal:
+                    try:
+                        equal = value == first_value
+                    except Exception:
+                        equal = False
+                if not equal:
+                    is_constant = False
+                    break
+            if is_constant:
+                stateful_inputs.setdefault(key, first_value)
+                if getattr(self, "debug", False):
+                    print(f"[DaftEngine] Detected constant column '{key}'")
+                if self._has_daft_cls_hint(first_value) and self._pipeline_accepts_stateful_param(
+                    pipeline, key, first_value
+                ):
+                    stateful_constant_cols.append(key)
 
-        # Convert pipeline to DataFrame operations
-        df = self._convert_pipeline_to_daft(pipeline, df, input_keys)
+        for key in stateful_constant_cols:
+            data_dict.pop(key, None)
 
-        if self.show_plan:
-            print("Daft Execution Plan:")
-            print(df.explain())
+        outputs = self._map_dataframe(
+            pipeline,
+            data_dict,
+            output_name,
+            initial_stateful_inputs=stateful_inputs,
+            return_format="python",
+        )
 
-        # Collect results
-        if self.collect:
-            df = df.collect()
-
-        # Extract results as dictionary of lists
-        result_dict = df.to_pydict()
-
-        # Determine which output keys to keep (outputs only, optional filter)
-        output_keys = self._get_output_names(pipeline)
-        if output_name is not None:
-            if isinstance(output_name, str):
-                output_name = [output_name]
-            output_keys = {k for k in output_keys if k in set(output_name)}
-
-        # Keep only present keys
-        present_output_keys = [k for k in result_dict.keys() if k in output_keys]
-        if not present_output_keys:
+        # Convert dict-of-lists into list-of-dicts for Pipeline.map
+        if not outputs:
             return []
 
-        # Number of rows/items
-        num_rows = len(result_dict[present_output_keys[0]])
-
-        # Build list of per-item dicts and normalize values
+        num_rows = len(next(iter(outputs.values())))
         results_list: List[Dict[str, Any]] = []
         for i in range(num_rows):
-            row: Dict[str, Any] = {}
-            for k in present_output_keys:
-                row[k] = self._convert_output_value(result_dict[k][i])
+            row = {key: outputs[key][i] for key in outputs}
             results_list.append(row)
 
         return results_list
 
+    def map_columnar(
+        self,
+        pipeline: "Pipeline",
+        varying_inputs: Dict[str, List[Any]],
+        fixed_inputs: Dict[str, Any],
+        output_name: Union[str, List[str], None],
+        return_format: str = "python",
+        _ctx: Optional[CallbackContext] = None,
+    ) -> Optional[Any]:
+        """Columnar fast-path for Pipeline.map when map_mode='zip'.
+
+        Returns:
+            Engine-native output honoring ``return_format`` if handled,
+            otherwise ``None`` to signal fallback to Python execution.
+        """
+        if not varying_inputs:
+            return {}
+
+        # Determine number of rows
+        first_key = next(iter(varying_inputs.keys()))
+        num_rows = len(varying_inputs[first_key])
+        if num_rows == 0:
+            return {}
+
+        # Build columnar data dict
+        data_dict: Dict[str, List[Any]] = {
+            key: list(values) for key, values in varying_inputs.items()
+        }
+
+        for key, value in fixed_inputs.items():
+            if isinstance(value, list):
+                if len(value) != num_rows:
+                    raise ValueError(
+                        f"Fixed parameter '{key}' list length {len(value)} "
+                        f"does not match varying inputs length {num_rows}"
+                    )
+                data_dict[key] = list(value)
+            else:
+                data_dict[key] = [value] * num_rows
+
+        return self._map_dataframe(
+            pipeline,
+            data_dict,
+            output_name,
+            initial_stateful_inputs=fixed_inputs,
+            return_format=return_format,
+        )
+
     def _convert_pipeline_to_daft(
-        self, pipeline: "Pipeline", df: "daft.DataFrame", input_keys: Set[str]
+        self,
+        pipeline: "Pipeline",
+        df: "daft.DataFrame",
+        input_keys: Set[str],
+        stateful_inputs: Dict[str, Any],
     ) -> "daft.DataFrame":
         """Convert a HyperNodes pipeline to Daft DataFrame operations.
 
@@ -243,6 +331,12 @@ class DaftEngine(Engine):
         Returns:
             DataFrame with all pipeline transformations applied
         """
+        if stateful_inputs and getattr(self, "debug", False):
+            print(
+                f"[DaftEngine] Converting pipeline '{getattr(pipeline, 'name', pipeline)}' "
+                f"with stateful inputs: {list(stateful_inputs.keys())}"
+            )
+
         # Track available columns
         available = set(input_keys)
 
@@ -251,7 +345,9 @@ class DaftEngine(Engine):
             # Check if this is a PipelineNode (wraps a pipeline)
             if hasattr(node, "pipeline") and hasattr(node, "input_mapping"):
                 # PipelineNode - handle input/output mapping
-                df = self._convert_pipeline_node_to_daft(node, df, available)
+                df = self._convert_pipeline_node_to_daft(
+                    node, df, available, stateful_inputs
+                )
                 # Update available columns with mapped output names
                 output_name = node.output_name
                 if isinstance(output_name, tuple):
@@ -261,12 +357,16 @@ class DaftEngine(Engine):
             # Check if this is a direct Pipeline (has 'nodes' attribute)
             elif hasattr(node, "nodes") and hasattr(node, "run"):
                 # Nested pipeline - recursively convert
-                df = self._convert_pipeline_to_daft(node, df, available)
+                df = self._convert_pipeline_to_daft(
+                    node, df, available, stateful_inputs
+                )
                 # Update available columns with nested pipeline outputs
                 available.update(self._get_output_names(node))
             elif hasattr(node, "func"):
                 # Regular node - convert to UDF
-                df = self._convert_node_to_daft(node, df, available)
+                df = self._convert_node_to_daft(
+                    node, df, available, stateful_inputs
+                )
                 # Update available columns
                 if hasattr(node, "output_name"):
                     available.add(node.output_name)
@@ -277,7 +377,11 @@ class DaftEngine(Engine):
         return df
 
     def _convert_pipeline_node_to_daft(
-        self, pipeline_node: Any, df: "daft.DataFrame", available: Set[str]
+        self,
+        pipeline_node: Any,
+        df: "daft.DataFrame",
+        available: Set[str],
+        stateful_inputs: Dict[str, Any],
     ) -> "daft.DataFrame":
         """Convert a PipelineNode (created with .as_node()) to Daft operations.
 
@@ -295,7 +399,9 @@ class DaftEngine(Engine):
         """
         # Check if this PipelineNode uses map_over
         if hasattr(pipeline_node, "map_over") and pipeline_node.map_over:
-            return self._convert_mapped_pipeline_node(pipeline_node, df, available)
+            return self._convert_mapped_pipeline_node(
+                pipeline_node, df, available, stateful_inputs
+            )
 
         # Get the inner pipeline and mappings
         inner_pipeline = pipeline_node.pipeline
@@ -306,10 +412,17 @@ class DaftEngine(Engine):
         # by renaming columns before and after the inner pipeline execution
 
         # Apply input mapping: rename outer columns to inner names
+        inner_stateful_inputs = dict(stateful_inputs)
+
         if input_mapping:
             # Create column aliases for the inner pipeline
             rename_exprs = []
             inner_available = set()
+            mapped_stateful = dict(stateful_inputs)
+            for outer_name, inner_name in input_mapping.items():
+                if outer_name in stateful_inputs:
+                    mapped_stateful[inner_name] = stateful_inputs[outer_name]
+            inner_stateful_inputs = mapped_stateful
 
             for outer_name, inner_name in input_mapping.items():
                 if outer_name in available:
@@ -330,7 +443,9 @@ class DaftEngine(Engine):
             inner_available = available.copy()
 
         # Convert the inner pipeline (modifies df in place)
-        df = self._convert_pipeline_to_daft(inner_pipeline, df, inner_available)
+        df = self._convert_pipeline_to_daft(
+            inner_pipeline, df, inner_available, inner_stateful_inputs
+        )
 
         # Apply output mapping: rename inner outputs to outer names
         if output_mapping:
@@ -357,7 +472,11 @@ class DaftEngine(Engine):
         return df
 
     def _convert_mapped_pipeline_node(
-        self, pipeline_node: Any, df: "daft.DataFrame", available: Set[str]
+        self,
+        pipeline_node: Any,
+        df: "daft.DataFrame",
+        available: Set[str],
+        stateful_inputs: Dict[str, Any],
     ) -> "daft.DataFrame":
         """Convert a PipelineNode with map_over to Daft operations.
 
@@ -446,8 +565,16 @@ class DaftEngine(Engine):
         df_exploded = df_exploded.select(*rename_exprs)
 
         # Step 4: Run inner pipeline on exploded DataFrame
+        inner_stateful_inputs = dict(stateful_inputs)
+        mapped_stateful = {}
+        for outer_name, inner_name in input_mapping.items():
+            if outer_name in stateful_inputs:
+                mapped_stateful[inner_name] = stateful_inputs[outer_name]
+
+        inner_stateful_inputs.update(mapped_stateful)
+
         df_transformed = self._convert_pipeline_to_daft(
-            inner_pipeline, df_exploded, inner_available
+            inner_pipeline, df_exploded, inner_available, inner_stateful_inputs
         )
 
         # Step 5: Apply output mapping (if any)
@@ -517,7 +644,11 @@ class DaftEngine(Engine):
         return df_result
 
     def _convert_node_to_daft(
-        self, node: Any, df: "daft.DataFrame", available: Set[str]
+        self,
+        node: Any,
+        df: "daft.DataFrame",
+        available: Set[str],
+        stateful_inputs: Dict[str, Any],
     ) -> "daft.DataFrame":
         """Convert a single node to a Daft UDF and apply it.
 
@@ -536,12 +667,26 @@ class DaftEngine(Engine):
         # Get node parameters that are available
         params = [p for p in node.parameters if p in available]
 
+        if stateful_inputs and getattr(self, "debug", False):
+            print(
+                f"[DaftEngine] Node '{getattr(node, 'output_name', node)}' "
+                f"stateful candidates: {list(stateful_inputs.keys())}"
+            )
+
         # Check if return type is Pydantic and wrap if needed
         try:
-            from typing import get_type_hints
-
             type_hints = get_type_hints(func)
             return_type = type_hints.get("return", None)
+        except Exception:
+            type_hints = {}
+            return_type = None
+
+        stateful_values = self._resolve_stateful_params(
+            params, stateful_inputs, type_hints
+        )
+        dynamic_params = [p for p in params if p not in stateful_values]
+
+        try:
 
             # Check parameter types for Pydantic models (for input conversion)
             # This dict maps param_name -> (container_type, pydantic_type)
@@ -744,7 +889,11 @@ class DaftEngine(Engine):
             if return_type is not None:
                 inferred_dtype = self._infer_return_dtype(return_type)
 
-            if inferred_dtype is not None:
+            if stateful_values:
+                daft_func = self._build_stateful_udf(
+                    func, params, stateful_values, inferred_dtype
+                )
+            elif inferred_dtype is not None:
                 daft_func = daft.func(func, return_dtype=inferred_dtype)
             else:
                 # No usable hint, try automatic inference
@@ -755,7 +904,7 @@ class DaftEngine(Engine):
 
         # Apply the UDF to the DataFrame
         # Build column expressions for parameters
-        col_exprs = [df[param] for param in params]
+        col_exprs = [df[param] for param in dynamic_params]
 
         # Apply the function and add as new column
         df = df.with_column(output_name, daft_func(*col_exprs))
@@ -825,6 +974,374 @@ class DaftEngine(Engine):
             return [self._convert_output_value(v) for v in value]
 
         return value
+
+    def _resolve_requested_outputs(
+        self, pipeline: "Pipeline", output_name: Union[str, List[str], None]
+    ) -> List[str]:
+        """Determine which outputs should be materialized/collected."""
+
+        ordered_outputs = self._ordered_output_names(pipeline)
+        available = set(ordered_outputs)
+
+        if output_name is None:
+            return ordered_outputs
+
+        if isinstance(output_name, str):
+            requested = [output_name]
+        else:
+            # Preserve user order while removing duplicates
+            seen = set()
+            requested = []
+            for name in output_name:
+                if name not in seen:
+                    requested.append(name)
+                    seen.add(name)
+
+        missing = [name for name in requested if name not in available]
+        if missing:
+            raise ValueError(
+                f"Requested output(s) {missing} not found in pipeline outputs {ordered_outputs}"
+            )
+        return requested
+
+    def _ordered_output_names(self, pipeline: "Pipeline") -> List[str]:
+        """Get output names in deterministic pipeline order."""
+
+        ordered: List[str] = []
+        for node in pipeline.nodes:
+            if hasattr(node, "pipeline") and hasattr(node, "input_mapping"):
+                inner_outputs = self._ordered_output_names(node.pipeline)
+                output_mapping = getattr(node, "output_mapping", None) or {}
+                for name in inner_outputs:
+                    mapped = output_mapping.get(name, name)
+                    if mapped not in ordered:
+                        ordered.append(mapped)
+            elif hasattr(node, "nodes") and hasattr(node, "run"):
+                for name in self._ordered_output_names(node):
+                    if name not in ordered:
+                        ordered.append(name)
+            elif hasattr(node, "output_name"):
+                output_name = node.output_name
+                if isinstance(output_name, tuple):
+                    for name in output_name:
+                        if name not in ordered:
+                            ordered.append(name)
+                else:
+                    if output_name not in ordered:
+                        ordered.append(output_name)
+        return ordered
+
+    def _select_output_columns(
+        self, df: "daft.DataFrame", columns: List[str]
+    ) -> "daft.DataFrame":
+        """Return DataFrame narrowed to requested columns only."""
+
+        if not columns:
+            return df
+
+        missing = [col for col in columns if col not in df.column_names]
+        if missing:
+            raise ValueError(f"Missing expected output columns: {missing}")
+
+        return df.select(*(df[col] for col in columns))
+
+    def _map_dataframe(
+        self,
+        pipeline: "Pipeline",
+        data_dict: Dict[str, List[Any]],
+        output_name: Union[str, List[str], None],
+        initial_stateful_inputs: Optional[Dict[str, Any]] = None,
+        return_format: str = "python",
+    ) -> Any:
+        """Execute pipeline using a prepared columnar dict."""
+
+        stateful_inputs = dict(initial_stateful_inputs or {})
+
+        # Detect constant columns that should be treated as stateful
+        for key, values in data_dict.items():
+            if not values:
+                continue
+            first_value = values[0]
+            is_constant = True
+            for value in values[1:]:
+                equal = value is first_value
+                if not equal:
+                    try:
+                        equal = value == first_value
+                    except Exception:
+                        equal = False
+                if not equal:
+                    is_constant = False
+                    break
+            if is_constant and key not in stateful_inputs:
+                stateful_inputs[key] = first_value
+                if getattr(self, "debug", False):
+                    print(f"[DaftEngine] Detected constant column '{key}'")
+
+        # Remove stateful-only columns from DataFrame inputs
+        for key in list(stateful_inputs.keys()):
+            if key in data_dict and self._has_daft_cls_hint(stateful_inputs[key]):
+                data_dict.pop(key, None)
+
+        if not data_dict:
+            if return_format == "python":
+                return {}
+            raise ValueError(
+                "No varying inputs available for columnar execution; "
+                f"return_format='{return_format}' cannot be produced."
+            )
+
+        df = daft.from_pydict(data_dict)
+
+        input_keys = set(data_dict.keys()) | set(stateful_inputs.keys())
+        requested_outputs = self._resolve_requested_outputs(pipeline, output_name)
+        if not requested_outputs:
+            return {}
+
+        df = self._convert_pipeline_to_daft(
+            pipeline, df, input_keys, stateful_inputs
+        )
+        df = self._select_output_columns(df, requested_outputs)
+
+        if self.show_plan:
+            print("Daft Execution Plan:")
+            print(df.explain())
+
+        materialized = df.collect() if self.collect else df
+
+        if return_format == "daft":
+            return materialized
+
+        if return_format == "arrow":
+            if not PYARROW_AVAILABLE:
+                raise RuntimeError(
+                    "return_format='arrow' requires pyarrow to be installed"
+                )
+            return materialized.to_arrow()
+
+        if return_format != "python":
+            raise ValueError(f"Unsupported return_format '{return_format}'")
+
+        return self._materialize_python_outputs(
+            materialized, requested_outputs
+        )
+
+    def _materialize_python_outputs(
+        self, materialized: "daft.DataFrame", requested_outputs: List[str]
+    ) -> Dict[str, List[Any]]:
+        """Convert Daft DataFrame into python outputs according to strategy."""
+
+        if not requested_outputs:
+            return {}
+
+        strategy = self.python_return_strategy
+        if strategy == "auto":
+            return self._convert_via_pydict(materialized, requested_outputs)
+        if strategy == "pydict":
+            return self._convert_via_pydict(materialized, requested_outputs)
+        if strategy == "arrow":
+            if not PYARROW_AVAILABLE:
+                raise RuntimeError(
+                    "python_return_strategy='arrow' requires pyarrow to be installed"
+                )
+            return self._convert_via_arrow(materialized, requested_outputs)
+        if strategy == "pandas":
+            if not PANDAS_AVAILABLE:
+                raise RuntimeError(
+                    "python_return_strategy='pandas' requires pandas to be installed"
+                )
+            return self._convert_via_pandas(materialized, requested_outputs)
+
+        raise ValueError(f"Unsupported python_return_strategy '{strategy}'")
+
+    def _convert_via_pydict(
+        self, materialized: "daft.DataFrame", requested_outputs: List[str]
+    ) -> Dict[str, List[Any]]:
+        """Previous behavior: rely on Daft's to_pydict conversion."""
+
+        result_dict = materialized.to_pydict()
+        if not result_dict:
+            return {}
+
+        outputs: Dict[str, List[Any]] = {}
+        for key in requested_outputs:
+            column = result_dict.get(key)
+            if column is None:
+                continue
+            outputs[key] = [self._convert_output_value(v) for v in column]
+        return outputs
+
+    def _convert_via_arrow(
+        self, materialized: "daft.DataFrame", requested_outputs: List[str]
+    ) -> Dict[str, List[Any]]:
+        """Use PyArrow Table conversion to minimize Python overhead."""
+
+        if not PYARROW_AVAILABLE:
+            raise RuntimeError("PyArrow is required for arrow conversion")
+        table = materialized.to_arrow()
+        if table.num_rows == 0:
+            return {}
+
+        outputs: Dict[str, List[Any]] = {}
+        for key in requested_outputs:
+            if key not in table.column_names:
+                continue
+            column = table.column(key)
+            raw_values = self._arrow_column_to_list(column)
+            outputs[key] = [self._convert_output_value(v) for v in raw_values]
+        return outputs
+
+    def _convert_via_pandas(
+        self, materialized: "daft.DataFrame", requested_outputs: List[str]
+    ) -> Dict[str, List[Any]]:
+        """Convert via pandas DataFrame for mixed object columns."""
+
+        if not PANDAS_AVAILABLE:
+            raise RuntimeError("pandas is required for pandas conversion")
+        df_pd = materialized.to_pandas()
+        if df_pd.empty:
+            return {}
+
+        outputs: Dict[str, List[Any]] = {}
+        for key in requested_outputs:
+            if key not in df_pd.columns:
+                continue
+            column = df_pd[key].tolist()
+            outputs[key] = [self._convert_output_value(v) for v in column]
+        return outputs
+
+    def _arrow_column_to_list(self, column: "pyarrow.ChunkedArray") -> List[Any]:
+        """Convert a PyArrow ChunkedArray to a Python list efficiently."""
+
+        if not PYARROW_AVAILABLE:
+            raise RuntimeError("pyarrow is required for arrow conversion")
+
+        if pa_types and (
+            pa_types.is_integer(column.type)
+            or pa_types.is_floating(column.type)
+            or pa_types.is_boolean(column.type)
+        ):
+            # Use zero-copy numpy access when possible
+            return column.to_numpy(zero_copy_only=False).tolist()
+
+        # Fall back to chunked to_pylist for complex types
+        if column.num_chunks <= 1:
+            return column.to_pylist()
+
+        values: List[Any] = []
+        for chunk in column.chunks:
+            values.extend(chunk.to_pylist())
+        return values
+
+    def _pipeline_accepts_stateful_param(
+        self, pipeline: "Pipeline", param_name: str, value: Any
+    ) -> bool:
+        """Check if any node in the pipeline can consume the param as stateful."""
+
+        for node in pipeline.nodes:
+            if hasattr(node, "pipeline") and hasattr(node, "input_mapping"):
+                mapping = getattr(node, "input_mapping", {}) or {}
+                inner_name = mapping.get(param_name)
+                if inner_name and self._pipeline_accepts_stateful_param(
+                    node.pipeline, inner_name, value
+                ):
+                    return True
+            elif hasattr(node, "nodes") and hasattr(node, "run"):
+                if self._pipeline_accepts_stateful_param(node, param_name, value):
+                    return True
+            elif hasattr(node, "func"):
+                try:
+                    type_hints = get_type_hints(node.func)
+                except Exception:
+                    type_hints = {}
+                hint = type_hints.get(param_name)
+                if hint and self._has_daft_cls_hint(hint):
+                    return True
+                if (
+                    param_name in getattr(node, "parameters", ())
+                    and self._has_daft_cls_hint(value)
+                ):
+                    return True
+        return False
+
+    def _resolve_stateful_params(
+        self,
+        params: List[str],
+        stateful_inputs: Dict[str, Any],
+        type_hints: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Identify parameters that should be captured via @daft.cls."""
+
+        resolved: Dict[str, Any] = {}
+        for param in params:
+            if param not in stateful_inputs:
+                continue
+            value = stateful_inputs[param]
+            hint = type_hints.get(param)
+            if self._has_daft_cls_hint(hint) or self._has_daft_cls_hint(value):
+                resolved[param] = value
+            elif getattr(self, "debug", False):
+                print(
+                    f"[DaftEngine] Skipping stateful candidate '{param}' "
+                    f"(hint={hint}, value_type={type(value)})"
+                )
+        if resolved and getattr(self, "debug", False):
+            print(
+                f"[DaftEngine] Captured stateful params {list(resolved.keys())}"
+            )
+        return resolved
+
+    def _has_daft_cls_hint(self, obj: Any) -> bool:
+        """Return True if object/type requests @daft.cls."""
+
+        if obj is None:
+            return False
+        hint = getattr(obj, "__daft_hint__", None)
+        if isinstance(hint, str):
+            normalized = hint.lower()
+            return normalized in {"@daft.cls", "daft.cls", "cls"}
+        if getattr(obj, "__daft_stateful__", False):
+            return True
+        return False
+
+    def _build_stateful_udf(
+        self,
+        func: Any,
+        params: List[str],
+        stateful_values: Dict[str, Any],
+        inferred_dtype: Optional["daft.DataType"],
+    ):
+        """Create a @daft.cls wrapper that captures stateful parameters."""
+
+        import daft
+
+        dynamic_params = [p for p in params if p not in stateful_values]
+
+        method_kwargs: Dict[str, Any] = {}
+        if inferred_dtype is None:
+            inferred_dtype = daft.DataType.python()
+        method_kwargs["return_dtype"] = inferred_dtype
+
+        method_decorator = daft.method(**method_kwargs) if method_kwargs else daft.method()
+
+        @daft.cls
+        class StatefulWrapper:
+            def __init__(self, payload: Dict[str, Any]):
+                self._payload = payload
+
+            @method_decorator
+            def __call__(self, *args):
+                arg_iter = iter(args)
+                kwargs = {}
+                for param in params:
+                    if param in self._payload:
+                        kwargs[param] = self._payload[param]
+                    else:
+                        kwargs[param] = next(arg_iter)
+                return func(**kwargs)
+
+        wrapper = StatefulWrapper(stateful_values)
+        return wrapper.__call__
 
     def _infer_return_dtype(self, return_type: Any) -> Optional["daft.DataType"]:
         """Infer an appropriate Daft DataType for a node return annotation.
