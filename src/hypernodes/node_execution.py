@@ -14,6 +14,8 @@ traversal.
 
 import hashlib
 import time
+import asyncio
+import inspect
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from .cache import compute_signature, hash_code, hash_inputs
@@ -287,6 +289,17 @@ def execute_single_node(
         else:
             # Regular node - call directly
             result = node(**inputs)
+            # If result is a coroutine, we need to await it
+            if inspect.iscoroutine(result):
+                # We're in a sync context, so we need to run the coroutine
+                # Check if there's already a running event loop
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context - shouldn't happen in current design
+                    raise RuntimeError("Unexpected async context in execute_single_node")
+                except RuntimeError:
+                    # No running loop - create one and run the coroutine
+                    result = asyncio.run(result)
 
         # Trigger node end callbacks
         node_duration = time.time() - node_start_time

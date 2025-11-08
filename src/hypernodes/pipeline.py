@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 import networkx as nx
 
-from .backend import Backend, LocalBackend
+from .engine import Engine, HypernodesEngine
 from .cache import Cache
 from .callbacks import PipelineCallback
 from .exceptions import CycleError, DependencyError
@@ -252,7 +252,7 @@ class Pipeline:
 
     Attributes:
         nodes: List of Node instances or nested Pipelines
-        backend: Backend for executing the pipeline (default: LocalBackend)
+        backend: Engine for executing the pipeline (default: HypernodesEngine)
         output_to_node: Mapping from output names to nodes
         graph: NetworkX DiGraph representing dependencies (cached)
         execution_order: Topologically sorted list of nodes (cached)
@@ -262,7 +262,7 @@ class Pipeline:
     def __init__(
         self,
         nodes: List[Union[Node, "Pipeline"]],
-        backend: Backend = None,
+        backend: Engine = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
@@ -272,7 +272,7 @@ class Pipeline:
 
         Args:
             nodes: List of Node instances or Pipeline instances (which are auto-wrapped)
-            backend: Backend for execution (default: LocalBackend())
+            backend: Engine for execution (default: HypernodesEngine())
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
             name: Human-readable name for the pipeline (used in visualization)
@@ -585,20 +585,20 @@ class Pipeline:
     # Fluent Builder Methods
     # ======================
 
-    def with_backend(self, backend: "Backend") -> "Pipeline":
+    def with_backend(self, backend: "Engine") -> "Pipeline":
         """Configure pipeline with a specific backend.
 
         Returns the same pipeline instance for method chaining.
 
         Args:
-            backend: Backend instance (LocalBackend, ModalBackend, etc.)
+            backend: Engine instance (HypernodesEngine, DaftEngine, etc.)
 
         Returns:
             Self for method chaining
 
         Example:
             >>> pipeline = Pipeline(nodes=[...]).with_backend(
-            ...     ModalBackend(image=my_image, gpu="A100")
+            ...     HypernodesEngine(node_executor="threaded")
             ... )
         """
         self.backend = backend
@@ -663,16 +663,16 @@ class Pipeline:
 
     @property
     def effective_backend(self):
-        """Get effective backend (inherited from parent if not set).
+        """Get effective engine (inherited from parent if not set).
 
         Returns:
-            Backend to use for execution
+            Engine to use for execution
         """
         if self.backend is not None:
             return self.backend
         if self._parent is not None:
             return self._parent.effective_backend
-        return LocalBackend()  # Default
+        return HypernodesEngine()  # Default
 
     @property
     def effective_cache(self):

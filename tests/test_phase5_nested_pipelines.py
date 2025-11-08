@@ -7,7 +7,8 @@ configuration inheritance, and .as_node() with input/output mapping.
 
 from typing import List, NamedTuple, Sequence
 
-from hypernodes import DiskCache, LocalBackend, Pipeline, PipelineCallback, node
+from hypernodes import DiskCache, Pipeline, PipelineCallback, node
+from hypernodes.engine import HypernodesEngine
 
 # =======================
 # Test 5.1: Simple Nested Pipeline
@@ -524,7 +525,7 @@ def test_5_12_configuration_inheritance_backend_only():
     inner = Pipeline(nodes=[double, add_one])
 
     # Parent defines backend
-    outer = Pipeline(nodes=[inner], backend=LocalBackend())
+    outer = Pipeline(nodes=[inner], backend=HypernodesEngine())
 
     result = outer.run(inputs={"x": 5})
     assert result["result"] == 11
@@ -554,11 +555,11 @@ def test_5_13_configuration_inheritance_selective_override():
     # Parent with configuration
     parent_callback = PipelineCallback()
     parent = Pipeline(
-        nodes=[process], backend=LocalBackend(), callbacks=[parent_callback]
+        nodes=[process], backend=HypernodesEngine(), callbacks=[parent_callback]
     )
 
     # Child overrides only backend
-    child_backend = LocalBackend()
+    child_backend = HypernodesEngine()
     child = Pipeline(nodes=[process], backend=child_backend, parent=parent)
 
     # Verify inheritance
@@ -585,14 +586,14 @@ def test_5_14_configuration_inheritance_recursive_chain():
         return x * 2
 
     # Level 1: Define all configuration
-    level_1_backend = LocalBackend()
+    level_1_backend = HypernodesEngine()
     level_1_callback = PipelineCallback()
     level_1 = Pipeline(
         nodes=[process], backend=level_1_backend, callbacks=[level_1_callback]
     )
 
     # Level 2: Override backend only
-    level_2_backend = LocalBackend()
+    level_2_backend = HypernodesEngine()
     level_2 = Pipeline(nodes=[process], backend=level_2_backend, parent=level_1)
 
     # Level 3: No overrides, inherits from level_2
@@ -700,7 +701,7 @@ def test_5_17_configuration_inheritance_full_inheritance():
         return x * 2
 
     # Outer with full configuration
-    outer_backend = LocalBackend()
+    outer_backend = HypernodesEngine()
     outer_cache = DiskCache(path=".cache_test_5_17")
     outer_cache.clear()  # Clear any stale cache data
     outer_callback = PipelineCallback()

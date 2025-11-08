@@ -26,7 +26,7 @@ Example:
 
 from .node import Node, node
 from .pipeline import Pipeline
-from .executors import Engine, HyperNodesEngine
+from .engines import Engine, HypernodesEngine
 from .cache import DiskCache
 from .callbacks import PipelineCallback, CallbackContext
 from .exceptions import (
@@ -44,7 +44,7 @@ from .visualization import (
 
 # Optional: DaftEngine (requires daft to be installed)
 try:
-    from .executors import DaftEngine
+    from .engines import DaftEngine
     _DAFT_AVAILABLE = True
 except ImportError:
     _DAFT_AVAILABLE = False
@@ -75,7 +75,7 @@ __all__ = [
     # Note: telemetry module is available but not exported at top level
     # Use: from hypernodes.telemetry import ProgressCallback, TelemetryCallback
     # Note: DaftEngine is available if daft is installed
-    # Use: from hypernodes.executors import DaftEngine
+    # Use: from hypernodes.engines import DaftEngine
 ]
 
 if _DAFT_AVAILABLE:

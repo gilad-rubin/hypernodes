@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 from hypernodes import node, Pipeline
 from hypernodes.engine import HypernodesEngine, Engine
-from hypernodes.executor_adapters import SequentialExecutor, AsyncExecutor
+from hypernodes.executors import SequentialExecutor, AsyncExecutor
 
 
 class TestEngineBasic:
@@ -182,6 +182,7 @@ class TestEngineComplexPipelines:
         result = engine.run(pipeline, {"x": 5}, output_name="b")
 
         # Should compute a and b, but not c
-        assert "a" in result
-        assert "b" in result
-        assert result["b"] == 20
+        # Output should only contain "b"
+        assert result == {"b": 20}
+        assert "a" not in result  # Dependency computed but filtered from output
+        assert "c" not in result  # Not computed

@@ -8,7 +8,7 @@ import asyncio
 import pytest
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-from hypernodes.executor_adapters import (
+from hypernodes.executors import (
     SequentialExecutor,
     AsyncExecutor,
     DEFAULT_WORKERS,

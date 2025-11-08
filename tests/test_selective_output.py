@@ -7,7 +7,7 @@ allowing pipelines to execute only the minimal set of nodes needed.
 import pytest
 
 from hypernodes import Pipeline, node
-from hypernodes.backend import LocalBackend
+from hypernodes.engine import HypernodesEngine
 
 
 # Test nodes for building pipelines
@@ -204,8 +204,8 @@ class TestSelectiveOutputExecutionModes:
     @pytest.mark.parametrize("node_execution", ["sequential", "async", "threaded"])
     def test_different_execution_modes(self, node_execution):
         """Test selective output works with different execution modes."""
-        backend = LocalBackend(node_execution=node_execution)
-        pipeline = Pipeline(nodes=[node_a, node_b, node_c], backend=backend)
+        engine = HypernodesEngine(node_executor=node_execution)
+        pipeline = Pipeline(nodes=[node_a, node_b, node_c], backend=engine)
 
         result = pipeline.run(inputs={"x": 5}, output_name="b")
 
