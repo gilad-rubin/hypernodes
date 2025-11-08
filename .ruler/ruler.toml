@@ -9,9 +9,9 @@
 # You can enable/disable agents and override their default output paths here.
 # Use lowercase agent identifiers: amp, copilot, claude, codex, cursor, windsurf, cline, aider, kilocode
 
-# [agents.copilot]
-# enabled = true
-# output_path = "AGENTS.md"
+[agents.copilot]
+enabled = true
+output_path = "AGENTS.md"
 
 # [agents.claude]
 # enabled = true
