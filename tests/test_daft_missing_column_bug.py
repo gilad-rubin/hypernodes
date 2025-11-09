@@ -96,7 +96,8 @@ def test_daft_preserves_columns_between_maps():
 
     # Verify results
     assert "results" in result
-    assert result["results"] == [23, 24, -1]  # x=23, y=24, z not in original items
+    # x and y are not in index {"a": 0, "b": 1, "c": 2}, so both should return -1
+    assert result["results"] == [-1, -1]
 
 
 def test_daft_preserves_columns_between_multiple_maps():

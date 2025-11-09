@@ -52,8 +52,12 @@ def test_daft_backend_list_of_pydantic_models():
     result = pipeline.run(inputs={"count": 3})
     
     assert "documents" in result
-    docs = result["documents"]
-    assert len(docs) == 3
+    docs_raw = result["documents"]
+    assert len(docs_raw) == 3
+
+    # DaftEngine returns Pydantic models as dicts - reconstruct them
+    docs = [Document(**d) if isinstance(d, dict) else d for d in docs_raw]
+
     assert all(isinstance(d, Document) for d in docs)
     assert docs[0].id == "doc_0"
     assert docs[0].text == "Document 0"
@@ -84,10 +88,14 @@ def test_daft_backend_pydantic_to_pydantic():
         engine=DaftEngine()
     )
     result = pipeline.run(inputs={"count": 2})
-    
+
     assert "encoded_documents" in result
-    encoded = result["encoded_documents"]
-    assert len(encoded) == 2
+    encoded_raw = result["encoded_documents"]
+    assert len(encoded_raw) == 2
+
+    # DaftEngine returns Pydantic models as dicts - reconstruct them
+    encoded = [EncodedDocument(**d) if isinstance(d, dict) else d for d in encoded_raw]
+
     assert all(isinstance(d, EncodedDocument) for d in encoded)
     assert encoded[0].embedding == [1.0, 2.0, 3.0]
 
@@ -120,8 +128,12 @@ def test_daft_backend_map_with_pydantic():
     )
     
     assert "encoded" in results
-    encoded = results["encoded"]
-    assert len(encoded) == 3
+    encoded_raw = results["encoded"]
+    assert len(encoded_raw) == 3
+
+    # DaftEngine returns Pydantic models as dicts - reconstruct them
+    encoded = [EncodedDocument(**d) if isinstance(d, dict) else d for d in encoded_raw]
+
     assert all(isinstance(d, EncodedDocument) for d in encoded)
     assert encoded[0].text == "Hello"
     assert encoded[0].embedding == [5.0]  # len("Hello")

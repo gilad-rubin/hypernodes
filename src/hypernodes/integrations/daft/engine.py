@@ -18,6 +18,7 @@ import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -66,6 +67,353 @@ else:
 
 if TYPE_CHECKING:
     from hypernodes.pipeline import Pipeline
+
+
+def _fix_annotation(annotation: Any) -> Any:
+    """Fix type annotations to be serializable by value.
+
+    Handles:
+    - Simple class types: MyClass -> fixed MyClass with __module__ = "__main__"
+    - Generic types: List[MyClass] -> List[fixed MyClass]
+    - Union types: Union[MyClass, None] -> Union[fixed MyClass, None]
+
+    Args:
+        annotation: Type annotation to fix
+
+    Returns:
+        Fixed annotation with all class references made serializable
+    """
+    # Simple class type
+    if isinstance(annotation, type):
+        return _make_class_serializable_by_value(annotation)
+
+    # Check for generic types (List, Dict, Optional, etc.)
+    origin = get_origin(annotation)
+    if origin is not None:
+        args = get_args(annotation)
+        if args:
+            # Fix all type arguments recursively
+            fixed_args = tuple(_fix_annotation(arg) for arg in args)
+            # Reconstruct the generic type with fixed arguments
+            # Use typing module's internal mechanism
+            try:
+                if origin is Union:
+                    # Special handling for Union (includes Optional)
+                    from typing import Union as UnionType
+
+                    return UnionType[fixed_args]
+                elif origin is list or origin is List:
+                    return List[fixed_args[0]] if len(fixed_args) == 1 else List
+                elif origin is dict or origin is Dict:
+                    if len(fixed_args) >= 2:
+                        return Dict[fixed_args[0], fixed_args[1]]
+                    else:
+                        return Dict
+                else:
+                    # Try generic reconstruction
+                    return origin[fixed_args]
+            except Exception:
+                # If reconstruction fails, return the fixed args as a tuple
+                # Better than failing completely
+                return annotation
+
+    # For other annotations (str, int, Any, etc.), return as-is
+    return annotation
+
+
+def _make_serializable_by_value(obj):
+    """Force cloudpickle to serialize function/class by value instead of by reference.
+
+    This is critical for Modal/distributed execution where the original module
+    may not exist in worker processes. By setting __module__ = "__main__",
+    cloudpickle will serialize the entire object bytecode instead of just
+    storing an import path.
+
+    Args:
+        obj: Function or class to make serializable by value
+
+    Returns:
+        A new function/class object with __module__ = "__main__"
+    """
+    # Detect if this is a class type
+    if isinstance(obj, type):
+        return _make_class_serializable_by_value(obj)
+
+    # Otherwise treat as function
+    import types
+
+    try:
+        # Create a NEW function object with the same bytecode but different module
+        # This is more robust than just modifying __module__ in place
+        new_func = types.FunctionType(
+            obj.__code__,  # Same bytecode
+            obj.__globals__,  # Same global namespace
+            obj.__name__,  # Same name
+            obj.__defaults__,  # Same default arguments
+            obj.__closure__,  # Same closure variables
+        )
+
+        # Set module to __main__ to force by-value serialization
+        new_func.__module__ = "__main__"
+        new_func.__qualname__ = obj.__name__
+
+        # Copy other important attributes
+        new_func.__dict__.update(obj.__dict__)
+
+        # Fix annotations - replace any class types with serializable versions
+        if obj.__annotations__:
+            fixed_annotations = {}
+
+            # IMPORTANT: If annotations are strings (from __future__ import annotations),
+            # we need to evaluate them first using get_type_hints() to get actual types,
+            # THEN fix those types, THEN store them back as the actual fixed types
+            # (not strings) so Daft sees the fixed classes
+            try:
+                # Try to get evaluated type hints (converts strings to actual types)
+                type_hints = get_type_hints(obj)
+                use_type_hints = True
+            except Exception:
+                # If get_type_hints fails, fall back to raw annotations
+                type_hints = obj.__annotations__
+                use_type_hints = False
+
+            for key, annotation in type_hints.items():
+                fixed_annotation = _fix_annotation(annotation)
+                fixed_annotations[key] = fixed_annotation
+                # Debug: check if we fixed a class from a script
+                if annotation != fixed_annotation and use_type_hints:
+                    orig_mod = (
+                        getattr(annotation, "__module__", "unknown")
+                        if hasattr(annotation, "__module__")
+                        else "N/A"
+                    )
+                    fixed_mod = (
+                        getattr(fixed_annotation, "__module__", "unknown")
+                        if hasattr(fixed_annotation, "__module__")
+                        else "N/A"
+                    )
+                    print(
+                        f"[FIX_ANNOTATION] {obj.__name__}.{key}: module {orig_mod} -> {fixed_mod}"
+                    )
+
+            new_func.__annotations__ = fixed_annotations
+        else:
+            new_func.__annotations__ = {}
+
+        new_func.__doc__ = obj.__doc__
+
+        return new_func
+    except (AttributeError, TypeError, ValueError):
+        # Fallback: try to modify in place
+        try:
+            obj.__module__ = "__main__"
+            obj.__qualname__ = obj.__name__
+        except (AttributeError, TypeError):
+            pass
+        return obj
+
+
+def _make_class_serializable_by_value(cls: type) -> type:
+    """Create a new class type with __module__ = "__main__" for by-value pickling.
+
+    This allows classes defined in scripts or inner functions to be pickled
+    by cloudpickle without requiring the original module to be importable.
+
+    Args:
+        cls: Class type to transform
+
+    Returns:
+        A new class type with the same attributes but __module__ = "__main__"
+    """
+    # Skip built-in types
+    if cls.__module__.startswith("builtins"):
+        return cls
+
+    # If already __main__, no need to transform
+    if cls.__module__ in ("__main__", "__mp_main__"):
+        return cls
+
+    try:
+        # Create a new class type with the same bases and namespace
+        # Use type() to create the new class dynamically
+        class_dict = {}
+
+        # Copy class attributes (excluding special attributes that can't be copied)
+        exclude_attrs = {
+            "__dict__",
+            "__weakref__",
+            "__module__",
+            "__qualname__",
+            "__mro__",
+            "__base__",
+            "__bases__",
+        }
+
+        for attr_name in dir(cls):
+            if attr_name in exclude_attrs:
+                continue
+
+            try:
+                attr_value = getattr(cls, attr_name)
+                # Only copy if it's defined directly on this class, not inherited
+                if attr_name in cls.__dict__:
+                    class_dict[attr_name] = attr_value
+            except (AttributeError, TypeError):
+                # Some attributes can't be accessed via getattr
+                continue
+
+        # Preserve __slots__ if present
+        if hasattr(cls, "__slots__"):
+            class_dict["__slots__"] = cls.__slots__
+
+        # Create new class with same name and bases
+        new_cls = type(cls.__name__, cls.__bases__, class_dict)
+
+        # Set module to __main__ to force by-value serialization
+        new_cls.__module__ = "__main__"
+        new_cls.__qualname__ = cls.__name__
+
+        # Copy docstring
+        if cls.__doc__:
+            new_cls.__doc__ = cls.__doc__
+
+        # CRITICAL: Fix the class's own __annotations__ (Pydantic field types)
+        # This is essential for Pydantic models where field annotations might
+        # reference other classes from the same script
+        if hasattr(cls, "__annotations__") and cls.__annotations__:
+            try:
+                # Get actual type hints (evaluates string annotations)
+                type_hints = get_type_hints(cls)
+                fixed_annotations = {}
+                for key, annotation in type_hints.items():
+                    fixed_annotations[key] = _fix_annotation(annotation)
+                new_cls.__annotations__ = fixed_annotations
+            except Exception:
+                # If fixing fails, copy original annotations
+                new_cls.__annotations__ = cls.__annotations__.copy()
+
+        return new_cls
+
+    except (TypeError, AttributeError):
+        # If class creation fails, try in-place modification as fallback
+        try:
+            cls.__module__ = "__main__"
+            cls.__qualname__ = cls.__name__
+        except (AttributeError, TypeError):
+            pass
+        return cls
+
+
+_FIXED_INSTANCES: Set[int] = set()
+
+
+def _fix_instance_class(instance: Any) -> Any:
+    """Fix a class instance to have a serializable-by-value class.
+
+    Modifies the instance's __class__ attribute to point to a version
+    of the class with __module__ = "__main__", enabling cloudpickle to
+    serialize it by value instead of by reference.
+
+    Args:
+        instance: Object instance to fix
+
+    Returns:
+        The same instance, potentially with modified __class__
+    """
+    # Track instances we've already fixed to avoid redundant work
+    instance_id = id(instance)
+    if instance_id in _FIXED_INSTANCES:
+        return instance
+
+    # Get the instance's class
+    cls = instance.__class__
+
+    # Skip built-in types
+    if cls.__module__.startswith("builtins"):
+        return instance
+
+    # Skip if already __main__
+    if cls.__module__ in ("__main__", "__mp_main__"):
+        _FIXED_INSTANCES.add(instance_id)
+        return instance
+
+    # Check if class needs by-value serialization
+    try:
+        spec = importlib.util.find_spec(cls.__module__)
+        if spec is not None:
+            # Module is importable, cloudpickle can handle it by reference
+            return instance
+    except (ImportError, ValueError, AttributeError):
+        # Module not importable, needs by-value serialization
+        pass
+
+    try:
+        # Create serializable version of the class
+        new_cls = _make_class_serializable_by_value(cls)
+
+        # For Pydantic models with frozen=True, we can't modify __class__ directly
+        # Check if this is a frozen Pydantic model
+        is_frozen_pydantic = False
+        if PYDANTIC_AVAILABLE and BaseModel is not None:
+            try:
+                if isinstance(instance, BaseModel):
+                    config = getattr(cls, "model_config", {})
+                    if isinstance(config, dict):
+                        is_frozen_pydantic = config.get("frozen", False)
+            except (TypeError, AttributeError):
+                pass
+
+        if is_frozen_pydantic:
+            # For frozen Pydantic models, create a new instance with the new class
+            # Get the model data and recreate with new class
+            try:
+                model_data = instance.model_dump()
+                new_instance = new_cls(**model_data)
+                _FIXED_INSTANCES.add(id(new_instance))
+                return new_instance
+            except Exception:
+                # If recreation fails, try direct __class__ assignment anyway
+                pass
+
+        # Modify the instance's class in place
+        object.__setattr__(instance, "__class__", new_cls)
+        _FIXED_INSTANCES.add(instance_id)
+
+    except (TypeError, AttributeError):
+        # Some objects don't allow __class__ modification
+        # This is okay - cloudpickle might still handle them
+        pass
+
+    return instance
+
+
+_REGISTERED_BY_VALUE_CLASSES: Set[type] = set()
+_REGISTER_PICKLE_BY_VALUE: Optional[Callable[[type], None]] = None
+
+
+def _get_register_pickle_by_value() -> Optional[Callable[[type], None]]:
+    """Lazily fetch daft/cloudpickle's register_pickle_by_value helper."""
+
+    global _REGISTER_PICKLE_BY_VALUE
+
+    if _REGISTER_PICKLE_BY_VALUE is not None:
+        return _REGISTER_PICKLE_BY_VALUE
+
+    candidate = None
+    try:
+        from daft.pickle import cloudpickle as daft_cloudpickle  # type: ignore
+
+        candidate = getattr(daft_cloudpickle, "register_pickle_by_value", None)
+    except ImportError:
+        try:
+            import cloudpickle as cloudpickle_module  # type: ignore
+
+            candidate = getattr(cloudpickle_module, "register_pickle_by_value", None)
+        except ImportError:
+            candidate = None
+
+    _REGISTER_PICKLE_BY_VALUE = candidate
+    return _REGISTER_PICKLE_BY_VALUE
 
 
 class DaftEngine(Engine):
@@ -240,8 +588,8 @@ class DaftEngine(Engine):
             self._actual_inputs = dict(inputs)
             self._actual_output_name = output_name
 
-        df_inputs, stateful_inputs, stateful_literal_keys = self._split_inputs_for_dataframe(
-            inputs
+        df_inputs, stateful_inputs, stateful_literal_keys = (
+            self._split_inputs_for_dataframe(inputs)
         )
         df_data = {k: [v] for k, v in df_inputs.items()}
         if not df_data:
@@ -416,7 +764,9 @@ class DaftEngine(Engine):
             key: list(values) for key, values in varying_inputs.items()
         }
 
-        fixed_columns, stateful_inputs, _ = self._split_inputs_for_dataframe(fixed_inputs)
+        fixed_columns, stateful_inputs, _ = self._split_inputs_for_dataframe(
+            fixed_inputs
+        )
 
         for key, value in fixed_columns.items():
             if isinstance(value, list):
@@ -774,7 +1124,13 @@ class DaftEngine(Engine):
         # Include both:
         # 1. Columns from the inner pipeline (post-map columns)
         # 2. Columns that existed before the map (pre-map columns like indexes)
-        post_map_columns = set(df_transformed.column_names)
+        if self.code_generation_mode:
+            # In code gen mode, compute what columns WOULD exist after inner pipeline
+            post_map_columns = set(df_exploded.column_names) | inner_outputs
+        else:
+            # In runtime mode, use actual DataFrame columns
+            post_map_columns = set(df_transformed.column_names)
+
         all_columns_to_consider = pre_map_columns | post_map_columns
 
         keep_cols = [
@@ -783,6 +1139,8 @@ class DaftEngine(Engine):
             if col not in final_output_names
             and col != row_id_col
             and col != original_mapped_col
+            # In runtime mode, only keep cols that actually exist in the transformed DataFrame
+            and (self.code_generation_mode or col in df_transformed.column_names)
         ]
 
         # Step 6: Group by row ID and collect results into lists
@@ -877,9 +1235,7 @@ class DaftEngine(Engine):
         output_name = node.output_name
 
         # Get node parameters that are available either as columns or stateful inputs
-        params = [
-            p for p in node.parameters if p in available or p in stateful_inputs
-        ]
+        params = [p for p in node.parameters if p in available or p in stateful_inputs]
 
         if stateful_inputs and getattr(self, "debug", False):
             print(
@@ -949,7 +1305,27 @@ class DaftEngine(Engine):
                     pass
 
             # Wrap function to handle both input conversion and output serialization
-            original_func = func  # Always store original for code generation
+            # Apply serialization fix to original function FIRST
+            original_func = _make_serializable_by_value(
+                func
+            )  # Always store original for code generation
+
+            # IMPORTANT: Fix Pydantic model classes for Modal/distributed execution
+            # The Pydantic classes themselves need __module__ = "__main__" so they can be pickled
+            fixed_param_pydantic_types = {}
+            for param_name, (
+                container_type,
+                pydantic_type,
+            ) in param_pydantic_types.items():
+                fixed_pydantic_type = _make_serializable_by_value(pydantic_type)
+                fixed_param_pydantic_types[param_name] = (
+                    container_type,
+                    fixed_pydantic_type,
+                )
+
+            # Update param_pydantic_types with fixed versions
+            param_pydantic_types = fixed_param_pydantic_types
+
             if param_pydantic_types or is_pydantic_return:
                 debug_mode = self.debug
 
@@ -1100,7 +1476,8 @@ class DaftEngine(Engine):
                         print(f"{'=' * 60}\n")
                         raise
 
-                func = wrapped_func
+                # Force by-value serialization for Modal/distributed execution
+                func = _make_serializable_by_value(wrapped_func)
 
             # Infer Daft dtype
             inferred_dtype = None
@@ -1128,10 +1505,14 @@ class DaftEngine(Engine):
                     func, params, stateful_values, inferred_dtype
                 )
             elif inferred_dtype is not None:
-                daft_func = daft.func(func, return_dtype=inferred_dtype)
+                # Force by-value serialization for Modal/distributed execution
+                serializable_func = _make_serializable_by_value(func)
+                daft_func = daft.func(serializable_func, return_dtype=inferred_dtype)
             else:
                 # No usable hint, try automatic inference
-                daft_func = daft.func(func)
+                # Force by-value serialization for Modal/distributed execution
+                serializable_func = _make_serializable_by_value(func)
+                daft_func = daft.func(serializable_func)
         except Exception:
             # If anything fails, fall back to Python object storage
             if self.code_generation_mode:
@@ -1151,14 +1532,30 @@ class DaftEngine(Engine):
                 )
                 return df
             else:
-                daft_func = daft.func(func, return_dtype=daft.DataType.python())
+                # Force by-value serialization for Modal/distributed execution
+                serializable_func = _make_serializable_by_value(func)
+                daft_func = daft.func(
+                    serializable_func, return_dtype=daft.DataType.python()
+                )
 
         # Apply the UDF to the DataFrame
         # Build column expressions for parameters
         col_exprs = [df[param] for param in dynamic_params]
 
-        # Apply the function and add as new column
-        df = df.with_column(output_name, daft_func(*col_exprs))
+        # Special case: If no dynamic params, call the function directly and use daft.lit()
+        # Daft UDFs require at least one column input, so we can't use them for zero-parameter functions
+        if not dynamic_params and not stateful_values:
+            # Node with no inputs - call directly and store result
+            result = func()
+            df = df.with_column(output_name, daft.lit(result))
+        elif not dynamic_params and stateful_values:
+            # Node with only stateful inputs - call with stateful values only
+            # We need to wrap the result in daft.lit() since there are no column inputs
+            result = func(**stateful_values)
+            df = df.with_column(output_name, daft.lit(result))
+        else:
+            # Normal case: apply UDF to DataFrame columns
+            df = df.with_column(output_name, daft_func(*col_exprs))
 
         return df
 
@@ -1529,9 +1926,9 @@ class DaftEngine(Engine):
                 continue
             value = stateful_inputs[param]
             hint = type_hints.get(param)
-            should_capture = self._should_capture_stateful_input(value) or self._has_daft_cls_hint(
-                hint
-            )
+            should_capture = self._should_capture_stateful_input(
+                value
+            ) or self._has_daft_cls_hint(hint)
             if should_capture:
                 resolved[param] = value
             elif getattr(self, "debug", False):
@@ -1602,12 +1999,18 @@ class DaftEngine(Engine):
         cls_kwargs: Dict[str, Any] = {"use_process": False}
 
         # Collect optional hints from stateful values
-        for value in stateful_values.values():
-            if value is None:
+        # Fix stateful values for pickling and update dict with fixed versions
+        for key, value in list(stateful_values.items()):
+            fixed_value = self._ensure_stateful_value_pickleable(value)
+            # Update dict if value was replaced (e.g., frozen Pydantic models)
+            if fixed_value is not value:
+                stateful_values[key] = fixed_value
+
+            if fixed_value is None:
                 continue
 
-            # Check for max_concurrency hint
-            max_concurrency = getattr(value, "__daft_max_concurrency__", None)
+            # Check for max_concurrency hint (use fixed_value for attribute access)
+            max_concurrency = getattr(fixed_value, "__daft_max_concurrency__", None)
             if max_concurrency is not None:
                 # Use minimum if multiple values specify it
                 if "max_concurrency" in cls_kwargs:
@@ -1618,7 +2021,7 @@ class DaftEngine(Engine):
                     cls_kwargs["max_concurrency"] = max_concurrency
 
             # Check for use_process hint (overrides default)
-            use_process = getattr(value, "__daft_use_process__", None)
+            use_process = getattr(fixed_value, "__daft_use_process__", None)
             if use_process is not None:
                 # If any stateful value explicitly requires threads (use_process=False), respect it
                 if use_process is False:
@@ -1628,9 +2031,9 @@ class DaftEngine(Engine):
                     cls_kwargs["use_process"] = use_process
 
             # Check for GPU requirements
-            gpus = getattr(value, "__daft_gpus__", None)
+            gpus = getattr(fixed_value, "__daft_gpus__", None)
             if gpus is None:
-                gpus = getattr(value, "gpus", None)
+                gpus = getattr(fixed_value, "gpus", None)
             if gpus is not None and isinstance(gpus, int):
                 # Sum GPU requirements
                 cls_kwargs["gpus"] = cls_kwargs.get("gpus", 0) + gpus
@@ -1639,6 +2042,68 @@ class DaftEngine(Engine):
             print(f"[DaftEngine] Extracted @daft.cls kwargs: {cls_kwargs}")
 
         return cls_kwargs
+
+    @staticmethod
+    def _class_requires_by_value_serialization(cls: type) -> bool:
+        module_name = getattr(cls, "__module__", None)
+        if not module_name:
+            return True
+        if module_name in {"__main__", "__mp_main__"}:
+            return True
+        if module_name.startswith("builtins"):
+            return False
+        try:
+            spec = importlib.util.find_spec(module_name)
+        except (ImportError, ValueError):
+            return True
+        return spec is None
+
+    def _ensure_stateful_value_pickleable(self, value: Any) -> Any:
+        """Fix stateful value instances to have serializable-by-value classes.
+
+        This replaces the old cloudpickle.register_pickle_by_value() approach
+        which didn't work for classes. Instead, we directly modify the instance's
+        __class__ attribute to point to a version with __module__ = "__main__".
+
+        Returns:
+            The fixed value (may be a new instance for frozen Pydantic models)
+        """
+
+        if value is None:
+            return value
+
+        cls = value.__class__
+
+        # Check if we've already processed this class type
+        if cls in _REGISTERED_BY_VALUE_CLASSES:
+            return value
+
+        try:
+            requires_by_value = self._class_requires_by_value_serialization(cls)
+        except Exception:
+            requires_by_value = True
+
+        if not requires_by_value:
+            return value
+
+        # Fix the instance's class to be serializable by value
+        try:
+            fixed_value = _fix_instance_class(value)
+            _REGISTERED_BY_VALUE_CLASSES.add(cls)
+
+            if getattr(self, "debug", False):
+                print(
+                    f"[DaftEngine] Fixed {cls.__module__}.{cls.__name__} instance for by-value pickling"
+                )
+
+            return fixed_value
+
+        except Exception as exc:
+            if getattr(self, "debug", False):
+                print(
+                    f"[DaftEngine] Failed to fix {cls.__name__} instance for by-value pickling: {exc}"
+                )
+            return value
 
     def _build_stateful_udf(
         self,
@@ -1655,6 +2120,9 @@ class DaftEngine(Engine):
         """
 
         import daft
+
+        # Force by-value serialization for Modal/distributed execution
+        serializable_func = _make_serializable_by_value(func)
 
         # Extract @daft.cls parameters from stateful objects (with sensible defaults)
         cls_kwargs = self._extract_daft_cls_kwargs(stateful_values)
@@ -1682,7 +2150,7 @@ class DaftEngine(Engine):
                         kwargs[param] = self._payload[param]
                     else:
                         kwargs[param] = next(arg_iter)
-                return func(**kwargs)
+                return serializable_func(**kwargs)
 
         wrapper = StatefulWrapper(stateful_values)
         return wrapper.__call__
@@ -1755,9 +2223,26 @@ class DaftEngine(Engine):
                                 "arbitrary_types_allowed", False
                             )
 
-                    # Use Python object storage for models with arbitrary types
-                    # (like numpy arrays) to avoid serialization issues
-                    if has_arbitrary_types:
+                    # IMPORTANT: Check if model is from a non-importable module (like a script)
+                    # In that case, ALWAYS use Python storage to avoid storing class references
+                    # in Daft's execution plan that can't be unpickled in workers
+                    is_from_script = False
+                    try:
+                        module_name = return_type.__module__
+                        if module_name and module_name not in (
+                            "__main__",
+                            "__mp_main__",
+                            "builtins",
+                        ):
+                            spec = importlib.util.find_spec(module_name)
+                            if spec is None:
+                                is_from_script = True
+                    except (ImportError, ValueError, AttributeError):
+                        is_from_script = True
+
+                    # Use Python object storage for models with arbitrary types OR from scripts
+                    # (like numpy arrays or non-importable modules) to avoid serialization issues
+                    if has_arbitrary_types or is_from_script:
                         return daft.DataType.python()
 
                     # Try PyArrow struct conversion for simple Pydantic models
