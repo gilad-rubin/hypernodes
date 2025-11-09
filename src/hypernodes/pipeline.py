@@ -1123,3 +1123,58 @@ class Pipeline:
             style=style,
             return_type=return_type,
         )
+    
+    def show_daft_code(self, inputs: Dict[str, Any], output_name: Union[str, List[str], None] = None) -> str:
+        """Generate executable Daft code equivalent to this pipeline.
+        
+        This method creates a DaftEngine in code generation mode and runs the pipeline
+        through it to produce actual executable Daft code. The generated code can be
+        used to:
+        - Understand how HyperNodes translates to native Daft operations
+        - Identify potential performance bottlenecks
+        - Hand-optimize the generated code for better performance
+        - Learn Daft patterns for complex operations
+        
+        Args:
+            inputs: Dictionary of input values (same as you'd pass to .run())
+            output_name: Optional output name(s) to generate code for
+        
+        Returns:
+            String containing executable Daft code
+        
+        Example:
+            >>> pipeline = Pipeline(nodes=[...])
+            >>> code = pipeline.show_daft_code(inputs={"x": 5})
+            >>> print(code)
+            >>> # Save to file
+            >>> with open("generated_daft.py", "w") as f:
+            ...     f.write(code)
+        
+        Note:
+            This requires the DaftEngine to be available (install with: pip install daft)
+        """
+        try:
+            from .engines import DaftEngine
+        except ImportError:
+            raise ImportError(
+                "DaftEngine is not available. Install daft with: pip install daft"
+            )
+        
+        # Create a code generation engine
+        code_engine = DaftEngine(code_generation_mode=True)
+        
+        # Create a temporary pipeline with the code generation engine
+        temp_pipeline = self.with_engine(code_engine)
+        
+        # Run in code generation mode (doesn't actually execute, just generates code)
+        try:
+            temp_pipeline.run(inputs=inputs, output_name=output_name)
+        except Exception as e:
+            # Even if there's an error, we can still get partial code
+            if not code_engine.generated_code:
+                raise RuntimeError(
+                    f"Failed to generate Daft code: {e}"
+                ) from e
+        
+        # Return the generated code
+        return code_engine.get_generated_code()

@@ -10,8 +10,10 @@ Key features:
 - Support for generators, async, and batch operations
 """
 
+import ast
 import importlib.util
 import multiprocessing
+import textwrap
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -27,8 +29,8 @@ from typing import (
     get_type_hints,
 )
 
-from hypernodes.engine import Engine
 from hypernodes.callbacks import CallbackContext
+from hypernodes.engine import Engine
 
 try:
     import daft
@@ -78,27 +80,27 @@ class DaftEngine(Engine):
 
     When using stateful objects (e.g., ML models, tokenizers) that are identified
     as needing @daft.cls wrapping, the engine automatically applies sensible defaults:
-    
+
     - ``use_process=False``: Uses threads instead of processes (avoids PyTorch/CUDA fork issues)
-    
+
     You can optionally override these defaults by adding hints to your classes:
-    
+
     .. code-block:: python
 
         class MyModel:
             # Optional: Tell DaftEngine this is stateful
             __daft_hint__ = "@daft.cls"
             __daft_stateful__ = True
-            
+
             # Optional: Limit concurrent instances (useful for GPU memory)
             __daft_max_concurrency__ = 1
-            
+
             # Optional: Override use_process default
             __daft_use_process__ = False
-            
+
             # Optional: Request GPUs
             __daft_gpus__ = 1
-    
+
     These hints are **completely optional** - the engine works out-of-the-box with
     PyTorch/HuggingFace models without any configuration.
 
@@ -136,6 +138,7 @@ class DaftEngine(Engine):
         debug: bool = False,
         python_return_strategy: str = "auto",
         force_spawn_method: bool = True,
+        code_generation_mode: bool = False,
     ):
         if not DAFT_AVAILABLE:
             raise ImportError(
@@ -159,8 +162,13 @@ class DaftEngine(Engine):
             )
         self.python_return_strategy = python_return_strategy
 
+        # Code generation mode
+        self.code_generation_mode = code_generation_mode
+        if code_generation_mode:
+            self._init_code_generation()
+
         # Configure multiprocessing for PyTorch/CUDA compatibility
-        if force_spawn_method:
+        if force_spawn_method and not code_generation_mode:
             self._configure_multiprocessing_for_pytorch()
 
     def _configure_multiprocessing_for_pytorch(self):
@@ -174,11 +182,11 @@ class DaftEngine(Engine):
         """
         current_method = multiprocessing.get_start_method(allow_none=True)
 
-        if current_method == 'spawn':
+        if current_method == "spawn":
             # Already configured correctly
             return
 
-        if current_method is not None and current_method != 'spawn':
+        if current_method is not None and current_method != "spawn":
             # Method already set to something else (fork/forkserver)
             warnings.warn(
                 f"Multiprocessing start method is already set to '{current_method}'. "
@@ -188,15 +196,17 @@ class DaftEngine(Engine):
                 f"importing torch or creating DaftEngine, or set force_spawn_method=False "
                 f"to disable this warning.",
                 RuntimeWarning,
-                stacklevel=3
+                stacklevel=3,
             )
             return
 
         # Set spawn method
         try:
-            multiprocessing.set_start_method('spawn', force=False)
+            multiprocessing.set_start_method("spawn", force=False)
             if self.debug:
-                print("[DaftEngine] Set multiprocessing start method to 'spawn' for PyTorch compatibility")
+                print(
+                    "[DaftEngine] Set multiprocessing start method to 'spawn' for PyTorch compatibility"
+                )
         except RuntimeError:
             # Already set by another module
             warnings.warn(
@@ -204,7 +214,7 @@ class DaftEngine(Engine):
                 "If using PyTorch/CUDA, you may experience segmentation faults. "
                 "Call multiprocessing.set_start_method('spawn') at the top of your script.",
                 RuntimeWarning,
-                stacklevel=3
+                stacklevel=3,
             )
 
     def run(
@@ -225,21 +235,53 @@ class DaftEngine(Engine):
         Returns:
             Dictionary containing the pipeline outputs
         """
-        # Create a single-row DataFrame from inputs
-        df = daft.from_pydict({k: [v] for k, v in inputs.items()})
+        # Store inputs and output_name for code generation
+        if self.code_generation_mode:
+            self._actual_inputs = dict(inputs)
+            self._actual_output_name = output_name
+
+        df_inputs, stateful_inputs, stateful_literal_keys = self._split_inputs_for_dataframe(
+            inputs
+        )
+        df_data = {k: [v] for k, v in df_inputs.items()}
+        if not df_data:
+            df_data["__hn_stateful_placeholder__"] = [0]
+
+        # Create a single-row DataFrame from non-stateful inputs only
+        df = daft.from_pydict(df_data)
 
         # Convert pipeline to DataFrame operations
-        stateful_inputs = dict(inputs)
         df = self._convert_pipeline_to_daft(
-            pipeline, df, inputs.keys(), stateful_inputs
+            pipeline, df, set(df_inputs.keys()), stateful_inputs
         )
 
-        if self.show_plan:
+        # In code generation mode, generate the from_pydict call AFTER conversion
+        # so we know which inputs are stateful
+        if self.code_generation_mode:
+            # Insert dataframe creation at the beginning of generated code
+            df_creation = []
+            self._stateful_literal_input_keys = stateful_literal_keys
+            self._stateful_actual_inputs = {
+                key: value
+                for key, value in stateful_inputs.items()
+                if key in stateful_literal_keys
+            }
+            self._generate_dataframe_creation_lines(inputs, df_creation)
+            # Insert at the beginning
+            self.generated_code = df_creation + self.generated_code
+
+        if self.show_plan and not self.code_generation_mode:
             print("Daft Execution Plan:")
             print(df.explain())
 
         requested_outputs = self._resolve_requested_outputs(pipeline, output_name)
         if not requested_outputs:
+            return {}
+
+        # In code generation mode, generate the select and collect calls and return
+        if self.code_generation_mode:
+            self._generate_output_collection(requested_outputs)
+            # Return empty dict in code generation mode (no actual execution)
             return {}
 
         df = self._select_output_columns(df, requested_outputs)
@@ -290,13 +332,12 @@ class DaftEngine(Engine):
         for key in items[0].keys():
             data_dict[key] = [item[key] for item in items]
 
-        # Add fixed parameters from inputs
-        for key, value in inputs.items():
+        shared_inputs, stateful_inputs, _ = self._split_inputs_for_dataframe(inputs)
+
+        # Add fixed parameters from shared inputs (excluding stateful ones)
+        for key, value in shared_inputs.items():
             if key not in data_dict:
                 data_dict[key] = [value] * len(items)
-
-        # Track stateful/shared inputs (explicit inputs + detected constants)
-        stateful_inputs = dict(inputs)
 
         stateful_constant_cols: List[str] = []
         for key, values in data_dict.items():
@@ -318,9 +359,9 @@ class DaftEngine(Engine):
                 stateful_inputs.setdefault(key, first_value)
                 if getattr(self, "debug", False):
                     print(f"[DaftEngine] Detected constant column '{key}'")
-                if self._has_daft_cls_hint(first_value) and self._pipeline_accepts_stateful_param(
-                    pipeline, key, first_value
-                ):
+                if self._has_daft_cls_hint(
+                    first_value
+                ) and self._pipeline_accepts_stateful_param(pipeline, key, first_value):
                     stateful_constant_cols.append(key)
 
         for key in stateful_constant_cols:
@@ -375,7 +416,9 @@ class DaftEngine(Engine):
             key: list(values) for key, values in varying_inputs.items()
         }
 
-        for key, value in fixed_inputs.items():
+        fixed_columns, stateful_inputs, _ = self._split_inputs_for_dataframe(fixed_inputs)
+
+        for key, value in fixed_columns.items():
             if isinstance(value, list):
                 if len(value) != num_rows:
                     raise ValueError(
@@ -390,7 +433,7 @@ class DaftEngine(Engine):
             pipeline,
             data_dict,
             output_name,
-            initial_stateful_inputs=fixed_inputs,
+            initial_stateful_inputs=stateful_inputs,
             return_format=return_format,
         )
 
@@ -444,9 +487,7 @@ class DaftEngine(Engine):
                 available.update(self._get_output_names(node))
             elif hasattr(node, "func"):
                 # Regular node - convert to UDF
-                df = self._convert_node_to_daft(
-                    node, df, available, stateful_inputs
-                )
+                df = self._convert_node_to_daft(node, df, available, stateful_inputs)
                 # Update available columns
                 if hasattr(node, "output_name"):
                     available.add(node.output_name)
@@ -521,6 +562,8 @@ class DaftEngine(Engine):
                 df = df.select(*rename_exprs)
         else:
             inner_available = available.copy()
+
+        inner_available.update(inner_stateful_inputs.keys())
 
         # Convert the inner pipeline (modifies df in place)
         df = self._convert_pipeline_to_daft(
@@ -603,46 +646,83 @@ class DaftEngine(Engine):
             )
 
         # Step 1: Add unique row ID for grouping later
-        row_id_col = "__daft_row_id__"
+        if self.code_generation_mode:
+            row_id_col = self._generate_row_id_name()
+        else:
+            row_id_col = "__daft_row_id__"
         original_mapped_col = f"__original_{map_over_col}__"
 
-        # For DaftBackend with map_over, we need to materialize to add row IDs
-        # This is a limitation when dealing with Python object types
-        # Collect just the column names and row count to minimize issues
-        try:
-            # Try to add row ID without materializing
-            df = df.with_column(row_id_col, daft.lit(0))
-            # Try to copy the mapped column
-            df = df.with_column(original_mapped_col, df[map_over_col])
-        except Exception:
-            # Fallback: materialize to add row IDs
-            df_collected = df.to_pydict()
-            num_rows = len(list(df_collected.values())[0])
-            df_collected[row_id_col] = list(range(num_rows))
-            df_collected[original_mapped_col] = df_collected[map_over_col]
-            df = daft.from_pydict(df_collected)
+        # Code generation mode
+        if self.code_generation_mode:
+            self._generate_operation_code("# Map over: " + map_over_col)
+            self._generate_operation_code(
+                'df = df.with_column("' + row_id_col + '", daft.lit(0))'
+            )
+            self._generate_operation_code(
+                'df = df.with_column("'
+                + original_mapped_col
+                + '", df["'
+                + map_over_col
+                + '"])'
+            )
+            self._generate_operation_code(
+                'df = df.explode(daft.col("' + map_over_col + '"))'
+            )
+        else:
+            # For DaftBackend with map_over, we need to materialize to add row IDs
+            # This is a limitation when dealing with Python object types
+            # Collect just the column names and row count to minimize issues
+            try:
+                # Try to add row ID without materializing
+                df = df.with_column(row_id_col, daft.lit(0))
+                # Try to copy the mapped column
+                df = df.with_column(original_mapped_col, df[map_over_col])
+            except Exception:
+                # Fallback: materialize to add row IDs
+                df_collected = df.to_pydict()
+                num_rows = len(list(df_collected.values())[0])
+                df_collected[row_id_col] = list(range(num_rows))
+                df_collected[original_mapped_col] = df_collected[map_over_col]
+                df = daft.from_pydict(df_collected)
 
-        # Step 2: Explode the list column
-        df_exploded = df.explode(daft.col(map_over_col))
+            # Step 2: Explode the list column
+            df_exploded = df.explode(daft.col(map_over_col))
+
+        if self.code_generation_mode:
+            df_exploded = df  # Not actually modifying in code gen mode
 
         # Step 3: Apply input mapping - rename outer columns to inner names
-        rename_exprs = []
-        inner_available = set()
+        if not self.code_generation_mode:
+            rename_exprs = []
+            inner_available = set()
 
-        for outer_name, inner_name in input_mapping.items():
-            if outer_name in available or outer_name == map_over_col:
-                # Rename: outer_name -> inner_name
-                rename_exprs.append(df_exploded[outer_name].alias(inner_name))
-                inner_available.add(inner_name)
+            for outer_name, inner_name in input_mapping.items():
+                if outer_name in available or outer_name == map_over_col:
+                    # Rename: outer_name -> inner_name
+                    rename_exprs.append(df_exploded[outer_name].alias(inner_name))
+                    inner_available.add(inner_name)
 
-        # Keep other available columns (including row_id_col)
-        for col_name in df_exploded.column_names:
-            if col_name not in input_mapping and col_name != map_over_col:
-                rename_exprs.append(df_exploded[col_name])
-                if col_name != row_id_col:
-                    inner_available.add(col_name)
+            # Keep other available columns (including row_id_col)
+            for col_name in df_exploded.column_names:
+                if col_name not in input_mapping and col_name != map_over_col:
+                    rename_exprs.append(df_exploded[col_name])
+                    if col_name != row_id_col:
+                        inner_available.add(col_name)
 
-        df_exploded = df_exploded.select(*rename_exprs)
+            df_exploded = df_exploded.select(*rename_exprs)
+        else:
+            # In code generation mode, emit alias operations so generated code has renamed columns
+            inner_available = set()
+            for outer_name, inner_name in input_mapping.items():
+                if outer_name in available or outer_name == map_over_col:
+                    inner_available.add(inner_name)
+                    self._generate_operation_code(
+                        f'df = df.with_column("{inner_name}", df["{outer_name}"])'
+                    )
+            # Also include non-mapped columns
+            for col in available:
+                if col not in input_mapping and col != map_over_col:
+                    inner_available.add(col)
 
         # Step 4: Run inner pipeline on exploded DataFrame
         inner_stateful_inputs = dict(stateful_inputs)
@@ -652,6 +732,12 @@ class DaftEngine(Engine):
                 mapped_stateful[inner_name] = stateful_inputs[outer_name]
 
         inner_stateful_inputs.update(mapped_stateful)
+
+        inner_available.update(inner_stateful_inputs.keys())
+
+        # Capture columns that exist before the inner pipeline runs
+        # These need to be preserved in the groupby aggregation
+        pre_map_columns = set(available) - {map_over_col}
 
         df_transformed = self._convert_pipeline_to_daft(
             inner_pipeline, df_exploded, inner_available, inner_stateful_inputs
@@ -673,18 +759,64 @@ class DaftEngine(Engine):
         # Update output names after mapping
         final_output_names = [output_mapping.get(name, name) for name in inner_outputs]
 
-        # Step 6: Group by row ID and collect results into lists
+        if self.code_generation_mode and output_mapping:
+            for inner_name, outer_name in output_mapping.items():
+                if inner_name == outer_name:
+                    continue
+                self._generate_operation_code(
+                    f'df = df.with_column("{outer_name}", df["{inner_name}"])'
+                )
+
         # Check if original_mapped_col survived through the inner pipeline
         has_original_col = original_mapped_col in df_transformed.column_names
 
         # Get list of columns to keep (non-output, non-row-id, non-original-mapped)
+        # Include both:
+        # 1. Columns from the inner pipeline (post-map columns)
+        # 2. Columns that existed before the map (pre-map columns like indexes)
+        post_map_columns = set(df_transformed.column_names)
+        all_columns_to_consider = pre_map_columns | post_map_columns
+
         keep_cols = [
             col
-            for col in df_transformed.column_names
+            for col in all_columns_to_consider
             if col not in final_output_names
             and col != row_id_col
             and col != original_mapped_col
         ]
+
+        # Step 6: Group by row ID and collect results into lists
+        if self.code_generation_mode:
+            agg_code_parts = []
+            for output_name in final_output_names:
+                agg_code_parts.append(
+                    f'daft.col("{output_name}").list_agg().alias("{output_name}")'
+                )
+            for col_name in keep_cols:
+                agg_code_parts.append(
+                    f'daft.col("{col_name}").any_value().alias("{col_name}")'
+                )
+            if map_over_col:
+                agg_code_parts.append(
+                    f'daft.col("{original_mapped_col}").any_value().alias("{map_over_col}")'
+                )
+
+            agg_code = ", ".join(agg_code_parts)
+            self._generate_operation_code(
+                'df = df.groupby(daft.col("' + row_id_col + '")).agg(' + agg_code + ")"
+            )
+
+            # Remove row_id column and backup column (if present)
+            select_cols = final_output_names + keep_cols
+            if map_over_col:
+                select_cols.append(map_over_col)
+            select_args = ", ".join([f'df["{col}"]' for col in select_cols])
+            if select_args:
+                self._generate_operation_code(f"df = df.select({select_args})")
+            else:
+                self._generate_operation_code("df = df.select()")
+
+            return df_transformed
 
         # Group by row_id and aggregate outputs into lists
         df_grouped = df_transformed.groupby(daft.col(row_id_col))
@@ -744,8 +876,10 @@ class DaftEngine(Engine):
         func = node.func
         output_name = node.output_name
 
-        # Get node parameters that are available
-        params = [p for p in node.parameters if p in available]
+        # Get node parameters that are available either as columns or stateful inputs
+        params = [
+            p for p in node.parameters if p in available or p in stateful_inputs
+        ]
 
         if stateful_inputs and getattr(self, "debug", False):
             print(
@@ -766,8 +900,12 @@ class DaftEngine(Engine):
         )
         dynamic_params = [p for p in params if p not in stateful_values]
 
-        try:
+        # Track stateful input names for code generation
+        if self.code_generation_mode:
+            for param_name in stateful_values.keys():
+                self._stateful_input_names.add(param_name)
 
+        try:
             # Check parameter types for Pydantic models (for input conversion)
             # This dict maps param_name -> (container_type, pydantic_type)
             # container_type is 'single' or 'list'
@@ -811,8 +949,8 @@ class DaftEngine(Engine):
                     pass
 
             # Wrap function to handle both input conversion and output serialization
+            original_func = func  # Always store original for code generation
             if param_pydantic_types or is_pydantic_return:
-                original_func = func
                 debug_mode = self.debug
 
                 def wrapped_func(*args, **kwargs):
@@ -953,13 +1091,13 @@ class DaftEngine(Engine):
                         # Log the error with context
                         import traceback
 
-                        print(f"\n{'='*60}")
+                        print(f"\n{'=' * 60}")
                         print(f"ERROR in wrapped function for node: {node.output_name}")
                         print(f"Function: {original_func.__name__}")
                         print(f"Error: {e}")
-                        print(f"{'='*60}")
+                        print(f"{'=' * 60}")
                         traceback.print_exc()
-                        print(f"{'='*60}\n")
+                        print(f"{'=' * 60}\n")
                         raise
 
                 func = wrapped_func
@@ -969,6 +1107,22 @@ class DaftEngine(Engine):
             if return_type is not None:
                 inferred_dtype = self._infer_return_dtype(return_type)
 
+            # Code generation mode: Generate UDF code instead of executing
+            if self.code_generation_mode:
+                udf_name = self._generate_udf_code(
+                    original_func, output_name, params, stateful_values, inferred_dtype
+                )
+
+                # Generate with_column code
+                col_args = ", ".join([f'df["{p}"]' for p in dynamic_params])
+                self._generate_operation_code(
+                    f'df = df.with_column("{output_name}", {udf_name}({col_args}))'
+                )
+
+                # Return unchanged df (not actually executing)
+                return df
+
+            # Normal execution mode
             if stateful_values:
                 daft_func = self._build_stateful_udf(
                     func, params, stateful_values, inferred_dtype
@@ -980,7 +1134,24 @@ class DaftEngine(Engine):
                 daft_func = daft.func(func)
         except Exception:
             # If anything fails, fall back to Python object storage
-            daft_func = daft.func(func, return_dtype=daft.DataType.python())
+            if self.code_generation_mode:
+                # In code generation mode, still generate code
+                # Use original_func if available, otherwise func
+                func_to_gen = original_func if "original_func" in locals() else func
+                udf_name = self._generate_udf_code(
+                    func_to_gen,
+                    output_name,
+                    params,
+                    stateful_values,
+                    daft.DataType.python(),
+                )
+                col_args = ", ".join([f'df["{p}"]' for p in dynamic_params])
+                self._generate_operation_code(
+                    f'df = df.with_column("{output_name}", {udf_name}({col_args}))'
+                )
+                return df
+            else:
+                daft_func = daft.func(func, return_dtype=daft.DataType.python())
 
         # Apply the UDF to the DataFrame
         # Build column expressions for parameters
@@ -1160,7 +1331,12 @@ class DaftEngine(Engine):
 
         # Remove stateful-only columns from DataFrame inputs
         for key in list(stateful_inputs.keys()):
-            if key in data_dict and self._has_daft_cls_hint(stateful_inputs[key]):
+            value = stateful_inputs[key]
+            if (
+                key in data_dict
+                and self._should_capture_stateful_input(value)
+                and self._pipeline_accepts_stateful_param(pipeline, key, value)
+            ):
                 data_dict.pop(key, None)
 
         if not data_dict:
@@ -1173,14 +1349,12 @@ class DaftEngine(Engine):
 
         df = daft.from_pydict(data_dict)
 
-        input_keys = set(data_dict.keys()) | set(stateful_inputs.keys())
+        input_keys = set(data_dict.keys())
         requested_outputs = self._resolve_requested_outputs(pipeline, output_name)
         if not requested_outputs:
             return {}
 
-        df = self._convert_pipeline_to_daft(
-            pipeline, df, input_keys, stateful_inputs
-        )
+        df = self._convert_pipeline_to_daft(pipeline, df, input_keys, stateful_inputs)
         df = self._select_output_columns(df, requested_outputs)
 
         if self.show_plan:
@@ -1202,9 +1376,7 @@ class DaftEngine(Engine):
         if return_format != "python":
             raise ValueError(f"Unsupported return_format '{return_format}'")
 
-        return self._materialize_python_outputs(
-            materialized, requested_outputs
-        )
+        return self._materialize_python_outputs(materialized, requested_outputs)
 
     def _materialize_python_outputs(
         self, materialized: "daft.DataFrame", requested_outputs: List[str]
@@ -1337,10 +1509,9 @@ class DaftEngine(Engine):
                 hint = type_hints.get(param_name)
                 if hint and self._has_daft_cls_hint(hint):
                     return True
-                if (
-                    param_name in getattr(node, "parameters", ())
-                    and self._has_daft_cls_hint(value)
-                ):
+                if param_name in getattr(
+                    node, "parameters", ()
+                ) and self._has_daft_cls_hint(value):
                     return True
         return False
 
@@ -1358,7 +1529,10 @@ class DaftEngine(Engine):
                 continue
             value = stateful_inputs[param]
             hint = type_hints.get(param)
-            if self._has_daft_cls_hint(hint) or self._has_daft_cls_hint(value):
+            should_capture = self._should_capture_stateful_input(value) or self._has_daft_cls_hint(
+                hint
+            )
+            if should_capture:
                 resolved[param] = value
             elif getattr(self, "debug", False):
                 print(
@@ -1366,9 +1540,7 @@ class DaftEngine(Engine):
                     f"(hint={hint}, value_type={type(value)})"
                 )
         if resolved and getattr(self, "debug", False):
-            print(
-                f"[DaftEngine] Captured stateful params {list(resolved.keys())}"
-            )
+            print(f"[DaftEngine] Captured stateful params {list(resolved.keys())}")
         return resolved
 
     def _has_daft_cls_hint(self, obj: Any) -> bool:
@@ -1382,64 +1554,90 @@ class DaftEngine(Engine):
             return normalized in {"@daft.cls", "daft.cls", "cls"}
         if getattr(obj, "__daft_stateful__", False):
             return True
+        cls = obj if isinstance(obj, type) else getattr(obj, "__class__", None)
+        if cls is not None:
+            if hasattr(cls, "__daft_cls__") or hasattr(cls, "_daft_cls"):
+                return True
         return False
 
-    def _extract_daft_cls_kwargs(self, stateful_values: Dict[str, Any]) -> Dict[str, Any]:
+    def _should_capture_stateful_input(self, value: Any) -> bool:
+        """Return True if the value should bypass DataFrame columns."""
+
+        return self._has_daft_cls_hint(value) or self._is_daft_cls_instance(value)
+
+    def _split_inputs_for_dataframe(
+        self, inputs: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
+        """Split inputs into DataFrame columns vs. stateful-only values."""
+
+        stateful_inputs = dict(inputs)
+        df_inputs: Dict[str, Any] = {}
+        stateful_only_keys: Set[str] = set()
+
+        for key, value in inputs.items():
+            if self._should_capture_stateful_input(value):
+                stateful_only_keys.add(key)
+            else:
+                df_inputs[key] = value
+
+        return df_inputs, stateful_inputs, stateful_only_keys
+
+    def _extract_daft_cls_kwargs(
+        self, stateful_values: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Extract @daft.cls parameters from stateful objects with sensible defaults.
-        
+
         Always sets use_process=False as default for PyTorch/HuggingFace compatibility.
-        
+
         Looks for optional hints on stateful objects:
         - __daft_max_concurrency__: int (limit concurrent instances)
         - __daft_use_process__: bool (override default use_process=False)
         - __daft_gpus__: int (request GPUs)
-        
+
         Returns:
             Dict of kwargs to pass to @daft.cls decorator
         """
         # Start with sensible defaults
         # use_process=False is critical: avoids PyTorch/CUDA fork issues
-        cls_kwargs: Dict[str, Any] = {
-            'use_process': False
-        }
-        
+        cls_kwargs: Dict[str, Any] = {"use_process": False}
+
         # Collect optional hints from stateful values
         for value in stateful_values.values():
             if value is None:
                 continue
-            
+
             # Check for max_concurrency hint
-            max_concurrency = getattr(value, '__daft_max_concurrency__', None)
+            max_concurrency = getattr(value, "__daft_max_concurrency__", None)
             if max_concurrency is not None:
                 # Use minimum if multiple values specify it
-                if 'max_concurrency' in cls_kwargs:
-                    cls_kwargs['max_concurrency'] = min(
-                        cls_kwargs['max_concurrency'], max_concurrency
+                if "max_concurrency" in cls_kwargs:
+                    cls_kwargs["max_concurrency"] = min(
+                        cls_kwargs["max_concurrency"], max_concurrency
                     )
                 else:
-                    cls_kwargs['max_concurrency'] = max_concurrency
-            
+                    cls_kwargs["max_concurrency"] = max_concurrency
+
             # Check for use_process hint (overrides default)
-            use_process = getattr(value, '__daft_use_process__', None)
+            use_process = getattr(value, "__daft_use_process__", None)
             if use_process is not None:
                 # If any stateful value explicitly requires threads (use_process=False), respect it
                 if use_process is False:
-                    cls_kwargs['use_process'] = False
-                elif 'use_process' not in cls_kwargs or cls_kwargs['use_process']:
+                    cls_kwargs["use_process"] = False
+                elif "use_process" not in cls_kwargs or cls_kwargs["use_process"]:
                     # Only set to True if not already False
-                    cls_kwargs['use_process'] = use_process
-            
+                    cls_kwargs["use_process"] = use_process
+
             # Check for GPU requirements
-            gpus = getattr(value, '__daft_gpus__', None)
+            gpus = getattr(value, "__daft_gpus__", None)
             if gpus is None:
-                gpus = getattr(value, 'gpus', None)
+                gpus = getattr(value, "gpus", None)
             if gpus is not None and isinstance(gpus, int):
                 # Sum GPU requirements
-                cls_kwargs['gpus'] = cls_kwargs.get('gpus', 0) + gpus
-        
-        if getattr(self, 'debug', False):
+                cls_kwargs["gpus"] = cls_kwargs.get("gpus", 0) + gpus
+
+        if getattr(self, "debug", False):
             print(f"[DaftEngine] Extracted @daft.cls kwargs: {cls_kwargs}")
-        
+
         return cls_kwargs
 
     def _build_stateful_udf(
@@ -1450,15 +1648,13 @@ class DaftEngine(Engine):
         inferred_dtype: Optional["daft.DataType"],
     ):
         """Create a @daft.cls wrapper that captures stateful parameters.
-        
+
         Automatically extracts concurrency hints from stateful objects and applies
         them to the @daft.cls decorator. Defaults to use_process=False for
         PyTorch/HuggingFace compatibility.
         """
 
         import daft
-
-        dynamic_params = [p for p in params if p not in stateful_values]
 
         # Extract @daft.cls parameters from stateful objects (with sensible defaults)
         cls_kwargs = self._extract_daft_cls_kwargs(stateful_values)
@@ -1468,7 +1664,9 @@ class DaftEngine(Engine):
             inferred_dtype = daft.DataType.python()
         method_kwargs["return_dtype"] = inferred_dtype
 
-        method_decorator = daft.method(**method_kwargs) if method_kwargs else daft.method()
+        method_decorator = (
+            daft.method(**method_kwargs) if method_kwargs else daft.method()
+        )
 
         @daft.cls(**cls_kwargs)
         class StatefulWrapper:
@@ -1589,3 +1787,477 @@ class DaftEngine(Engine):
 
         # Default: let Daft infer
         return None
+
+    # ==================== Code Generation Methods ====================
+
+    def _init_code_generation(self):
+        """Initialize code generation tracking."""
+        self.generated_code: List[str] = []
+        self._udf_definitions: List[str] = []
+        self._imports: Set[Tuple[str, str]] = set()  # (module, name) tuples
+        self._stateful_objects: Dict[str, str] = {}  # name -> init code
+        self._udf_counter = 0
+        self._row_id_counter = 0
+        self._actual_inputs: Optional[Dict[str, Any]] = None
+        self._actual_output_name: Union[str, List[str], None] = None
+        self._stateful_input_names: Set[str] = set()  # Track which inputs are stateful
+        self._stateful_actual_inputs: Dict[str, Any] = {}
+        self._stateful_literal_input_keys: Set[str] = set()
+
+    def _add_import(self, module: str, names: Union[str, List[str]]):
+        """Track imports needed for generated code."""
+        if not self.code_generation_mode:
+            return
+
+        if isinstance(names, str):
+            names = [names]
+
+        for name in names:
+            self._imports.add((module, name))
+
+    def _generate_udf_name(self, base_name: str) -> str:
+        """Generate unique UDF name."""
+        self._udf_counter += 1
+        return f"{base_name}_{self._udf_counter}"
+
+    def _generate_row_id_name(self) -> str:
+        """Generate unique row ID column name."""
+        self._row_id_counter += 1
+        return f"__daft_row_id_{self._row_id_counter}__"
+
+    def _format_dtype_for_code(self, dtype: Optional["daft.DataType"]) -> str:
+        """Return a valid Python expression for a Daft DataType."""
+        import daft
+
+        if dtype is None:
+            return "daft.DataType.python()"
+
+        simple_map = {
+            daft.DataType.python(): "daft.DataType.python()",
+            daft.DataType.bool(): "daft.DataType.bool()",
+            daft.DataType.int8(): "daft.DataType.int8()",
+            daft.DataType.int16(): "daft.DataType.int16()",
+            daft.DataType.int32(): "daft.DataType.int32()",
+            daft.DataType.int64(): "daft.DataType.int64()",
+            daft.DataType.uint8(): "daft.DataType.uint8()",
+            daft.DataType.uint16(): "daft.DataType.uint16()",
+            daft.DataType.uint32(): "daft.DataType.uint32()",
+            daft.DataType.uint64(): "daft.DataType.uint64()",
+            daft.DataType.float32(): "daft.DataType.float32()",
+            daft.DataType.float64(): "daft.DataType.float64()",
+            daft.DataType.string(): "daft.DataType.string()",
+        }
+
+        for sample, literal in simple_map.items():
+            if dtype == sample:
+                return literal
+
+        if dtype.is_list():
+            inner = self._format_dtype_for_code(dtype.dtype)
+            return f"daft.DataType.list({inner})"
+
+        if dtype.is_struct():
+            fields = [
+                f'"{name}": {self._format_dtype_for_code(field_dtype)}'
+                for name, field_dtype in dtype.fields.items()
+            ]
+            joined = ", ".join(fields)
+            return f"daft.DataType.struct({{{joined}}})"
+
+        if dtype.is_map():
+            key_code = self._format_dtype_for_code(dtype.key_type)
+            value_code = self._format_dtype_for_code(dtype.value_type)
+            return f"daft.DataType.map({key_code}, {value_code})"
+
+        return "daft.DataType.python()"
+
+    def _extract_function_body(self, func: Any) -> Optional[str]:
+        """Return dedented source for the body of ``func``."""
+        import inspect
+
+        try:
+            raw_source = inspect.getsource(func)
+        except (OSError, TypeError):
+            return None
+
+        dedented = textwrap.dedent(raw_source)
+        try:
+            module = ast.parse(dedented)
+        except SyntaxError:
+            return None
+
+        func_nodes = [
+            node
+            for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        if not func_nodes:
+            return None
+
+        func_node = func_nodes[0]
+        if not func_node.body:
+            return None
+
+        lines = dedented.split("\n")
+        start = max(func_node.body[0].lineno - 1, 0)
+        end_node = func_node.body[-1]
+        end = getattr(end_node, "end_lineno", end_node.lineno)
+        end = min(end, len(lines))
+        body = "\n".join(lines[start:end])
+        return body
+
+    def _generate_udf_code(
+        self,
+        func: Any,
+        output_name: str,
+        params: List[str],
+        stateful_values: Dict[str, Any],
+        inferred_dtype: Optional["daft.DataType"],
+    ) -> str:
+        """Generate UDF definition code with proper decorators.
+
+        Returns:
+            UDF name to use in with_column calls
+        """
+        if self.code_generation_mode:
+            self._add_import("typing", "Any")
+
+        func_name = func.__name__
+        udf_name = self._generate_udf_name(func_name)
+
+        # Generate code based on whether it's stateful or not
+        if stateful_values:
+            # Generate @daft.cls wrapper
+            class_name = f"{func_name.title().replace('_', '')}Wrapper"
+
+            lines = []
+            lines.append("@daft.cls(use_process=False)")
+            lines.append(f"class {class_name}:")
+
+            # __init__ with stateful parameters
+            stateful_params = ", ".join([f"{k}: Any" for k in stateful_values.keys()])
+            lines.append(f"    def __init__(self, {stateful_params}):")
+            for k in stateful_values.keys():
+                lines.append(f"        self.{k} = {k}")
+            lines.append("")
+
+            # __call__ method (or named method)
+            dtype_str = self._format_dtype_for_code(inferred_dtype)
+            dynamic_params = [p for p in params if p not in stateful_values]
+            method_params = ", ".join([f"{p}: Any" for p in dynamic_params])
+
+            lines.append(f"    @daft.method(return_dtype={dtype_str})")
+            lines.append(f"    def __call__(self, {method_params}):")
+
+            # Generate function call
+            all_params = ", ".join(
+                [f"self.{p}" if p in stateful_values else p for p in params]
+            )
+            lines.append(f"        return {func_name}({all_params})")
+            lines.append("")
+
+            # Add instantiation
+            init_args = ", ".join([f"{k}={k}" for k in stateful_values.keys()])
+            lines.append(f"{udf_name} = {class_name}({init_args})")
+
+            self._udf_definitions.append("\n".join(lines))
+            return udf_name
+        else:
+            # Generate @daft.func
+            lines = []
+
+            # Format parameters
+            param_list = ", ".join([f"{p}: Any" for p in params])
+
+            dtype_str = self._format_dtype_for_code(inferred_dtype)
+            lines.append(f"@daft.func(return_dtype={dtype_str})")
+            lines.append(f"def {udf_name}({param_list}):")
+
+            # Try to get function body
+            body = self._extract_function_body(func)
+            if body:
+                body = textwrap.dedent(body)
+                for line in body.split("\n"):
+                    lines.append(f"    {line}" if line else "")
+            else:
+                lines.append("    # Source code not available")
+                lines.append(f"    return {func_name}({', '.join(params)})")
+
+            self._udf_definitions.append("\n".join(lines))
+            return udf_name
+
+    def _generate_operation_code(self, operation: str):
+        """Add a DataFrame operation line to generated code."""
+        if not self.code_generation_mode:
+            return
+
+        self.generated_code.append(operation)
+
+    def _generate_dataframe_creation_lines(
+        self, inputs: Dict[str, Any], lines: List[str]
+    ):
+        """Generate the initial DataFrame creation code with actual input data."""
+        if not self.code_generation_mode:
+            return
+
+        stateful_literal_keys = getattr(self, "_stateful_literal_input_keys", set())
+
+        # Separate inputs by type:
+        # - simple: primitives that can be serialized directly
+        # - daft_cls: @daft.cls instances (stateful UDFs)
+        # - complex: other objects that need pre-initialization
+        simple_inputs = {}
+        daft_cls_inputs = {}
+        complex_inputs = {}
+
+        for key, value in inputs.items():
+            if key in stateful_literal_keys:
+                continue
+            # Check if it's a simple type that can be serialized
+            if self._is_simple_type(value):
+                simple_inputs[key] = value
+            elif self._is_daft_cls_instance(value):
+                daft_cls_inputs[key] = value
+            else:
+                complex_inputs[key] = value
+
+        # Generate the from_pydict call with simple data
+        lines.append("# Create DataFrame with input data")
+        lines.append("df = daft.from_pydict({")
+
+        for key, value in simple_inputs.items():
+            # Format value as Python literal
+            value_repr = self._format_value_for_code(value)
+            lines.append(f'    "{key}": [{value_repr}],')
+
+        lines.append("})")
+        lines.append("")
+
+        if stateful_literal_keys:
+            lines.append("# Stateful inputs handled outside the DataFrame:")
+            for key in stateful_literal_keys:
+                obj = self._stateful_actual_inputs.get(key)
+                type_name = type(obj).__name__ if obj is not None else "object"
+                lines.append(f"#   - {key}: {type_name} (captured via @daft.cls)")
+            lines.append("")
+
+        # Add warnings for @daft.cls instances
+        if daft_cls_inputs:
+            lines.append(
+                "# ==================== ⚠️  PERFORMANCE WARNING ===================="
+            )
+            lines.append(
+                "# The following stateful objects are being passed via daft.lit():"
+            )
+            for key in daft_cls_inputs.keys():
+                lines.append(f"#   - {key}: {type(daft_cls_inputs[key]).__name__}")
+            lines.append("#")
+            lines.append(
+                "# This is INEFFICIENT! The object is serialized into every row."
+            )
+            lines.append(
+                "# These objects are already @daft.cls instances and should be"
+            )
+            lines.append("# used DIRECTLY without daft.lit().")
+            lines.append("#")
+            lines.append("# CORRECT USAGE:")
+            lines.append(
+                f"#   {list(daft_cls_inputs.keys())[0]} = {type(list(daft_cls_inputs.values())[0]).__name__}(...)"
+            )
+            lines.append(
+                f"#   df = df.with_column('result', {list(daft_cls_inputs.keys())[0]}(df['input']))"
+            )
+            lines.append("#")
+            lines.append("# Do NOT add them as columns with daft.lit()!")
+            lines.append(
+                "# ================================================================"
+            )
+            lines.append("")
+
+        # Add complex inputs as DataFrame columns (they need to be pre-initialized)
+        if complex_inputs or daft_cls_inputs:
+            if complex_inputs:
+                lines.append("# Add complex/stateful objects as columns")
+                lines.append(
+                    "# Note: These objects must be initialized before running this code"
+                )
+                for key in complex_inputs.keys():
+                    lines.append(f'df = df.with_column("{key}", daft.lit({key}))')
+                lines.append("")
+
+            # Include daft_cls for now (with warning above)
+            if daft_cls_inputs:
+                lines.append(
+                    "# ⚠️  WARNING: @daft.cls objects below - see warning above!"
+                )
+                for key in daft_cls_inputs.keys():
+                    lines.append(
+                        f'df = df.with_column("{key}", daft.lit({key}))  # ← INEFFICIENT!'
+                    )
+                lines.append("")
+
+    def _is_simple_type(self, value: Any) -> bool:
+        """Check if a value is a simple serializable type."""
+        return isinstance(value, (int, float, str, bool, type(None), list, tuple, dict))
+
+    def _is_daft_cls_instance(self, value: Any) -> bool:
+        """Check if value is a @daft.cls instance."""
+        # Check for @daft.cls marker
+        if hasattr(value, "__class__"):
+            cls = value.__class__
+            # Daft marks classes with special attributes
+            return hasattr(cls, "__daft_cls__") or hasattr(cls, "_daft_cls")
+        return False
+
+    def _generate_output_collection(self, requested_outputs: List[str]):
+        """Generate the output collection code."""
+        if not self.code_generation_mode:
+            return
+
+        self.generated_code.append("")
+        self.generated_code.append("# Select output columns")
+
+        if len(requested_outputs) == 1:
+            self.generated_code.append(f'df = df.select(df["{requested_outputs[0]}"])')
+        else:
+            cols = ", ".join([f'df["{out}"]' for out in requested_outputs])
+            self.generated_code.append(f"df = df.select({cols})")
+
+        self.generated_code.append("")
+        self.generated_code.append("# Collect results")
+        self.generated_code.append("result = df.collect()")
+        self.generated_code.append("print(result.to_pydict())")
+
+    def _format_value_for_code(self, value: Any) -> str:
+        """Format a value as Python code string.
+
+        Returns a valid Python literal that can be used in generated code.
+        Unlike reprlib.repr(), this returns the FULL representation without
+        truncation, since we need executable code not debug output.
+        """
+        # Handle common types
+        if isinstance(value, str):
+            return repr(value)
+        elif isinstance(value, (int, float, bool)):
+            return repr(value)
+        elif isinstance(value, (list, tuple)):
+            # Use full repr for code generation (not reprlib which truncates with ...)
+            return repr(value)
+        elif value is None:
+            return "None"
+        else:
+            # For complex objects, just use a placeholder
+            return f"<{type(value).__name__} object>"
+
+    def get_generated_code(self) -> str:
+        """Return complete executable Daft code that exactly matches the pipeline execution."""
+        if not self.code_generation_mode:
+            return "# Code generation mode not enabled"
+
+        lines = []
+
+        # Header with performance analysis
+        lines.append('"""')
+        lines.append(
+            "Generated Daft code - Exact translation from HyperNodes pipeline."
+        )
+        lines.append("")
+        lines.append(
+            "This code produces identical results to the HyperNodes pipeline execution."
+        )
+        lines.append("You can run this file directly to verify the translation.")
+        lines.append("")
+        lines.append("=" * 70)
+        lines.append("PERFORMANCE ANALYSIS")
+        lines.append("=" * 70)
+
+        # Count map operations
+        map_count = sum(1 for line in self.generated_code if "# Map over:" in line)
+        if map_count > 0:
+            lines.append("")
+            lines.append(f"⚠️  DETECTED {map_count} NESTED MAP OPERATIONS")
+            lines.append("")
+            lines.append(
+                "Each map operation creates an explode → process → groupby cycle,"
+            )
+            lines.append(
+                f"which forces data materialization. This can be {map_count}x slower than optimal."
+            )
+            lines.append("")
+            lines.append("OPTIMIZATION STRATEGIES:")
+            lines.append("")
+            lines.append("1. BATCH UDFs: Use @daft.func.batch or @daft.method.batch")
+            lines.append(
+                "   - Processes entire Series at once (10-100x faster for ML models)"
+            )
+            lines.append("   - Eliminates explode/groupby overhead")
+            lines.append("")
+            lines.append("2. RESTRUCTURE PIPELINE: Reduce nesting")
+            lines.append("   - Batch encode all passages/queries upfront")
+            lines.append("   - Use vectorized operations where possible")
+            lines.append("")
+            lines.append("3. STATEFUL UDFs: Ensure using @daft.cls correctly")
+            lines.append("   - Initialize expensive objects ONCE per worker")
+            lines.append("   - Don't pass via daft.lit() - use directly!")
+            lines.append("")
+
+        lines.append("For detailed recommendations, see:")
+        lines.append(
+            "https://www.getdaft.io/projects/docs/en/stable/user_guide/udfs.html"
+        )
+        lines.append("=" * 70)
+        lines.append('"""')
+        lines.append("")
+
+        # Imports
+        lines.append("import daft")
+
+        # Group imports by module
+        imports_by_module: Dict[str, List[str]] = {}
+        for module, name in sorted(self._imports):
+            if module not in imports_by_module:
+                imports_by_module[module] = []
+            imports_by_module[module].append(name)
+
+        for module, names in sorted(imports_by_module.items()):
+            lines.append(f"from {module} import {', '.join(sorted(set(names)))}")
+
+        lines.append("")
+
+        # Stateful object setup
+        if self._stateful_input_names and self._actual_inputs:
+            lines.append("# ==================== Stateful Objects ====================")
+            lines.append(
+                "# These objects need to be initialized before running the pipeline"
+            )
+            lines.append("")
+            for name in sorted(self._stateful_input_names):
+                if name in self._actual_inputs:
+                    obj = self._actual_inputs[name]
+                    lines.append(
+                        "# " + name + " = <" + type(obj).__name__ + " instance>"
+                    )
+                    lines.append(
+                        "# You need to initialize this with the same configuration"
+                    )
+            lines.append("")
+
+        # UDF definitions
+        if self._udf_definitions:
+            lines.append("# ==================== UDF Definitions ====================")
+            lines.append("")
+            for udf_def in self._udf_definitions:
+                lines.append(udf_def)
+                lines.append("")
+
+        # Main execution
+        lines.append("")
+        lines.append("# ==================== Pipeline Execution ====================")
+        lines.append("")
+
+        # Pipeline operations (includes DataFrame creation and output collection)
+        if self.generated_code:
+            for code_line in self.generated_code:
+                lines.append(code_line)
+
+        return "\n".join(lines)

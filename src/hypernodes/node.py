@@ -59,16 +59,20 @@ class Node:
         """
         return self._code_hash
     
-    def __call__(self, **kwargs) -> Any:
-        """Execute the wrapped function with given keyword arguments.
-        
+    def __call__(self, *args, **kwargs) -> Any:
+        """Execute the wrapped function with given arguments.
+
+        This allows Node instances to be called directly like functions,
+        which is useful in generated code and when wrapping nodes.
+
         Args:
-            **kwargs: Keyword arguments matching the function's parameters
-            
+            *args: Positional arguments to pass to the wrapped function
+            **kwargs: Keyword arguments to pass to the wrapped function
+
         Returns:
             The result of executing the wrapped function
         """
-        return self.func(**kwargs)
+        return self.func(*args, **kwargs)
     
     def __repr__(self) -> str:
         """Return string representation of the Node."""
