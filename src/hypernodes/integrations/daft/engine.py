@@ -11,6 +11,8 @@ Key features:
 """
 
 import importlib.util
+import multiprocessing
+import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -72,6 +74,34 @@ class DaftEngine(Engine):
     - Map operations become DataFrame operations
     - Pipelines are converted to lazy DataFrame transformations
 
+    **Concurrency Control for Stateful Objects**:
+
+    When using stateful objects (e.g., ML models, tokenizers) that are identified
+    as needing @daft.cls wrapping, the engine automatically applies sensible defaults:
+    
+    - ``use_process=False``: Uses threads instead of processes (avoids PyTorch/CUDA fork issues)
+    
+    You can optionally override these defaults by adding hints to your classes:
+    
+    .. code-block:: python
+
+        class MyModel:
+            # Optional: Tell DaftEngine this is stateful
+            __daft_hint__ = "@daft.cls"
+            __daft_stateful__ = True
+            
+            # Optional: Limit concurrent instances (useful for GPU memory)
+            __daft_max_concurrency__ = 1
+            
+            # Optional: Override use_process default
+            __daft_use_process__ = False
+            
+            # Optional: Request GPUs
+            __daft_gpus__ = 1
+    
+    These hints are **completely optional** - the engine works out-of-the-box with
+    PyTorch/HuggingFace models without any configuration.
+
     Args:
         collect: Whether to automatically collect results (default: True)
         show_plan: Whether to print the execution plan (default: False)
@@ -82,6 +112,7 @@ class DaftEngine(Engine):
             - "pydict": previous behavior using ``to_pydict()``
             - "arrow": force Arrow-based conversion (requires pyarrow)
             - "pandas": materialize via ``to_pandas()`` (requires pandas)
+        force_spawn_method: Whether to force multiprocessing spawn method (default: True)
 
     Example:
         >>> from hypernodes import node, Pipeline
@@ -104,6 +135,7 @@ class DaftEngine(Engine):
         show_plan: bool = False,
         debug: bool = False,
         python_return_strategy: str = "auto",
+        force_spawn_method: bool = True,
     ):
         if not DAFT_AVAILABLE:
             raise ImportError(
@@ -126,6 +158,54 @@ class DaftEngine(Engine):
                 "python_return_strategy='pandas' requires pandas to be installed"
             )
         self.python_return_strategy = python_return_strategy
+
+        # Configure multiprocessing for PyTorch/CUDA compatibility
+        if force_spawn_method:
+            self._configure_multiprocessing_for_pytorch()
+
+    def _configure_multiprocessing_for_pytorch(self):
+        """Configure multiprocessing to avoid PyTorch/CUDA fork issues.
+
+        PyTorch and CUDA have known issues with the 'fork' multiprocessing method,
+        which can cause segmentation faults. This method sets the start method to
+        'spawn' to avoid these issues.
+
+        See: https://pytorch.org/docs/stable/notes/multiprocessing.html
+        """
+        current_method = multiprocessing.get_start_method(allow_none=True)
+
+        if current_method == 'spawn':
+            # Already configured correctly
+            return
+
+        if current_method is not None and current_method != 'spawn':
+            # Method already set to something else (fork/forkserver)
+            warnings.warn(
+                f"Multiprocessing start method is already set to '{current_method}'. "
+                f"For PyTorch/CUDA compatibility, DaftEngine recommends 'spawn'. "
+                f"This may cause segmentation faults with PyTorch models. "
+                f"To fix: call multiprocessing.set_start_method('spawn') before "
+                f"importing torch or creating DaftEngine, or set force_spawn_method=False "
+                f"to disable this warning.",
+                RuntimeWarning,
+                stacklevel=3
+            )
+            return
+
+        # Set spawn method
+        try:
+            multiprocessing.set_start_method('spawn', force=False)
+            if self.debug:
+                print("[DaftEngine] Set multiprocessing start method to 'spawn' for PyTorch compatibility")
+        except RuntimeError:
+            # Already set by another module
+            warnings.warn(
+                "Could not set multiprocessing start method to 'spawn'. "
+                "If using PyTorch/CUDA, you may experience segmentation faults. "
+                "Call multiprocessing.set_start_method('spawn') at the top of your script.",
+                RuntimeWarning,
+                stacklevel=3
+            )
 
     def run(
         self,
@@ -1304,6 +1384,64 @@ class DaftEngine(Engine):
             return True
         return False
 
+    def _extract_daft_cls_kwargs(self, stateful_values: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract @daft.cls parameters from stateful objects with sensible defaults.
+        
+        Always sets use_process=False as default for PyTorch/HuggingFace compatibility.
+        
+        Looks for optional hints on stateful objects:
+        - __daft_max_concurrency__: int (limit concurrent instances)
+        - __daft_use_process__: bool (override default use_process=False)
+        - __daft_gpus__: int (request GPUs)
+        
+        Returns:
+            Dict of kwargs to pass to @daft.cls decorator
+        """
+        # Start with sensible defaults
+        # use_process=False is critical: avoids PyTorch/CUDA fork issues
+        cls_kwargs: Dict[str, Any] = {
+            'use_process': False
+        }
+        
+        # Collect optional hints from stateful values
+        for value in stateful_values.values():
+            if value is None:
+                continue
+            
+            # Check for max_concurrency hint
+            max_concurrency = getattr(value, '__daft_max_concurrency__', None)
+            if max_concurrency is not None:
+                # Use minimum if multiple values specify it
+                if 'max_concurrency' in cls_kwargs:
+                    cls_kwargs['max_concurrency'] = min(
+                        cls_kwargs['max_concurrency'], max_concurrency
+                    )
+                else:
+                    cls_kwargs['max_concurrency'] = max_concurrency
+            
+            # Check for use_process hint (overrides default)
+            use_process = getattr(value, '__daft_use_process__', None)
+            if use_process is not None:
+                # If any stateful value explicitly requires threads (use_process=False), respect it
+                if use_process is False:
+                    cls_kwargs['use_process'] = False
+                elif 'use_process' not in cls_kwargs or cls_kwargs['use_process']:
+                    # Only set to True if not already False
+                    cls_kwargs['use_process'] = use_process
+            
+            # Check for GPU requirements
+            gpus = getattr(value, '__daft_gpus__', None)
+            if gpus is None:
+                gpus = getattr(value, 'gpus', None)
+            if gpus is not None and isinstance(gpus, int):
+                # Sum GPU requirements
+                cls_kwargs['gpus'] = cls_kwargs.get('gpus', 0) + gpus
+        
+        if getattr(self, 'debug', False):
+            print(f"[DaftEngine] Extracted @daft.cls kwargs: {cls_kwargs}")
+        
+        return cls_kwargs
+
     def _build_stateful_udf(
         self,
         func: Any,
@@ -1311,11 +1449,19 @@ class DaftEngine(Engine):
         stateful_values: Dict[str, Any],
         inferred_dtype: Optional["daft.DataType"],
     ):
-        """Create a @daft.cls wrapper that captures stateful parameters."""
+        """Create a @daft.cls wrapper that captures stateful parameters.
+        
+        Automatically extracts concurrency hints from stateful objects and applies
+        them to the @daft.cls decorator. Defaults to use_process=False for
+        PyTorch/HuggingFace compatibility.
+        """
 
         import daft
 
         dynamic_params = [p for p in params if p not in stateful_values]
+
+        # Extract @daft.cls parameters from stateful objects (with sensible defaults)
+        cls_kwargs = self._extract_daft_cls_kwargs(stateful_values)
 
         method_kwargs: Dict[str, Any] = {}
         if inferred_dtype is None:
@@ -1324,7 +1470,7 @@ class DaftEngine(Engine):
 
         method_decorator = daft.method(**method_kwargs) if method_kwargs else daft.method()
 
-        @daft.cls
+        @daft.cls(**cls_kwargs)
         class StatefulWrapper:
             def __init__(self, payload: Dict[str, Any]):
                 self._payload = payload
