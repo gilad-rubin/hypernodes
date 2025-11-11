@@ -88,12 +88,6 @@ def run_test():
         encoded = encoder.encode(doc)
         return encoded.text
 
-    # Force process spawning
-    encode_document.func.__daft_udf_config__ = {
-        "use_process": True,
-        "max_concurrency": 1,
-    }
-
     # Create encoder instance
     print("\nCreating DocumentEncoder instance...")
     encoder = DocumentEncoder(model_name="modal-test")

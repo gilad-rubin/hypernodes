@@ -134,7 +134,8 @@ class RecallEvaluator:
 
 # ==================== Simple Nodes (EXACT copy of structure) ====================
 
-from hypernodes import node, Pipeline
+from hypernodes import Pipeline, node
+
 
 @node(output_name="passages")
 def load_passages(corpus_path: str) -> List[dict]:
@@ -367,9 +368,8 @@ modal_image = (
 )
 def run_pipeline(pipeline: Pipeline, inputs: dict, daft: bool = False) -> Any:
     """Run pipeline (EXACT copy of structure)."""
-    from time import time
-
     import sys
+    from time import time
     sys.path.insert(0, "/root")
 
     from hypernodes.engines import DaftEngine, HypernodesEngine
@@ -405,7 +405,7 @@ def run_pipeline(pipeline: Pipeline, inputs: dict, daft: bool = False) -> Any:
     pipeline = pipeline.with_engine(engine)
     
     start_time = time()
-    print(f"Running retrieval pipeline with unknown examples...")
+    print("Running retrieval pipeline with unknown examples...")
     
     results = pipeline.run(output_name="evaluation_results", inputs=inputs)
     
@@ -442,8 +442,9 @@ def main():
 
     start_time = time()
     result_remote = run_pipeline.local(pipeline, inputs, daft=True)
+    #result_remote = run_pipeline.remote(pipeline, inputs, daft=True)
     end_time = time()
-    
+
     print(f"\nelapsed time: {end_time - start_time}")
     print(f"Result: {result_remote}")
 

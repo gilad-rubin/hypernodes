@@ -645,16 +645,33 @@ def _fix_instance_class(instance: Any) -> Any:
                 pass
 
         if is_frozen_pydantic:
-            # For frozen Pydantic models, create a new instance with the new class
-            # Get the model data and recreate with new class
+            # For frozen Pydantic models, we need to be more careful
+            # Some fields might not serialize well (e.g., numpy arrays)
             try:
-                model_data = instance.model_dump()
-                new_instance = new_cls(**model_data)
+                # First try: use model_copy with the new class
+                # This preserves all fields including arbitrary types
+                new_instance = instance.model_copy(deep=True)
+                object.__setattr__(new_instance, "__class__", new_cls)
                 _FIXED_INSTANCES.add(id(new_instance))
                 return new_instance
             except Exception:
-                # If recreation fails, try direct __class__ assignment anyway
-                pass
+                # Second try: use model_dump() and recreate
+                try:
+                    model_data = instance.model_dump()
+                    new_instance = new_cls(**model_data)
+                    _FIXED_INSTANCES.add(id(new_instance))
+                    return new_instance
+                except Exception:
+                    # Third try: Create empty instance and copy __dict__
+                    try:
+                        new_instance = object.__new__(new_cls)
+                        for k, v in instance.__dict__.items():
+                            object.__setattr__(new_instance, k, v)
+                        _FIXED_INSTANCES.add(id(new_instance))
+                        return new_instance
+                    except Exception:
+                        # If all else fails, try direct __class__ assignment
+                        pass
 
         # Modify the instance's class in place
         object.__setattr__(instance, "__class__", new_cls)
@@ -3278,20 +3295,29 @@ class DaftEngine(Engine):
         # Capture debug flag for logging inside the wrapper
         debug_mode = self.debug
 
+        # Calculate dynamic params (those not in stateful_values)
+        dynamic_params = [p for p in params if p not in prepared_stateful_values]
+
         @daft.cls(**cls_kwargs)
         class StatefulWrapper:
-            def __init__(self, payload: Dict[str, Any]):
+            def __init__(self, payload: Dict[str, Any], dynamic_param_names: List[str]):
                 self._payload = payload
+                self._dynamic_params = dynamic_param_names
 
             @method_decorator
             def __call__(self, *args):
-                arg_iter = iter(args)
-                kwargs = {}
-                for param in params:
-                    if param in self._payload:
-                        kwargs[param] = self._payload[param]
-                    else:
-                        kwargs[param] = next(arg_iter)
+                # Build kwargs by combining stateful values with dynamic args
+                # The args correspond to dynamic_params in order
+                kwargs = dict(self._payload)  # Start with stateful values
+                
+                # Add dynamic params from args
+                if len(args) != len(self._dynamic_params):
+                    raise ValueError(
+                        f"Expected {len(self._dynamic_params)} dynamic args "
+                        f"({self._dynamic_params}), got {len(args)}"
+                    )
+                for param_name, arg_value in zip(self._dynamic_params, args):
+                    kwargs[param_name] = arg_value
 
                 # Call the function
                 result = serializable_func(**kwargs)
@@ -3305,7 +3331,7 @@ class DaftEngine(Engine):
 
                 return fixed_result
 
-        wrapper = StatefulWrapper(prepared_stateful_values)
+        wrapper = StatefulWrapper(prepared_stateful_values, dynamic_params)
         return wrapper
 
     def _should_execute_stateful_in_python(
