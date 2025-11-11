@@ -68,6 +68,10 @@ class NodeConverter:
             formatted = ", ".join(missing)
             raise ValueError(f"Missing columns for node '{node.output_name}': {formatted}")
 
+        if not dynamic_params:
+            constant_value = node.func(**stateful_params)
+            return df.with_column(node.output_name, daft.lit(constant_value))
+
         if stateful_params:
             udf = self._stateful_builder.build(node.func, stateful_params, dynamic_params)
         else:

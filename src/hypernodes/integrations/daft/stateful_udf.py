@@ -94,6 +94,7 @@ class StatefulUDFBuilder:
                 self._stateful = stateful_values
                 self._dynamic_params = dynamic_param_names
 
+            @daft.method(return_dtype=daft.DataType.python())
             def __call__(self, *args):
                 """Execute function with combined stateful + dynamic params.
 
