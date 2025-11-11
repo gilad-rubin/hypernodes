@@ -1,326 +1,412 @@
-#!/usr/bin/env python3
 """
-Progressively complex test to find where Modal-style serialization breaks.
+Progressive complexity test to find what causes the serialization bug.
 
-This script tests increasing levels of complexity to pinpoint the exact failure point.
-Run with different COMPLEXITY_LEVEL values to test each level.
+Start simple and uncomment features progressively until it breaks.
 """
 
-import sys
-from typing import List, Any, Protocol
-from pydantic import BaseModel
-import numpy as np
-from hypernodes import Pipeline, node
-from hypernodes.engines import DaftEngine
+import modal
+from pathlib import Path
+
+# Create Modal app
+app = modal.App("test-progressive")
+
+# Get paths
+hypernodes_dir = Path("/Users/giladrubin/python_workspace/hypernodes/src/hypernodes")
+models_file = Path("/Users/giladrubin/python_workspace/hypernodes/scripts/models_test.py")
+
+# Modal image
+image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install(
+        "daft",
+        "cloudpickle",
+        "pydantic",
+        "networkx",
+        "tqdm",
+        "rich",
+        "graphviz",
+        "numpy",
+        "pandas",
+    )
+    .add_local_dir(str(hypernodes_dir), remote_path="/root/hypernodes")
+    .add_local_file(str(models_file), remote_path="/root/models_test.py")
+)
 
 
-# Configuration
-COMPLEXITY_LEVEL = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-DEBUG = True
+@app.function(image=image)
+def test_level_1_simple():
+    """Level 1: Simple classes from separate module."""
+    import sys
+    sys.path.insert(0, "/root")
 
-print(f"Testing complexity level {COMPLEXITY_LEVEL}")
-print("=" * 60)
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document
 
+    print("\n" + "="*70)
+    print("LEVEL 1: Simple class from separate module")
+    print("="*70)
 
-# ==================== LEVEL 1: Basic Pydantic Models ====================
-class Item(BaseModel):
-    id: str
-    value: int
-    model_config = {"frozen": True}
+    @node(output_name="doc")
+    def create_doc() -> Document:
+        return Document(text="test", doc_id=1)
 
+    @node(output_name="result")
+    def extract(doc: Document) -> str:
+        return doc.text
 
-@node(output_name="items_l1")
-def create_items_l1(count: int) -> List[Item]:
-    return [Item(id=f"item_{i}", value=i * 10) for i in range(count)]
-
-
-@node(output_name="sum_l1")
-def sum_items_l1(items_l1: List[Item]) -> int:
-    return sum(item.value for item in items_l1)
-
-
-# ==================== LEVEL 2: Pydantic with arbitrary_types_allowed ====================
-class DataItem(BaseModel):
-    id: str
-    data: Any  # numpy array
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-
-@node(output_name="data_items_l2")
-def create_data_items_l2(count: int) -> List[DataItem]:
-    return [
-        DataItem(id=f"data_{i}", data=np.array([i, i * 2, i * 3]))
-        for i in range(count)
-    ]
-
-
-@node(output_name="sum_l2")
-def sum_data_items_l2(data_items_l2: List[DataItem]) -> float:
-    return sum(item.data.sum() for item in data_items_l2)
-
-
-# ==================== LEVEL 3: Protocol + Stateful Class ====================
-class Processor(Protocol):
-    def process(self, x: int) -> int: ...
-
-
-class ConcreteProcessor:
-    __daft_hint__ = "@daft.cls"
-    
-    def __init__(self, multiplier: int):
-        self.multiplier = multiplier
-    
-    def process(self, x: int) -> int:
-        return x * self.multiplier
-
-
-@node(output_name="processed_l3")
-def process_with_stateful_l3(x: int, processor: Processor) -> int:
-    return processor.process(x)
-
-
-# ==================== LEVEL 4: Nested Pydantic Models ====================
-class InnerData(BaseModel):
-    value: int
-    model_config = {"frozen": True}
-
-
-class OuterData(BaseModel):
-    id: str
-    inner: InnerData
-    items: List[InnerData]
-    model_config = {"frozen": True}
-
-
-@node(output_name="nested_l4")
-def create_nested_l4(count: int) -> List[OuterData]:
-    return [
-        OuterData(
-            id=f"outer_{i}",
-            inner=InnerData(value=i * 10),
-            items=[InnerData(value=j) for j in range(i)]
-        )
-        for i in range(count)
-    ]
-
-
-@node(output_name="sum_l4")
-def sum_nested_l4(nested_l4: List[OuterData]) -> int:
-    total = 0
-    for item in nested_l4:
-        total += item.inner.value
-        total += sum(inner.value for inner in item.items)
-    return total
-
-
-# ==================== LEVEL 5: Complex with Multiple Stateful Objects ====================
-class Encoder:
-    __daft_hint__ = "@daft.cls"
-    __daft_use_process__ = False
-    
-    def __init__(self, factor: int):
-        self.factor = factor
-    
-    def encode(self, text: str) -> Any:
-        # Simulate encoding with numpy array
-        return np.array([len(text) * self.factor, ord(text[0]) if text else 0])
-
-
-class EncodedItem(BaseModel):
-    id: str
-    text: str
-    embedding: Any
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-
-@node(output_name="encoded_l5")
-def encode_items_l5(items_l1: List[Item], encoder: Encoder) -> List[EncodedItem]:
-    return [
-        EncodedItem(id=item.id, text=f"text_{item.id}", embedding=encoder.encode(item.id))
-        for item in items_l1
-    ]
-
-
-@node(output_name="sum_l5")
-def sum_encoded_l5(encoded_l5: List[EncodedItem]) -> float:
-    return sum(item.embedding.sum() for item in encoded_l5)
-
-
-# ==================== LEVEL 6: Map Operations ====================
-@node(output_name="single_item")
-def process_single_item_l6(item: Item, processor: Processor) -> int:
-    return processor.process(item.value)
-
-
-# ==================== Build Pipelines ====================
-def build_pipeline_level_1():
-    """Basic Pydantic models."""
-    return Pipeline(
-        nodes=[create_items_l1, sum_items_l1],
-        name="level_1"
+    pipeline = Pipeline(
+        nodes=[create_doc, extract],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
+    result = pipeline.run(inputs={})
+    print(f"✓ Level 1 passed: {result}")
+    return {"level": 1, "status": "pass"}
 
-def build_pipeline_level_2():
-    """Pydantic with numpy arrays."""
-    return Pipeline(
-        nodes=[create_data_items_l2, sum_data_items_l2],
-        name="level_2"
+
+@app.function(image=image)
+def test_level_2_stateful():
+    """Level 2: Stateful class with typed methods."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, Encoder
+
+    print("\n" + "="*70)
+    print("LEVEL 2: Stateful class with typed methods")
+    print("="*70)
+
+    @node(output_name="doc")
+    def create_doc() -> Document:
+        return Document(text="test", doc_id=1)
+
+    @node(output_name="encoded")
+    def encode_doc(doc: Document, encoder: Encoder) -> Document:
+        return encoder.encode(doc)
+
+    @node(output_name="result")
+    def extract(encoded: Document) -> str:
+        return encoded.text
+
+    encoder = Encoder(model_name="test-model")
+
+    pipeline = Pipeline(
+        nodes=[create_doc, encode_doc, extract],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
+    result = pipeline.run(inputs={"encoder": encoder})
+    print(f"✓ Level 2 passed: {result}")
+    return {"level": 2, "status": "pass"}
 
-def build_pipeline_level_3():
-    """Protocol + stateful class."""
-    return Pipeline(
-        nodes=[process_with_stateful_l3],
-        name="level_3"
+
+@app.function(image=image)
+def test_level_3_use_process():
+    """Level 3: Add use_process=True."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, Encoder
+
+    print("\n" + "="*70)
+    print("LEVEL 3: With use_process=True")
+    print("="*70)
+
+    @node(output_name="doc")
+    def create_doc() -> Document:
+        return Document(text="test", doc_id=1)
+
+    @node(output_name="encoded")
+    def encode_doc(doc: Document, encoder: Encoder) -> Document:
+        return encoder.encode(doc)
+
+    @node(output_name="result")
+    def extract(encoded: Document) -> str:
+        return encoded.text
+
+    # Force use_process
+    encode_doc.func.__daft_udf_config__ = {"use_process": True, "max_concurrency": 1}
+
+    encoder = Encoder(model_name="test-model")
+
+    pipeline = Pipeline(
+        nodes=[create_doc, encode_doc, extract],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
+    result = pipeline.run(inputs={"encoder": encoder})
+    print(f"✓ Level 3 passed: {result}")
+    return {"level": 3, "status": "pass"}
 
-def build_pipeline_level_4():
-    """Nested Pydantic models."""
-    return Pipeline(
-        nodes=[create_nested_l4, sum_nested_l4],
-        name="level_4"
+
+@app.function(image=image)
+def test_level_4_daft_hints():
+    """Level 4: Add __daft_hint__ attributes."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, EncoderWithHints
+
+    print("\n" + "="*70)
+    print("LEVEL 4: With __daft_hint__ attributes")
+    print("="*70)
+
+    @node(output_name="doc")
+    def create_doc() -> Document:
+        return Document(text="test", doc_id=1)
+
+    @node(output_name="encoded")
+    def encode_doc(doc: Document, encoder: EncoderWithHints) -> Document:
+        return encoder.encode(doc)
+
+    @node(output_name="result")
+    def extract(encoded: Document) -> str:
+        return encoded.text
+
+    encoder = EncoderWithHints(model_name="test-model")
+
+    pipeline = Pipeline(
+        nodes=[create_doc, encode_doc, extract],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
+    result = pipeline.run(inputs={"encoder": encoder})
+    print(f"✓ Level 4 passed: {result}")
+    return {"level": 4, "status": "pass"}
 
-def build_pipeline_level_5():
-    """Complex: multiple nodes + stateful objects + numpy."""
-    return Pipeline(
-        nodes=[create_items_l1, encode_items_l5, sum_encoded_l5],
-        name="level_5"
+
+@app.function(image=image)
+def test_level_5_multiple_stateful():
+    """Level 5: Multiple stateful objects."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, EncoderWithHints, Fusion
+
+    print("\n" + "="*70)
+    print("LEVEL 5: Multiple stateful objects")
+    print("="*70)
+
+    @node(output_name="doc1")
+    def create_doc1() -> Document:
+        return Document(text="doc1", doc_id=1)
+
+    @node(output_name="doc2")
+    def create_doc2() -> Document:
+        return Document(text="doc2", doc_id=2)
+
+    @node(output_name="encoded1")
+    def encode_doc1(doc1: Document, encoder: EncoderWithHints) -> Document:
+        return encoder.encode(doc1)
+
+    @node(output_name="encoded2")
+    def encode_doc2(doc2: Document, encoder: EncoderWithHints) -> Document:
+        return encoder.encode(doc2)
+
+    @node(output_name="fused")
+    def fuse_docs(encoded1: Document, encoded2: Document, fusion: Fusion) -> Document:
+        return fusion.fuse(encoded1, encoded2)
+
+    @node(output_name="result")
+    def extract(fused: Document) -> str:
+        return fused.text
+
+    encoder = EncoderWithHints(model_name="test-model")
+    fusion = Fusion(strategy="concat")
+
+    pipeline = Pipeline(
+        nodes=[create_doc1, create_doc2, encode_doc1, encode_doc2, fuse_docs, extract],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
+    result = pipeline.run(inputs={"encoder": encoder, "fusion": fusion})
+    print(f"✓ Level 5 passed: {result}")
+    return {"level": 5, "status": "pass"}
 
-def build_pipeline_level_6():
-    """Map operations with stateful objects."""
-    # Need to create full pipeline first, then extract items for map
-    return Pipeline(
-        nodes=[process_single_item_l6],
-        name="level_6"
+
+@app.function(image=image)
+def test_level_6_nested_types():
+    """Level 6: Complex nested type annotations."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from typing import List
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, Hit, Ranker
+
+    print("\n" + "="*70)
+    print("LEVEL 6: Complex nested types (List[CustomClass])")
+    print("="*70)
+
+    @node(output_name="docs")
+    def create_docs() -> List[Document]:
+        return [Document(text=f"doc{i}", doc_id=i) for i in range(3)]
+
+    @node(output_name="hits")
+    def docs_to_hits(docs: List[Document]) -> List[Hit]:
+        return [Hit(doc_id=d.doc_id, score=1.0) for d in docs]
+
+    @node(output_name="ranked")
+    def rank_hits(hits: List[Hit], ranker: Ranker) -> List[Hit]:
+        return ranker.rank(hits)
+
+    @node(output_name="result")
+    def count_hits(ranked: List[Hit]) -> int:
+        return len(ranked)
+
+    ranker = Ranker(strategy="score")
+
+    pipeline = Pipeline(
+        nodes=[create_docs, docs_to_hits, rank_hits, count_hits],
+        engine=DaftEngine(collect=True, debug=True),
     )
 
-
-# ==================== Test Runners ====================
-def run_test(level: int):
-    """Run test at specified complexity level."""
-    try:
-        print(f"\n{'='*60}")
-        print(f"LEVEL {level}")
-        print(f"{'='*60}")
-        
-        if level == 1:
-            print("Testing: Basic Pydantic models")
-            pipeline = build_pipeline_level_1()
-            inputs = {"count": 3}
-            expected_key = "sum_l1"
-            expected_value = 30  # 0 + 10 + 20
-            
-        elif level == 2:
-            print("Testing: Pydantic with numpy arrays (arbitrary_types_allowed)")
-            pipeline = build_pipeline_level_2()
-            inputs = {"count": 3}
-            expected_key = "sum_l2"
-            expected_value = 18.0  # sum of [0,0,0], [1,2,3], [2,4,6]
-            
-        elif level == 3:
-            print("Testing: Protocol type hints + stateful class")
-            pipeline = build_pipeline_level_3()
-            processor = ConcreteProcessor(multiplier=5)
-            inputs = {"x": 10, "processor": processor}
-            expected_key = "processed_l3"
-            expected_value = 50
-            
-        elif level == 4:
-            print("Testing: Nested Pydantic models")
-            pipeline = build_pipeline_level_4()
-            inputs = {"count": 3}
-            expected_key = "sum_l4"
-            expected_value = 31  # 0 + [] + 10 + [0] + 20 + [0,1] = 0 + 10 + 0 + 20 + 0 + 1 = 31
-            
-        elif level == 5:
-            print("Testing: Complex pipeline with encoder + Pydantic + numpy")
-            pipeline = build_pipeline_level_5()
-            encoder = Encoder(factor=2)
-            inputs = {"count": 3, "encoder": encoder}
-            expected_key = "sum_l5"
-            expected_value = None  # Dynamic, just check it runs
-            
-        elif level == 6:
-            print("Testing: Map operations with stateful objects")
-            pipeline = build_pipeline_level_6()
-            processor = ConcreteProcessor(multiplier=3)
-            # Create items directly for map
-            items = [Item(id=f"item_{i}", value=i * 10) for i in range(3)]
-            inputs = {"item": items, "processor": processor}
-            expected_key = "single_item"
-            expected_value = [0, 30, 60]  # [0*3, 10*3, 20*3]
-            
-        else:
-            print(f"Invalid level: {level}")
-            return False
-        
-        # Run with DaftEngine
-        engine = DaftEngine(debug=DEBUG)
-        pipeline_with_engine = pipeline.with_engine(engine)
-        
-        print(f"\nInputs: {list(inputs.keys())}")
-        print("Executing...")
-        
-        if level == 6:
-            # Use map for level 6
-            result = pipeline_with_engine.map(inputs=inputs, map_over="item")
-        else:
-            result = pipeline_with_engine.run(inputs=inputs)
-        
-        print(f"Result keys: {list(result.keys())}")
-        print(f"Result['{expected_key}']: {result[expected_key]}")
-        
-        if expected_value is not None:
-            actual = result[expected_key]
-            if isinstance(actual, (list, dict)):
-                print(f"✓ Level {level} PASSED (returned {type(actual).__name__})")
-            elif abs(actual - expected_value) < 0.01:
-                print(f"✓ Level {level} PASSED")
-            else:
-                print(f"✗ Level {level} FAILED: expected {expected_value}, got {actual}")
-                return False
-        else:
-            print(f"✓ Level {level} PASSED (result returned successfully)")
-        
-        return True
-        
-    except Exception as e:
-        print(f"\n✗ Level {level} FAILED with exception:")
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    result = pipeline.run(inputs={"ranker": ranker})
+    print(f"✓ Level 6 passed: {result}")
+    return {"level": 6, "status": "pass"}
 
 
+@app.function(image=image)
+def test_level_7_dict_annotations():
+    """Level 7: Dict with custom class values in annotations."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from typing import List
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, Hit, Reranker
+
+    print("\n" + "="*70)
+    print("LEVEL 7: Dict[str, CustomClass] in annotations")
+    print("="*70)
+
+    @node(output_name="docs")
+    def create_docs() -> List[Document]:
+        return [Document(text=f"doc{i}", doc_id=i) for i in range(3)]
+
+    @node(output_name="doc_lookup")
+    def build_lookup(docs: List[Document]) -> dict:
+        return {str(d.doc_id): d for d in docs}
+
+    @node(output_name="hits")
+    def create_hits() -> List[Hit]:
+        return [Hit(doc_id=i, score=float(i)) for i in range(3)]
+
+    @node(output_name="reranked")
+    def rerank_hits(hits: List[Hit], doc_lookup: dict, reranker: Reranker) -> List[Hit]:
+        return reranker.rerank(hits, doc_lookup)
+
+    @node(output_name="result")
+    def count_hits(reranked: List[Hit]) -> int:
+        return len(reranked)
+
+    reranker = Reranker(model="test")
+
+    pipeline = Pipeline(
+        nodes=[create_docs, build_lookup, create_hits, rerank_hits, count_hits],
+        engine=DaftEngine(collect=True, debug=True),
+    )
+
+    result = pipeline.run(inputs={"reranker": reranker})
+    print(f"✓ Level 7 passed: {result}")
+    return {"level": 7, "status": "pass"}
+
+
+@app.local_entrypoint()
 def main():
-    """Run tests progressively."""
-    if COMPLEXITY_LEVEL == 0:
-        # Run all levels
-        print("Running ALL complexity levels...\n")
-        for level in range(1, 7):
-            success = run_test(level)
-            if not success:
-                print(f"\n{'='*60}")
-                print(f"FAILED at complexity level {level}")
-                print(f"{'='*60}")
-                sys.exit(1)
-        
-        print(f"\n{'='*60}")
-        print("✓ ALL LEVELS PASSED!")
-        print(f"{'='*60}")
-    else:
-        # Run specific level
-        success = run_test(COMPLEXITY_LEVEL)
-        sys.exit(0 if success else 1)
+    """Run all tests progressively."""
+    tests = [
+        ("Level 1: Simple class", test_level_1_simple),
+        ("Level 2: Stateful class", test_level_2_stateful),
+        ("Level 3: use_process=True", test_level_3_use_process),
+        ("Level 4: __daft_hint__", test_level_4_daft_hints),
+        ("Level 5: Multiple stateful", test_level_5_multiple_stateful),
+        ("Level 6: Nested types", test_level_6_nested_types),
+        ("Level 7: Dict annotations", test_level_7_dict_annotations),
+    ]
+
+    print("\n" + "="*70)
+    print("PROGRESSIVE COMPLEXITY TESTING")
+    print("="*70)
+
+    for test_name, test_func in tests:
+        print(f"\nRunning: {test_name}")
+        try:
+            result = test_func.remote()
+            print(f"  ✓ {test_name}: PASSED")
+        except Exception as e:
+            print(f"  ✗ {test_name}: FAILED")
+            print(f"\nError: {type(e).__name__}")
+            print(f"Message: {str(e)[:500]}")
+
+            if "models_test" in str(e) or "ModuleNotFoundError" in str(e):
+                print("\n" + "!"*70)
+                print(f"BUG REPRODUCED AT {test_name}!")
+                print("!"*70)
+
+            import traceback
+            traceback.print_exc()
+            return
+
+    print("\n" + "="*70)
+    print("ALL TESTS PASSED!")
+    print("="*70)
 
 
 if __name__ == "__main__":
-    main()
+    test_level_1_simple.local()
 
+
+@app.function(image=image)
+def test_level_8_nested_stateful():
+    """Level 8: Stateful object containing other stateful objects."""
+    import sys
+    sys.path.insert(0, "/root")
+
+    from hypernodes import Pipeline, node
+    from hypernodes.engines import DaftEngine
+    from models_test import Document, EncoderWithHints, Reranker2
+
+    print("\n" + "="*70)
+    print("LEVEL 8: Stateful object CONTAINING other stateful objects")
+    print("="*70)
+
+    @node(output_name="doc")
+    def create_doc() -> Document:
+        return Document(text="test", doc_id=1)
+
+    @node(output_name="reranked")
+    def rerank_doc(doc: Document, reranker: Reranker2) -> Document:
+        return reranker.rerank(doc)
+
+    @node(output_name="result")
+    def extract(reranked: Document) -> str:
+        return reranked.text
+
+    # Create nested stateful objects
+    encoder = EncoderWithHints(model_name="inner-encoder")
+    doc_lookup = {str(i): Document(f"doc{i}", i) for i in range(3)}
+    reranker = Reranker2(encoder=encoder, doc_lookup=doc_lookup)
+
+    print(f"Reranker contains encoder: {type(reranker._encoder)}")
+    print(f"Encoder module: {reranker._encoder.__class__.__module__}")
+
+    pipeline = Pipeline(
+        nodes=[create_doc, rerank_doc, extract],
+        engine=DaftEngine(collect=True, debug=True),
+    )
+
+    result = pipeline.run(inputs={"reranker": reranker})
+    print(f"✓ Level 8 passed: {result}")
+    return {"level": 8, "status": "pass"}

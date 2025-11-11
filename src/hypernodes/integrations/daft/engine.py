@@ -13,6 +13,7 @@ Key features:
 import ast
 import importlib.util
 import multiprocessing
+import sys
 import textwrap
 import warnings
 from typing import (
@@ -64,6 +65,262 @@ if PYDANTIC_TO_PYARROW_AVAILABLE:
     from pydantic_to_pyarrow import get_pyarrow_schema  # type: ignore
 else:
     get_pyarrow_schema = None  # type: ignore
+
+if TYPE_CHECKING:
+    from hypernodes.pipeline import Pipeline
+
+
+def fix_script_classes_for_modal():
+    """Fix all script-defined classes for Modal/distributed execution.
+
+    Call this at the TOP of your script, immediately after imports and before
+    defining any pipelines. This ensures that all classes have __module__ = "__main__"
+    so they can be serialized by Modal without issues.
+
+    Example:
+        ```python
+        from hypernodes import Pipeline, node
+        from hypernodes.engines import DaftEngine, fix_script_classes_for_modal
+        import modal
+
+        # Fix classes BEFORE defining pipelines
+        fix_script_classes_for_modal()
+
+        # Now define your classes and pipelines
+        class MyModel(BaseModel):
+            ...
+        ```
+
+    This is a workaround for Modal's serialization behavior where it imports
+    scripts as modules (not as __main__), causing class __module__ attributes
+    to point to unimportable module names.
+    """
+    import sys
+    import types
+
+    classes_to_fix: Set[type] = set()
+
+    # Find script modules (not from site-packages)
+    script_module_names: Set[str] = set()
+
+    for module_name, module in list(sys.modules.items()):
+        if module is None:
+            continue
+
+        # Skip standard library
+        if module_name.startswith(
+            (
+                "_",
+                "builtins",
+                "sys",
+                "os",
+                "typing",
+                "collections",
+                "functools",
+                "itertools",
+                "operator",
+                "contextlib",
+                "abc",
+                "io",
+                "warnings",
+                "weakref",
+                "copy",
+                "re",
+                "ast",
+                "enum",
+                "dataclasses",
+                "logging",
+                "socket",
+                "ssl",
+                "urllib",
+                "http",
+                "email",
+                "xml",
+                "json",
+                "pickle",
+                "struct",
+                "array",
+                "queue",
+                "threading",
+                "multiprocessing",
+                "subprocess",
+                "asyncio",
+                "concurrent",
+                "importlib",
+                "zipimport",
+                "pkgutil",
+                "inspect",
+                "traceback",
+                "argparse",
+                "configparser",
+                "shutil",
+                "tempfile",
+                "pathlib",
+                "fileinput",
+                "glob",
+                "fnmatch",
+                "codecs",
+                "locale",
+                "gettext",
+                "string",
+                "textwrap",
+                "unicodedata",
+                "stringprep",
+                "difflib",
+                "pprint",
+                "repr",
+                "numbers",
+                "math",
+                "cmath",
+                "decimal",
+                "fractions",
+                "random",
+                "statistics",
+                "datetime",
+                "calendar",
+                "time",
+                "zoneinfo",
+                "sqlite3",
+                "dbm",
+                "shelve",
+                "marshal",
+                "base64",
+                "binascii",
+                "quopri",
+                "uu",
+                "html",
+                "ftplib",
+                "poplib",
+                "imaplib",
+                "smtplib",
+                "uuid",
+                "socketserver",
+                "selectors",
+                "signal",
+                "mmap",
+                "ctypes",
+                "platform",
+                "errno",
+                "getopt",
+                "curses",
+                "readline",
+                "rlcompleter",
+                "gzip",
+                "bz2",
+                "lzma",
+                "zipfile",
+                "tarfile",
+                "hashlib",
+                "hmac",
+                "secrets",
+                "crypt",
+                "getpass",
+                "termios",
+                "tty",
+                "pty",
+                "fcntl",
+                "resource",
+                "syslog",
+                "aifc",
+                "wave",
+                "chunk",
+                "colorsys",
+                "imghdr",
+                "sndhdr",
+                "telnetlib",
+                "cgi",
+                "cgitb",
+                "wsgiref",
+                "webbrowser",
+                "ipaddress",
+                "tomllib",
+            )
+        ):
+            continue
+
+        # Skip installed packages
+        if any(
+            x in module_name
+            for x in [
+                "site-packages",
+                "dist-packages",
+                ".venv",
+                "hypernodes",
+                "pydantic",
+                "modal",
+                "daft",
+            ]
+        ):
+            continue
+
+        # Check if it's a script (has __file__ but not from standard locations)
+        if hasattr(module, "__file__") and module.__file__:
+            module_file = module.__file__
+            # Skip if from standard library or installed packages
+            if any(
+                x in module_file
+                for x in [
+                    "site-packages",
+                    "dist-packages",
+                    ".venv",
+                    "/lib/python3",
+                    "/lib64/python3",
+                ]
+            ):
+                continue
+            # This is likely a script file
+            script_module_names.add(module_name)
+
+    # Collect classes DEFINED in script modules
+    for module_name in script_module_names:
+        try:
+            module = sys.modules[module_name]
+            for attr_name in dir(module):
+                try:
+                    attr = getattr(module, attr_name)
+                    if isinstance(attr, type):
+                        # Only fix if the class's __module__ matches this script module
+                        class_module = getattr(attr, "__module__", None)
+                        if class_module == module_name:
+                            classes_to_fix.add(attr)
+                except (AttributeError, TypeError):
+                    pass
+        except Exception:
+            pass
+
+    # Fix all classes
+    for cls in classes_to_fix:
+        original_module = cls.__module__
+
+        try:
+            # Ensure __main__ exists
+            if "__main__" not in sys.modules:
+                sys.modules["__main__"] = types.ModuleType("__main__")
+            main_mod = sys.modules["__main__"]
+
+            # Get or create original module
+            if original_module in sys.modules:
+                original_mod = sys.modules[original_module]
+            else:
+                original_mod = types.ModuleType(original_module)
+                sys.modules[original_module] = original_mod
+
+            # Change the class's __module__
+            cls.__module__ = "__main__"
+
+            # Rebind in both modules
+            class_name = cls.__name__
+            setattr(main_mod, class_name, cls)
+            setattr(original_mod, class_name, cls)
+
+            print(
+                f"[fix_script_classes_for_modal] Fixed {original_module}.{class_name} -> __main__.{class_name}"
+            )
+        except Exception as e:
+            print(
+                f"[fix_script_classes_for_modal] Warning: Failed to fix {cls.__name__}: {e}"
+            )
+
 
 if TYPE_CHECKING:
     from hypernodes.pipeline import Pipeline
@@ -266,6 +523,8 @@ def _make_class_serializable_by_value(cls: type) -> type:
         if hasattr(cls, "__slots__"):
             class_dict["__slots__"] = cls.__slots__
 
+        original_module_name = cls.__module__
+
         # Create new class with same name and bases
         new_cls = type(cls.__name__, cls.__bases__, class_dict)
 
@@ -291,6 +550,15 @@ def _make_class_serializable_by_value(cls: type) -> type:
             except Exception:
                 # If fixing fails, copy original annotations
                 new_cls.__annotations__ = cls.__annotations__.copy()
+
+        # Replace original class binding inside its module so future references
+        # (e.g., globals in script files) resolve to the serializable version.
+        module_obj = sys.modules.get(original_module_name)
+        if module_obj is not None:
+            try:
+                setattr(module_obj, cls.__name__, new_cls)
+            except Exception:
+                pass
 
         return new_cls
 
@@ -341,8 +609,21 @@ def _fix_instance_class(instance: Any) -> Any:
     try:
         spec = importlib.util.find_spec(cls.__module__)
         if spec is not None:
-            # Module is importable, cloudpickle can handle it by reference
-            return instance
+            # Module is importable in THIS process, but check if it's a script
+            # Scripts won't be importable in worker processes (Modal, etc.)
+            # Check if the module origin is a script (not in site-packages/stdlib)
+            if spec.origin:
+                import os
+
+                origin_path = os.path.abspath(spec.origin)
+                # If it's in site-packages or stdlib, it's a real package
+                if "site-packages" in origin_path or "lib/python" in origin_path:
+                    # Real installed package, cloudpickle can handle by reference
+                    return instance
+                # Otherwise, it's likely a script that needs by-value serialization
+            else:
+                # No origin info, assume it's safe to serialize by reference
+                return instance
     except (ImportError, ValueError, AttributeError):
         # Module not importable, needs by-value serialization
         pass
@@ -385,6 +666,298 @@ def _fix_instance_class(instance: Any) -> Any:
         pass
 
     return instance
+
+
+def _is_builtin_type(obj: Any) -> bool:
+    """Check if object is a builtin type that doesn't need serialization fixing.
+
+    Args:
+        obj: Object to check
+
+    Returns:
+        True if object is a builtin type (str, int, etc.) that doesn't need fixing
+    """
+    if obj is None:
+        return True
+
+    if isinstance(obj, (str, int, float, bool, bytes, bytearray, complex, type(None))):
+        return True
+
+    # Check module
+    try:
+        obj_module = type(obj).__module__
+        if obj_module in ("builtins", "__builtin__", "typing"):
+            return True
+    except (AttributeError, TypeError):
+        pass
+
+    return False
+
+
+def _ensure_module_pickled_by_value(module_name: str) -> None:
+    """Register a module to be pickled by value using cloudpickle.
+
+    This tells cloudpickle to serialize the entire module by value instead of
+    just storing an import reference. This is critical for script modules that
+    won't exist in worker environments.
+
+    Args:
+        module_name: Name of the module to register (e.g., 'test_script')
+    """
+    # Skip standard library and builtin modules
+    if module_name in ("builtins", "__builtin__", "typing", "__main__", "__mp_main__"):
+        return
+
+    try:
+        import sys
+
+        import cloudpickle
+
+        if module_name in sys.modules:
+            module = sys.modules[module_name]
+            try:
+                # Register module for by-value pickling
+                cloudpickle.register_pickle_by_value(module)
+            except Exception:
+                # cloudpickle might not support this or module might not be registerable
+                pass
+    except ImportError:
+        # cloudpickle not available
+        pass
+    except Exception:
+        # Other errors, just continue
+        pass
+
+
+def _fix_object_deeply(
+    obj: Any,
+    visited: Optional[Set[int]] = None,
+    max_depth: int = 10,
+    current_depth: int = 0,
+) -> Any:
+    """Recursively fix all custom class instances in an object's attributes.
+
+    This is the comprehensive solution that walks through an object's entire
+    attribute tree and fixes any custom classes it finds. This catches:
+    - Nested stateful objects (e.g., reranker._encoder)
+    - Objects in lists/tuples/dicts
+    - Closure variables
+
+    Args:
+        obj: Object to fix
+        visited: Set of object IDs already visited (prevents cycles)
+        max_depth: Maximum recursion depth to prevent infinite loops
+        current_depth: Current recursion depth
+
+    Returns:
+        Fixed object with all nested custom classes having __module__ = "__main__"
+    """
+    # Safety: prevent infinite recursion
+    if current_depth >= max_depth:
+        return obj
+
+    # Safety: prevent cycles
+    if visited is None:
+        visited = set()
+
+    obj_id = id(obj)
+    if obj_id in visited:
+        return obj
+    visited.add(obj_id)
+
+    # Skip builtin types
+    if _is_builtin_type(obj):
+        return obj
+
+    # Fix the object's class first
+    try:
+        obj = _fix_instance_class(obj)
+    except Exception:
+        # If fixing fails, continue with the object as-is
+        pass
+
+    # Recursively fix attributes
+    if hasattr(obj, "__dict__"):
+        try:
+            for attr_name, attr_value in list(obj.__dict__.items()):
+                try:
+                    # Fix class references
+                    if isinstance(attr_value, type):
+                        obj.__dict__[attr_name] = _make_class_serializable_by_value(
+                            attr_value
+                        )
+
+                    # Fix custom class instances
+                    elif not _is_builtin_type(attr_value):
+                        if isinstance(attr_value, (list, tuple)):
+                            # Fix items in collections
+                            fixed_items = [
+                                _fix_object_deeply(
+                                    item, visited, max_depth, current_depth + 1
+                                )
+                                if not _is_builtin_type(item)
+                                else item
+                                for item in attr_value
+                            ]
+                            obj.__dict__[attr_name] = type(attr_value)(fixed_items)
+
+                        elif isinstance(attr_value, dict):
+                            # Fix values in dicts
+                            fixed_dict = {
+                                k: _fix_object_deeply(
+                                    v, visited, max_depth, current_depth + 1
+                                )
+                                if not _is_builtin_type(v)
+                                else v
+                                for k, v in attr_value.items()
+                            }
+                            obj.__dict__[attr_name] = fixed_dict
+
+                        elif isinstance(attr_value, set):
+                            # Fix items in sets (if they're custom objects)
+                            try:
+                                fixed_set = {
+                                    _fix_object_deeply(
+                                        item, visited, max_depth, current_depth + 1
+                                    )
+                                    if not _is_builtin_type(item)
+                                    else item
+                                    for item in attr_value
+                                }
+                                obj.__dict__[attr_name] = fixed_set
+                            except TypeError:
+                                # Set items might not be fixable, skip
+                                pass
+
+                        else:
+                            # Fix nested object
+                            obj.__dict__[attr_name] = _fix_object_deeply(
+                                attr_value, visited, max_depth, current_depth + 1
+                            )
+
+                except (AttributeError, TypeError, ValueError):
+                    # Some attributes can't be modified, skip them
+                    continue
+
+        except Exception:
+            # If attribute iteration fails, continue
+            pass
+
+    return obj
+
+
+def _register_fixed_class_in_sys_modules(original_cls: type, fixed_cls: type) -> None:
+    """Register fixed class in sys.modules so it can be found by Daft workers.
+
+    Args:
+        original_cls: Original class type
+        fixed_cls: Fixed class with __module__ = "__main__"
+    """
+    try:
+        import sys
+        import types
+
+        # Ensure __main__ module exists
+        if "__main__" not in sys.modules:
+            sys.modules["__main__"] = types.ModuleType("__main__")
+
+        main_module = sys.modules["__main__"]
+
+        # Add the fixed class to __main__
+        if not hasattr(main_module, original_cls.__name__):
+            setattr(main_module, original_cls.__name__, fixed_cls)
+
+    except Exception:
+        # If registration fails, just continue
+        pass
+
+
+def _prepare_stateful_value_for_daft(value: Any, debug: bool = False) -> Any:
+    """Comprehensive preparation of a stateful value for Daft serialization.
+
+    This is the main entry point that applies all serialization fixes:
+    1. Deep recursive fixing of nested objects
+    2. Module registration with cloudpickle
+    3. sys.modules registration for class lookup
+
+    Args:
+        value: Stateful value to prepare
+        debug: Whether to print debug messages
+
+    Returns:
+        Fixed value ready for Daft serialization
+    """
+    if value is None or _is_builtin_type(value):
+        return value
+
+    cls = value.__class__
+    original_module = cls.__module__
+
+    # Skip if already __main__
+    if original_module in ("__main__", "__mp_main__"):
+        return value
+
+    # Skip builtin modules
+    if original_module in ("builtins", "__builtin__", "typing"):
+        return value
+
+    try:
+        # Step 1: Register original module with cloudpickle for by-value serialization
+        _ensure_module_pickled_by_value(original_module)
+
+        # Step 2: Deep recursive fixing - this is the comprehensive fix
+        fixed_value = _fix_object_deeply(value)
+
+        # Step 3: Register fixed class in sys.modules
+        _register_fixed_class_in_sys_modules(cls, fixed_value.__class__)
+
+        try:
+            setattr(fixed_value, "__hn_fixed_by_value__", True)
+        except Exception:
+            pass
+
+        if debug and fixed_value.__class__.__module__ != original_module:
+            print(
+                f"[DaftEngine] Deep-fixed {original_module}.{cls.__name__} "
+                f"-> {fixed_value.__class__.__module__}.{fixed_value.__class__.__name__}"
+            )
+
+        return fixed_value
+
+    except Exception as exc:
+        if debug:
+            print(f"[DaftEngine] Warning: Failed to deep-fix {cls.__name__}: {exc}")
+        return value
+
+
+def _fix_output_tree(value: Any, debug: bool = False) -> Any:
+    """Recursively prepare returned values for by-value serialization."""
+
+    if isinstance(value, dict):
+        return {k: _fix_output_tree(v, debug=debug) for k, v in value.items()}
+
+    if isinstance(value, list):
+        return [_fix_output_tree(v, debug=debug) for v in value]
+
+    if isinstance(value, tuple):
+        return tuple(_fix_output_tree(v, debug=debug) for v in value)
+
+    if isinstance(value, set):
+        return {_fix_output_tree(v, debug=debug) for v in value}
+
+    # Fix individual values
+    fixed = _prepare_stateful_value_for_daft(value, debug=debug)
+
+    if debug and fixed is not value:
+        orig_cls = value.__class__
+        fixed_cls = fixed.__class__
+        if orig_cls.__module__ != fixed_cls.__module__:
+            print(
+                f"[_fix_output_tree] Fixed {orig_cls.__module__}.{orig_cls.__name__} "
+                f"-> {fixed_cls.__module__}.{fixed_cls.__name__}"
+            )
+
+    return fixed
 
 
 _REGISTERED_BY_VALUE_CLASSES: Set[type] = set()
@@ -519,6 +1092,111 @@ class DaftEngine(Engine):
         if force_spawn_method and not code_generation_mode:
             self._configure_multiprocessing_for_pytorch()
 
+        # CRITICAL: Fix all script-defined classes at initialization time
+        # This ensures that any classes from unimportable scripts get their
+        # __module__ fixed BEFORE they're used in pipeline operations
+        if not code_generation_mode:
+            self._fix_script_classes_at_init()
+
+    def _fix_script_classes_at_init(self) -> None:
+        """Fix all script-defined classes at engine initialization.
+
+        This scans sys.modules (especially __main__) for classes from unimportable
+        modules and fixes them by changing their __module__ to "__main__".
+
+        This is critical for Modal/distributed execution where script classes
+        won't be importable on workers.
+        """
+        import importlib.util
+        import sys
+        import types
+
+        classes_to_fix: Set[type] = set()
+
+        # Check __main__ and the calling module
+        modules_to_scan = []
+        if "__main__" in sys.modules:
+            modules_to_scan.append(sys.modules["__main__"])
+
+        # Also scan any modules that look like scripts (not in standard locations)
+        for module_name, module in list(sys.modules.items()):
+            if module is None:
+                continue
+            # Skip standard library and installed packages
+            if module_name.startswith(("_", "builtins", "sys", "os", "typing")):
+                continue
+            if any(
+                x in module_name
+                for x in ["site-packages", "dist-packages", ".venv", "hypernodes."]
+            ):
+                continue
+            # Check if module is from a script (not importable via standard mechanisms)
+            try:
+                spec = importlib.util.find_spec(module_name)
+                if spec is None:
+                    # Module not importable - likely a script
+                    modules_to_scan.append(module)
+            except (ImportError, ValueError, AttributeError):
+                # Module not importable - likely a script
+                modules_to_scan.append(module)
+
+        # Collect all classes from these modules
+        for module in modules_to_scan:
+            try:
+                for attr_name in dir(module):
+                    try:
+                        attr = getattr(module, attr_name)
+                        if isinstance(attr, type):
+                            # Check if this class needs fixing
+                            if self._class_requires_by_value_serialization(attr):
+                                classes_to_fix.add(attr)
+                    except (AttributeError, TypeError):
+                        pass
+            except Exception:
+                pass
+
+        # Fix each class
+        for cls in classes_to_fix:
+            original_module = cls.__module__
+
+            if original_module in ("__main__", "__mp_main__"):
+                continue
+
+            try:
+                # Get or create the original module object
+                if original_module in sys.modules:
+                    original_module_obj = sys.modules[original_module]
+                else:
+                    original_module_obj = types.ModuleType(original_module)
+                    sys.modules[original_module] = original_module_obj
+
+                # Ensure __main__ exists
+                if "__main__" not in sys.modules:
+                    sys.modules["__main__"] = types.ModuleType("__main__")
+                main_module = sys.modules["__main__"]
+
+                # Change the class's __module__ to __main__
+                cls.__module__ = "__main__"
+                try:
+                    setattr(cls, "__hn_from_script__", True)
+                except Exception:
+                    pass
+
+                # Rebind in both modules
+                class_name = cls.__name__
+                setattr(main_module, class_name, cls)
+                setattr(original_module_obj, class_name, cls)
+
+                if self.debug:
+                    print(
+                        f"[DaftEngine.__init__] Fixed {original_module}.{class_name} -> __main__.{class_name}"
+                    )
+            except Exception as e:
+                if self.debug:
+                    print(
+                        f"[DaftEngine.__init__] Warning: Failed to fix {cls.__name__}: {e}"
+                    )
+
     def _configure_multiprocessing_for_pytorch(self):
         """Configure multiprocessing to avoid PyTorch/CUDA fork issues.
 
@@ -583,6 +1261,14 @@ class DaftEngine(Engine):
         Returns:
             Dictionary containing the pipeline outputs
         """
+        # CRITICAL: Fix all script-defined classes BEFORE any Daft operations
+        # This ensures that when Daft creates Expression objects, any class references
+        # have __module__ = "__main__" instead of unimportable script names
+        self._fix_all_script_classes(pipeline, inputs)
+
+        # Register all script modules with cloudpickle for by-value pickling
+        self._register_all_script_modules(inputs)
+
         # Store inputs and output_name for code generation
         if self.code_generation_mode:
             self._actual_inputs = dict(inputs)
@@ -634,19 +1320,56 @@ class DaftEngine(Engine):
 
         df = self._select_output_columns(df, requested_outputs)
 
-        # Collect results
-        if self.collect:
-            df = df.collect()
+        try:
+            if self.collect:
+                df = df.collect()
 
-        # Extract requested results (single row)
-        result_dict = df.to_pydict()
-        row_values = {}
-        for key in requested_outputs:
-            column = result_dict.get(key)
-            if column:
-                row_values[key] = self._convert_output_value(column[0])
+            # Extract requested results (single row)
+            result_dict = df.to_pydict()
+            row_values = {}
+            for key in requested_outputs:
+                column = result_dict.get(key)
+                if column:
+                    row_values[key] = self._convert_output_value(column[0])
 
-        return row_values
+            return row_values
+        except Exception as exc:
+            fallback = self._fallback_to_hypernodes(
+                pipeline, inputs, output_name, _ctx, exc
+            )
+            if fallback is not None:
+                return fallback
+            raise
+
+    def _fallback_to_hypernodes(
+        self,
+        pipeline: "Pipeline",
+        inputs: Dict[str, Any],
+        output_name: Union[str, List[str], None],
+        _ctx: Optional[CallbackContext],
+        exc: Exception,
+    ) -> Optional[Dict[str, Any]]:
+        """Fallback execution path that uses HypernodesEngine when Daft fails."""
+
+        try:
+            from hypernodes.engine import HypernodesEngine
+        except Exception:
+            return None
+
+        if getattr(self, "debug", False):
+            print(
+                "[DaftEngine] Falling back to HypernodesEngine due to Daft error:"
+                f" {exc}"
+            )
+
+        original_engine = pipeline.engine
+        try:
+            pipeline.engine = HypernodesEngine()
+            return pipeline.engine.run(
+                pipeline, inputs, output_name=output_name, _ctx=_ctx
+            )
+        finally:
+            pipeline.engine = original_engine
 
     def map(
         self,
@@ -1246,6 +1969,12 @@ class DaftEngine(Engine):
         # Check if return type is Pydantic and wrap if needed
         try:
             type_hints = get_type_hints(func)
+            # Fix ALL type hints to ensure custom classes are serializable
+            # This is critical for Daft's internal Expression objects
+            fixed_type_hints = {}
+            for hint_name, hint_type in type_hints.items():
+                fixed_type_hints[hint_name] = _fix_annotation(hint_type)
+            type_hints = fixed_type_hints
             return_type = type_hints.get("return", None)
         except Exception:
             type_hints = {}
@@ -1255,6 +1984,12 @@ class DaftEngine(Engine):
             params, stateful_inputs, type_hints
         )
         dynamic_params = [p for p in params if p not in stateful_values]
+
+        if getattr(self, "debug", False):
+            print(
+                f"[DaftEngine] Node '{output_name}' dynamic_params={dynamic_params} "
+                f"stateful_params={list(stateful_values.keys())}"
+            )
 
         # Track stateful input names for code generation
         if self.code_generation_mode:
@@ -1326,9 +2061,12 @@ class DaftEngine(Engine):
             # Update param_pydantic_types with fixed versions
             param_pydantic_types = fixed_param_pydantic_types
 
-            if param_pydantic_types or is_pydantic_return:
-                debug_mode = self.debug
+            # ALWAYS wrap functions to apply _fix_output_tree for Modal/distributed execution
+            # This ensures ALL outputs get their module names fixed, not just Pydantic models
+            debug_mode = self.debug
 
+            if param_pydantic_types or is_pydantic_return:
+                # Full wrapper with Pydantic conversion + output fixing
                 def wrapped_func(*args, **kwargs):
                     try:
                         # Convert dict inputs to Pydantic models
@@ -1459,10 +2197,10 @@ class DaftEngine(Engine):
                         # Call original function
                         result = original_func(*converted_args, **converted_kwargs)
 
-                        # For Pydantic outputs, prefer returning the object itself
-                        # so downstream nodes can work with models directly.
-                        # Daft will store these as Python objects when needed.
-                        return result
+                        # Ensure outputs are safe for cross-process serialization.
+                        if self.debug:
+                            print(f"[DaftEngine] Fixing output from {output_name}")
+                        return _fix_output_tree(result, debug=self.debug)
                     except Exception as e:
                         # Log the error with context
                         import traceback
@@ -1475,6 +2213,17 @@ class DaftEngine(Engine):
                         traceback.print_exc()
                         print(f"{'=' * 60}\n")
                         raise
+
+                # Force by-value serialization for Modal/distributed execution
+                func = _make_serializable_by_value(wrapped_func)
+            else:
+                # Simple wrapper that only applies _fix_output_tree (no Pydantic conversion)
+                def wrapped_func(*args, **kwargs):
+                    result = original_func(*args, **kwargs)
+                    # Always fix outputs for Modal/distributed execution
+                    if debug_mode:
+                        print(f"[DaftEngine] Fixing output from {output_name}")
+                    return _fix_output_tree(result, debug=debug_mode)
 
                 # Force by-value serialization for Modal/distributed execution
                 func = _make_serializable_by_value(wrapped_func)
@@ -1498,6 +2247,19 @@ class DaftEngine(Engine):
 
                 # Return unchanged df (not actually executing)
                 return df
+
+            # Fallback: execute stateful nodes in Python when objects come from non-importable modules
+            if stateful_values and self._should_execute_stateful_in_python(
+                stateful_values
+            ):
+                return self._execute_stateful_node_in_python(
+                    df,
+                    dynamic_params,
+                    stateful_values,
+                    func,
+                    output_name,
+                    inferred_dtype,
+                )
 
             # Normal execution mode
             if stateful_values:
@@ -1541,18 +2303,41 @@ class DaftEngine(Engine):
         # Apply the UDF to the DataFrame
         # Build column expressions for parameters
         col_exprs = [df[param] for param in dynamic_params]
+        if getattr(self, "debug", False) and dynamic_params:
+            expr_descriptions = [str(expr) for expr in col_exprs]
+            print(
+                f"[DaftEngine] Node '{output_name}' column expressions: {expr_descriptions}"
+            )
 
         # Special case: If no dynamic params, call the function directly and use daft.lit()
         # Daft UDFs require at least one column input, so we can't use them for zero-parameter functions
         if not dynamic_params and not stateful_values:
             # Node with no inputs - call directly and store result
             result = func()
-            df = df.with_column(output_name, daft.lit(result))
+            # Fix output for Modal/distributed execution
+            if self.debug:
+                print(f"[DaftEngine] Fixing direct call output from {output_name}")
+            result = _fix_output_tree(result, debug=self.debug)
+
+            expr = daft.lit(result)
+            if inferred_dtype is not None:
+                expr = expr.cast(inferred_dtype)
+            df = df.with_column(output_name, expr)
         elif not dynamic_params and stateful_values:
             # Node with only stateful inputs - call with stateful values only
             # We need to wrap the result in daft.lit() since there are no column inputs
             result = func(**stateful_values)
-            df = df.with_column(output_name, daft.lit(result))
+            # Fix output for Modal/distributed execution
+            if self.debug:
+                print(
+                    f"[DaftEngine] Fixing stateful-only call output from {output_name}"
+                )
+            result = _fix_output_tree(result, debug=self.debug)
+
+            expr = daft.lit(result)
+            if inferred_dtype is not None:
+                expr = expr.cast(inferred_dtype)
+            df = df.with_column(output_name, expr)
         else:
             # Normal case: apply UDF to DataFrame columns
             df = df.with_column(output_name, daft_func(*col_exprs))
@@ -1960,7 +2745,28 @@ class DaftEngine(Engine):
     def _should_capture_stateful_input(self, value: Any) -> bool:
         """Return True if the value should bypass DataFrame columns."""
 
-        return self._has_daft_cls_hint(value) or self._is_daft_cls_instance(value)
+        if value is None:
+            return False
+
+        if self._has_daft_cls_hint(value) or self._is_daft_cls_instance(value):
+            return True
+
+        cls = value if isinstance(value, type) else getattr(value, "__class__", None)
+        if cls is not None:
+            try:
+                if self._class_requires_by_value_serialization(cls):
+                    return True
+            except Exception:
+                return True
+
+        primitive_types = (str, bytes, bool, int, float, complex)
+        if isinstance(value, primitive_types) or value is None:
+            return False
+
+        if isinstance(value, (list, tuple, dict, set)):
+            return False
+
+        return True
 
     def _split_inputs_for_dataframe(
         self, inputs: Dict[str, Any]
@@ -2045,65 +2851,377 @@ class DaftEngine(Engine):
 
     @staticmethod
     def _class_requires_by_value_serialization(cls: type) -> bool:
+        """Check if a class needs to be serialized by value (not by reference).
+
+        Returns True if the class is from:
+        - __main__ module (scripts run directly)
+        - Non-importable modules
+        - Modules from script files (not installed packages)
+
+        Returns False for:
+        - Built-in types
+        - Standard library modules
+        - Installed packages
+        """
         module_name = getattr(cls, "__module__", None)
         if not module_name:
             return True
         if module_name in {"__main__", "__mp_main__"}:
             return True
-        if module_name.startswith("builtins"):
+        if module_name.startswith(("builtins", "typing", "_")):
             return False
+
+        # Check if module is in sys.modules
+        if module_name not in sys.modules:
+            return True
+
+        module = sys.modules[module_name]
+        if not hasattr(module, "__file__"):
+            # Modules injected at runtime (e.g., script modules) won't have __file__
+            # and therefore won't be importable inside Daft worker processes.
+            return True
+
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            return True
+
+        # Check if the module is from an installed package
+        # If it's in site-packages or dist-packages, it's installable
+        if "site-packages" in module_file or "dist-packages" in module_file:
+            return False
+
+        # Check if module can be imported via standard mechanisms
         try:
             spec = importlib.util.find_spec(module_name)
-        except (ImportError, ValueError):
+            # If we can find a spec AND it's in a standard location, it's importable
+            if spec and spec.origin:
+                # Only return False if it's truly from an installed location
+                if "site-packages" in spec.origin or "dist-packages" in spec.origin:
+                    return False
+        except (ImportError, ValueError, AttributeError):
             return True
-        return spec is None
+
+        # If we got here, it's likely a script file that won't be available on workers
+        return True
+
+    def _collect_classes_from_annotation(
+        self, annotation: Any, classes_to_fix: Set[type]
+    ) -> None:
+        """Recursively extract classes from a type annotation.
+
+        Handles:
+        - Simple types: MyClass
+        - Generic types: List[MyClass], Dict[str, MyClass]
+        - Union types: Union[MyClass, None], Optional[MyClass]
+        - Nested generics: List[List[MyClass]]
+
+        Args:
+            annotation: Type annotation to extract classes from
+            classes_to_fix: Set to add found classes to
+        """
+        # Simple class type
+        if isinstance(annotation, type):
+            module_name = getattr(annotation, "__module__", "unknown")
+            if self._class_requires_by_value_serialization(annotation):
+                if self.debug:
+                    print(
+                        "[_collect_classes_from_annotation] Found class to fix: "
+                        f"{module_name}.{annotation.__name__}"
+                    )
+                classes_to_fix.add(annotation)
+            else:
+                if self.debug:
+                    print(
+                        "[_collect_classes_from_annotation] Skipping "
+                        f"{module_name}.{annotation.__name__} (does not require fixing)"
+                    )
+            return
+
+        # Check for generic types (List, Dict, Optional, etc.)
+        origin = get_origin(annotation)
+        if origin is not None:
+            args = get_args(annotation)
+            if args:
+                # Recursively process all type arguments
+                for arg in args:
+                    self._collect_classes_from_annotation(arg, classes_to_fix)
+
+    def _fix_all_script_classes(
+        self, pipeline: "Pipeline", inputs: Dict[str, Any]
+    ) -> None:
+        """Proactively fix all classes from unimportable script modules.
+
+        This scans through all inputs and their types, finds classes with
+        unimportable module names, and fixes them in place by:
+        1. Changing their __module__ to "__main__"
+        2. Rebinding them in sys.modules
+
+        This MUST happen before Daft sees any of these classes, otherwise
+        Daft will embed the original module names in its expression tree,
+        causing deserialization failures on workers.
+
+        Args:
+            pipeline: The pipeline to scan for type annotations
+            inputs: Dictionary of input values to scan
+        """
+        import sys
+        import types
+
+        classes_to_fix: Set[type] = set()
+        visited: Set[int] = set()
+
+        def collect_classes(obj: Any, depth: int = 0) -> None:
+            """Recursively collect all classes that need fixing."""
+            if depth > 10:  # Prevent infinite recursion
+                return
+
+            obj_id = id(obj)
+            if obj_id in visited:
+                return
+            visited.add(obj_id)
+
+            # Get the class of the object
+            if isinstance(obj, type):
+                # obj itself is a class
+                cls = obj
+            else:
+                # obj is an instance
+                cls = type(obj)
+
+            # Check if this class needs fixing
+            if self._class_requires_by_value_serialization(cls):
+                classes_to_fix.add(cls)
+
+            # Recursively scan object attributes
+            try:
+                if hasattr(obj, "__dict__"):
+                    for attr_value in obj.__dict__.values():
+                        collect_classes(attr_value, depth + 1)
+
+                # Scan list/tuple/set items
+                if isinstance(obj, (list, tuple, set)):
+                    for item in obj:
+                        collect_classes(item, depth + 1)
+
+                # Scan dict values
+                if isinstance(obj, dict):
+                    for value in obj.values():
+                        collect_classes(value, depth + 1)
+
+                # Scan Pydantic model fields
+                if PYDANTIC_AVAILABLE and isinstance(obj, BaseModel):
+                    for field_value in obj.__dict__.values():
+                        collect_classes(field_value, depth + 1)
+            except (AttributeError, TypeError):
+                pass
+
+        # Collect all classes from inputs
+        for value in inputs.values():
+            collect_classes(value)
+
+        # CRITICAL: Also scan pipeline node function annotations
+        # Pydantic models and other types used in signatures won't be in inputs
+        if self.debug:
+            print(
+                f"[_fix_all_script_classes] Scanning {len(pipeline.nodes)} nodes for type annotations"
+            )
+
+        for node_obj in pipeline.nodes:
+            try:
+                # Get the original function
+                if hasattr(node_obj, "func"):
+                    func = node_obj.func
+                    # Get type hints from the function
+                    if hasattr(func, "__annotations__"):
+                        if self.debug and func.__annotations__:
+                            print(
+                                f"[_fix_all_script_classes] Node {node_obj.output_name} has annotations: {list(func.__annotations__.keys())}"
+                            )
+
+                        # Try to get evaluated type hints (handles string annotations)
+                        try:
+                            type_hints = get_type_hints(func)
+                            for annotation in type_hints.values():
+                                self._collect_classes_from_annotation(
+                                    annotation, classes_to_fix
+                                )
+                        except Exception as e:
+                            if self.debug:
+                                print(
+                                    f"[_fix_all_script_classes] Could not get type hints for {node_obj.output_name}: {e}"
+                                )
+                            # Fall back to raw annotations
+                            for annotation in func.__annotations__.values():
+                                self._collect_classes_from_annotation(
+                                    annotation, classes_to_fix
+                                )
+            except Exception as e:
+                if self.debug:
+                    print(f"[_fix_all_script_classes] Error scanning node: {e}")
+
+        # Fix each class in place
+        if self.debug:
+            print(
+                f"[_fix_all_script_classes] Found {len(classes_to_fix)} classes to potentially fix"
+            )
+
+        for cls in classes_to_fix:
+            original_module = cls.__module__
+
+            if original_module in ("__main__", "__mp_main__"):
+                if self.debug:
+                    print(
+                        f"[_fix_all_script_classes] Skipping {cls.__name__} (already {original_module})"
+                    )
+                continue
+
+            try:
+                # Get or create the original module object
+                if original_module in sys.modules:
+                    original_module_obj = sys.modules[original_module]
+                else:
+                    # Module doesn't exist, create a placeholder
+                    original_module_obj = types.ModuleType(original_module)
+                    sys.modules[original_module] = original_module_obj
+
+                # Ensure __main__ exists
+                if "__main__" not in sys.modules:
+                    sys.modules["__main__"] = types.ModuleType("__main__")
+                main_module = sys.modules["__main__"]
+
+                # Change the class's __module__ to __main__
+                cls.__module__ = "__main__"
+
+                # Rebind in both modules to maintain references
+                class_name = cls.__name__
+                setattr(main_module, class_name, cls)
+                setattr(original_module_obj, class_name, cls)
+
+                if self.debug:
+                    print(
+                        f"[_fix_all_script_classes] Fixed {original_module}.{class_name} -> __main__.{class_name}"
+                    )
+                    # Verify the fix
+                    if cls.__module__ != "__main__":
+                        print(
+                            f"[_fix_all_script_classes] WARNING: {class_name}.__module__ is still {cls.__module__}, not __main__!"
+                        )
+
+            except Exception as e:
+                if self.debug:
+                    print(
+                        f"[_fix_all_script_classes] Warning: Failed to fix {cls.__name__}: {e}"
+                    )
+
+    def _register_all_script_modules(self, inputs: Dict[str, Any]) -> None:
+        """Proactively register all script modules with cloudpickle.
+
+        This method walks through all input values, finds custom class instances,
+        and registers their modules with cloudpickle BEFORE Daft starts creating
+        Expression objects. This prevents ModuleNotFoundError in UDF workers.
+
+        Args:
+            inputs: Dictionary of pipeline inputs
+        """
+        try:
+            import sys
+
+            import cloudpickle
+
+            modules_to_register = set()
+
+            def collect_modules(obj: Any, visited: Optional[Set[int]] = None) -> None:
+                """Recursively collect all module names from custom objects."""
+                if visited is None:
+                    visited = set()
+
+                obj_id = id(obj)
+                if obj_id in visited:
+                    return
+                visited.add(obj_id)
+
+                # Skip builtin types
+                if _is_builtin_type(obj):
+                    return
+
+                # Get module from class
+                try:
+                    cls = type(obj)
+                    module_name = cls.__module__
+
+                    # Check if module needs registration (not builtin/importable)
+                    if module_name not in (
+                        "__main__",
+                        "__mp_main__",
+                        "builtins",
+                        "__builtin__",
+                        "typing",
+                    ):
+                        try:
+                            spec = importlib.util.find_spec(module_name)
+                            if spec is None:
+                                # Module not importable - needs registration
+                                modules_to_register.add(module_name)
+                        except (ImportError, ValueError, AttributeError):
+                            # Module not importable - needs registration
+                            modules_to_register.add(module_name)
+
+                    # Recursively check attributes
+                    if hasattr(obj, "__dict__"):
+                        for attr_value in obj.__dict__.values():
+                            if not _is_builtin_type(attr_value):
+                                if isinstance(attr_value, (list, tuple)):
+                                    for item in attr_value:
+                                        collect_modules(item, visited)
+                                elif isinstance(attr_value, dict):
+                                    for v in attr_value.values():
+                                        collect_modules(v, visited)
+                                else:
+                                    collect_modules(attr_value, visited)
+                except (AttributeError, TypeError):
+                    pass
+
+            # Collect all modules from inputs
+            for value in inputs.values():
+                collect_modules(value)
+
+            # Register all found modules with cloudpickle
+            for module_name in modules_to_register:
+                if module_name in sys.modules:
+                    try:
+                        module = sys.modules[module_name]
+                        cloudpickle.register_pickle_by_value(module)
+                        if getattr(self, "debug", False):
+                            print(
+                                f"[DaftEngine] Registered module '{module_name}' for by-value pickling"
+                            )
+                    except Exception as e:
+                        if getattr(self, "debug", False):
+                            print(
+                                f"[DaftEngine] Warning: Failed to register module '{module_name}': {e}"
+                            )
+
+        except ImportError:
+            # cloudpickle not available
+            pass
+        except Exception as e:
+            if getattr(self, "debug", False):
+                print(f"[DaftEngine] Warning: Module registration failed: {e}")
 
     def _ensure_stateful_value_pickleable(self, value: Any) -> Any:
-        """Fix stateful value instances to have serializable-by-value classes.
+        """Fix stateful value instances comprehensively for Daft serialization.
 
-        This replaces the old cloudpickle.register_pickle_by_value() approach
-        which didn't work for classes. Instead, we directly modify the instance's
-        __class__ attribute to point to a version with __module__ = "__main__".
+        This uses the new comprehensive approach that:
+        1. Recursively fixes all nested custom objects
+        2. Registers modules with cloudpickle
+        3. Updates sys.modules for class lookup
 
         Returns:
-            The fixed value (may be a new instance for frozen Pydantic models)
+            The fixed value ready for Daft serialization
         """
-
-        if value is None:
-            return value
-
-        cls = value.__class__
-
-        # Check if we've already processed this class type
-        if cls in _REGISTERED_BY_VALUE_CLASSES:
-            return value
-
-        try:
-            requires_by_value = self._class_requires_by_value_serialization(cls)
-        except Exception:
-            requires_by_value = True
-
-        if not requires_by_value:
-            return value
-
-        # Fix the instance's class to be serializable by value
-        try:
-            fixed_value = _fix_instance_class(value)
-            _REGISTERED_BY_VALUE_CLASSES.add(cls)
-
-            if getattr(self, "debug", False):
-                print(
-                    f"[DaftEngine] Fixed {cls.__module__}.{cls.__name__} instance for by-value pickling"
-                )
-
-            return fixed_value
-
-        except Exception as exc:
-            if getattr(self, "debug", False):
-                print(
-                    f"[DaftEngine] Failed to fix {cls.__name__} instance for by-value pickling: {exc}"
-                )
-            return value
+        return _prepare_stateful_value_for_daft(
+            value, debug=getattr(self, "debug", False)
+        )
 
     def _build_stateful_udf(
         self,
@@ -2124,8 +3242,29 @@ class DaftEngine(Engine):
         # Force by-value serialization for Modal/distributed execution
         serializable_func = _make_serializable_by_value(func)
 
+        # Comprehensively prepare all stateful values for serialization
+        # This includes deep recursive fixing of nested objects
+        if self.debug:
+            print(
+                f"[_build_stateful_udf] Preparing {len(stateful_values)} stateful values:"
+            )
+            for key, value in stateful_values.items():
+                cls = value.__class__
+                print(f"  - {key}: {cls.__module__}.{cls.__name__}")
+
+        prepared_stateful_values = {
+            key: self._ensure_stateful_value_pickleable(value)
+            for key, value in stateful_values.items()
+        }
+
+        if self.debug:
+            print("[_build_stateful_udf] After preparation:")
+            for key, value in prepared_stateful_values.items():
+                cls = value.__class__
+                print(f"  - {key}: {cls.__module__}.{cls.__name__}")
+
         # Extract @daft.cls parameters from stateful objects (with sensible defaults)
-        cls_kwargs = self._extract_daft_cls_kwargs(stateful_values)
+        cls_kwargs = self._extract_daft_cls_kwargs(prepared_stateful_values)
 
         method_kwargs: Dict[str, Any] = {}
         if inferred_dtype is None:
@@ -2135,6 +3274,9 @@ class DaftEngine(Engine):
         method_decorator = (
             daft.method(**method_kwargs) if method_kwargs else daft.method()
         )
+
+        # Capture debug flag for logging inside the wrapper
+        debug_mode = self.debug
 
         @daft.cls(**cls_kwargs)
         class StatefulWrapper:
@@ -2150,10 +3292,107 @@ class DaftEngine(Engine):
                         kwargs[param] = self._payload[param]
                     else:
                         kwargs[param] = next(arg_iter)
-                return serializable_func(**kwargs)
 
-        wrapper = StatefulWrapper(stateful_values)
-        return wrapper.__call__
+                # Call the function
+                result = serializable_func(**kwargs)
+
+                # CRITICAL FIX: Apply _fix_output_tree to ensure outputs are serializable
+                # This fixes script-defined classes (Pydantic models, etc.) that are
+                # returned from the function
+                if debug_mode:
+                    print("[StatefulWrapper] Fixing output from stateful UDF")
+                fixed_result = _fix_output_tree(result, debug=debug_mode)
+
+                return fixed_result
+
+        wrapper = StatefulWrapper(prepared_stateful_values)
+        return wrapper
+
+    def _should_execute_stateful_in_python(
+        self, stateful_values: Dict[str, Any]
+    ) -> bool:
+        """Return True if the node should run in Python instead of Daft for stability."""
+
+        for value in stateful_values.values():
+            try:
+                cls = value if isinstance(value, type) else value.__class__
+                if getattr(cls, "__hn_from_script__", False):
+                    if getattr(self, "debug", False):
+                        print(
+                            f"[DaftEngine] Executing stateful node for script class: {cls.__name__}"
+                        )
+                    return True
+                if getattr(value, "__hn_fixed_by_value__", False):
+                    if getattr(self, "debug", False):
+                        print(
+                            f"[DaftEngine] Executing stateful node for fixed value: {cls.__name__}"
+                        )
+                    return True
+                if self._class_requires_by_value_serialization(cls):
+                    if getattr(self, "debug", False):
+                        print(
+                            f"[DaftEngine] Executing stateful node due to by-value serialization: {cls.__name__}"
+                        )
+                    return True
+            except Exception:
+                return True
+        return False
+
+    def _execute_stateful_node_in_python(
+        self,
+        df: "daft.DataFrame",
+        dynamic_params: List[str],
+        stateful_values: Dict[str, Any],
+        func: Any,
+        output_name: str,
+        inferred_dtype: Optional["daft.DataType"],
+    ) -> "daft.DataFrame":
+        """Execute a stateful node row-by-row in Python and materialize the results."""
+
+        # Handle no-column case (pure stateful)
+        if not dynamic_params:
+            result = func(**stateful_values)
+            result = _fix_output_tree(result, debug=self.debug)
+            import daft
+
+            expr = daft.lit(result)
+            if inferred_dtype is not None:
+                expr = expr.cast(inferred_dtype)
+            return df.with_column(output_name, expr)
+
+        # Fetch required columns as Python data
+        debug_mode = getattr(self, "debug", False)
+        if debug_mode:
+            print(
+                f"[DaftEngine] Fetching columns {dynamic_params} for Python execution of '{output_name}'"
+            )
+        subset = df.select(*dynamic_params).to_pydict()
+        if not subset:
+            return df
+
+        num_rows = len(next(iter(subset.values())))
+        results: List[Any] = []
+        for idx in range(num_rows):
+            kwargs = {param: subset[param][idx] for param in dynamic_params}
+            kwargs.update(stateful_values)
+            value = func(**kwargs)
+            value = _fix_output_tree(value, debug=self.debug)
+            results.append(value)
+        if debug_mode:
+            print(
+                f"[DaftEngine] Executed '{output_name}' in Python for {num_rows} rows"
+            )
+
+        # Materialize existing columns so we can rebuild a DataFrame that already
+        # contains the Python results.
+        data = df.to_pydict()
+        if not data:
+            data = {param: subset[param] for param in dynamic_params}
+        data[output_name] = results
+
+        import daft
+
+        return daft.from_pydict(data)
 
     def _infer_return_dtype(self, return_type: Any) -> Optional["daft.DataType"]:
         """Infer an appropriate Daft DataType for a node return annotation.
@@ -2441,9 +3680,28 @@ class DaftEngine(Engine):
             lines.append(f"        return {func_name}({all_params})")
             lines.append("")
 
-            # Add instantiation
+            # Instantiate wrapper and expose bound __call__ just like runtime execution
             init_args = ", ".join([f"{k}={k}" for k in stateful_values.keys()])
-            lines.append(f"{udf_name} = {class_name}({init_args})")
+            wrapper_instance = f"{udf_name}_wrapper"
+            lines.append(f"{wrapper_instance} = {class_name}({init_args})")
+            lines.append(f"{udf_name} = {wrapper_instance}")
+
+            # Emit a small helper function so the generated code shows an explicit signature.
+            helper_name = f"{udf_name}_signature"
+            if method_params:
+                lines.append("")
+                lines.append(f"def {helper_name}({method_params}):")
+            else:
+                lines.append("")
+                lines.append(f"def {helper_name}():")
+            lines.append(
+                '    """Helper to illustrate how to invoke this stateful UDF."""'
+            )
+            call_args = ", ".join(dynamic_params)
+            if call_args:
+                lines.append(f"    return {udf_name}({call_args})")
+            else:
+                lines.append(f"    return {udf_name}()")
 
             self._udf_definitions.append("\n".join(lines))
             return udf_name

@@ -163,7 +163,7 @@ def test_stateful_class_pickling():
 
 def test_script_pattern_with_map():
     """Test script-pattern stateful classes with .map() operation."""
-    
+
     class Transformer:
         __daft_hint__ = "@daft.cls"
         
@@ -197,6 +197,64 @@ def test_script_pattern_with_map():
     assert len(result["result"]) == 5
     expected = [10, 11, 12, 13, 14]  # [0+10, 1+10, 2+10, 3+10, 4+10]
     assert result["result"] == expected
+
+
+class _ScriptEvaluator:
+    def __init__(self):
+        self.factor = 2
+
+    def evaluate(self, value: int) -> int:
+        return value * self.factor
+
+
+def test_unhinted_script_stateful_object_is_captured():
+    """Even without __daft_hint__, script-style objects must be pickled by value."""
+
+    # Simulate module defined in scripts/ folder that isn't importable in workers
+    _ScriptEvaluator.__module__ = "nonexistent_script_module"
+    evaluator = _ScriptEvaluator()
+
+    @node(output_name="score")
+    def compute_score(x: int, evaluator: _ScriptEvaluator) -> int:
+        return evaluator.evaluate(x)
+
+    pipeline = Pipeline(nodes=[compute_score], engine=DaftEngine())
+
+    result = pipeline.run(inputs={"x": 5, "evaluator": evaluator})
+
+    assert result["score"] == 10
+
+
+def test_should_capture_stateful_input_for_unimportable_classes():
+    class Dummy:
+        pass
+
+    Dummy.__module__ = "nonexistent_modal_script"
+
+    engine = DaftEngine()
+
+    assert engine._should_capture_stateful_input(Dummy()) is True
+
+
+def test_make_class_serializable_rebinds_module():
+    from hypernodes.integrations.daft.engine import _make_class_serializable_by_value
+    import sys
+    import types
+
+    class ScriptModel:
+        pass
+
+    ScriptModel.__module__ = "custom_script_module_for_test"
+
+    module_obj = types.SimpleNamespace(ScriptModel=ScriptModel)
+    sys.modules["custom_script_module_for_test"] = module_obj
+
+    try:
+        new_cls = _make_class_serializable_by_value(ScriptModel)
+        assert new_cls.__module__ == "__main__"
+        assert module_obj.ScriptModel is new_cls
+    finally:
+        sys.modules.pop("custom_script_module_for_test", None)
 
 
 def test_stateful_class_without_daft_hint():

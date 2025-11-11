@@ -23,7 +23,7 @@ __all__ = ["Engine", "HypernodesEngine", "SequentialExecutor", "AsyncExecutor", 
 
 # Optional engines
 try:
-    from .integrations.daft import DaftEngine
-    __all__.append("DaftEngine")
+    from .integrations.daft.engine import DaftEngine, fix_script_classes_for_modal
+    __all__.extend(["DaftEngine", "fix_script_classes_for_modal"])
 except ImportError:
     pass
