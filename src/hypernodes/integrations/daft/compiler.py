@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Union
 
 try:
     import daft
@@ -17,6 +17,9 @@ from hypernodes.pipeline import Pipeline
 
 from .node_converter import NodeConverter
 from .stateful_udf import StatefulUDFBuilder
+
+if TYPE_CHECKING:
+    from .code_generator import CodeGenerator
 
 
 @dataclass
@@ -34,12 +37,14 @@ class PipelineCompiler:
         self,
         node_converter: NodeConverter,
         stateful_builder: StatefulUDFBuilder,
+        code_generator: Optional["CodeGenerator"] = None,
     ):
         if not DAFT_AVAILABLE:  # pragma: no cover - enforced by engine
             raise ImportError("Daft is not installed. Install with `pip install daft`.")
 
         self._node_converter = node_converter
         self._stateful_builder = stateful_builder
+        self._code_generator = code_generator
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -56,6 +61,11 @@ class PipelineCompiler:
         nodes = plan if plan is not None else pipeline.execution_order
 
         df_inputs, stateful_inputs = self._prepare_inputs(inputs, row_count)
+        
+        # Generate DataFrame creation code if in code generation mode
+        if self._code_generator:
+            self._generate_dataframe_creation(df_inputs, stateful_inputs)
+        
         df = daft.from_pydict(df_inputs)
 
         for node in nodes:
@@ -65,7 +75,18 @@ class PipelineCompiler:
         requested = self._resolve_requested_columns(output_name, all_columns)
 
         if requested:
+            if self._code_generator:
+                self._code_generator.add_operation("")
+                self._code_generator.add_operation("# Select output columns")
+                columns_str = ", ".join([f'"{col}"' for col in requested])
+                self._code_generator.add_operation(f"df = df.select({columns_str})")
             df = df.select(*requested)
+        
+        if self._code_generator:
+            self._code_generator.add_operation("")
+            self._code_generator.add_operation("# Collect result")
+            self._code_generator.add_operation("result = df.collect()")
+            self._code_generator.add_operation("print(result.to_pydict())")
 
         return CompilationResult(dataframe=df, columns=requested)
 
@@ -84,7 +105,14 @@ class PipelineCompiler:
         dynamic_row_count = None if row_count is None else row_count
 
         for name, value in inputs.items():
+            # Check if it's a stateful object (has __daft_hint__)
             if self._stateful_builder.is_stateful(value):
+                stateful_inputs[name] = value
+                continue
+            
+            # For code generation, also treat complex objects as stateful
+            # (they can't be easily serialized in generated code)
+            if self._code_generator and not self._is_simple_type(value):
                 stateful_inputs[name] = value
                 continue
 
@@ -148,3 +176,54 @@ class PipelineCompiler:
             )
 
         return requested
+
+    def _generate_dataframe_creation(
+        self,
+        df_inputs: Dict[str, List[Any]],
+        stateful_inputs: Dict[str, Any],
+    ) -> None:
+        """Generate code for DataFrame creation."""
+        if not self._code_generator:
+            return
+        
+        # Track stateful inputs
+        for name, obj in stateful_inputs.items():
+            self._code_generator.add_stateful_input(name, obj)
+        
+        self._code_generator.add_operation("# Create DataFrame with input data")
+        self._code_generator.add_operation("df = daft.from_pydict({")
+        
+        for key, value in df_inputs.items():
+            value_repr = self._code_generator.format_value_for_code(value)
+            self._code_generator.add_operation(f'    "{key}": {value_repr},')
+        
+        self._code_generator.add_operation("})")
+        self._code_generator.add_operation("")
+        
+        # Add stateful objects as columns using daft.lit()
+        if stateful_inputs:
+            self._code_generator.add_operation("# Add stateful objects as columns")
+            self._code_generator.add_operation(
+                "# Note: These objects must be initialized before running this code"
+            )
+            for key in stateful_inputs.keys():
+                self._code_generator.add_operation(f'df = df.with_column("{key}", daft.lit({key}))')
+            self._code_generator.add_operation("")
+
+    def _is_simple_type(self, value: Any) -> bool:
+        """Check if value is a simple type that can be serialized."""
+        if value is None:
+            return True
+        if isinstance(value, (bool, int, float, str, bytes)):
+            return True
+        if isinstance(value, list):
+            return all(self._is_simple_type(item) for item in value)
+        if isinstance(value, tuple):
+            return all(self._is_simple_type(item) for item in value)
+        if isinstance(value, dict):
+            return all(
+                self._is_simple_type(k) and self._is_simple_type(v)
+                for k, v in value.items()
+            )
+        return False
+
