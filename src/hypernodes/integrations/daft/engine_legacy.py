@@ -1265,7 +1265,6 @@ class DaftEngine(Engine):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx: Optional[CallbackContext] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline by converting it to a Daft DataFrame.
 
@@ -1273,7 +1272,6 @@ class DaftEngine(Engine):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values
             output_name: Optional output name(s) to compute
-            _ctx: Internal callback context (not used in Daft engine)
 
         Returns:
             Dictionary containing the pipeline outputs
@@ -1975,7 +1973,7 @@ class DaftEngine(Engine):
         output_name = node.output_name
 
         # Get node parameters that are available either as columns or stateful inputs
-        params = [p for p in node.parameters if p in available or p in stateful_inputs]
+        params = [p for p in node.root_args if p in available or p in stateful_inputs]
 
         if stateful_inputs and getattr(self, "debug", False):
             print(
@@ -3309,7 +3307,7 @@ class DaftEngine(Engine):
                 # Build kwargs by combining stateful values with dynamic args
                 # The args correspond to dynamic_params in order
                 kwargs = dict(self._payload)  # Start with stateful values
-                
+
                 # Add dynamic params from args
                 if len(args) != len(self._dynamic_params):
                     raise ValueError(

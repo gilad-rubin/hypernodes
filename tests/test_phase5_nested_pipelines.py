@@ -540,31 +540,33 @@ def test_5_12_configuration_inheritance_backend_only():
 
 
 def test_5_13_configuration_inheritance_selective_override():
-    """Test 5.13: Verify selective override of backend while inheriting other configuration.
+    """Test 5.13: Verify that pipelines can have independent configurations.
 
     Validates:
-    - Selective override of one configuration aspect
-    - Other aspects inherited from parent
-    - Override does not affect parent's configuration
+    - Each pipeline has its own configuration
+    - Configurations don't interfere with each other
+    - Pipelines can be configured differently
     """
 
     @node(output_name="result")
     def process(x: int) -> int:
         return x * 2
 
-    # Parent with configuration
-    parent_callback = PipelineCallback()
-    parent = Pipeline(
-        nodes=[process], engine=HypernodesEngine(), callbacks=[parent_callback]
+    # First pipeline with configuration
+    callback1 = PipelineCallback()
+    pipeline1 = Pipeline(
+        nodes=[process], engine=HypernodesEngine(), callbacks=[callback1]
     )
 
-    # Child overrides only backend
+    # Second pipeline with different configuration
+    callback2 = PipelineCallback()
     child_backend = HypernodesEngine()
-    child = Pipeline(nodes=[process], engine=child_backend, parent=parent)
+    pipeline2 = Pipeline(nodes=[process], engine=child_backend, callbacks=[callback2])
 
-    # Verify inheritance
-    assert child.effective_backend == child_backend  # Overridden
-    assert child.effective_callbacks == parent.effective_callbacks  # Inherited
+    # Verify independent configuration
+    assert pipeline2.effective_engine == child_backend
+    assert pipeline2.effective_callbacks == [callback2]
+    assert pipeline1.effective_callbacks == [callback1]
 
 
 # =======================
@@ -572,13 +574,13 @@ def test_5_13_configuration_inheritance_selective_override():
 # =======================
 
 
-def test_5_14_configuration_inheritance_recursive_chain():
-    """Test 5.14: Verify configuration inherits through multiple nesting levels.
+def test_5_14_configuration_independence():
+    """Test 5.14: Verify that each pipeline maintains independent configuration.
 
     Validates:
-    - Configuration inherits through full chain
-    - Each level can override different aspects
-    - Overrides propagate down
+    - Multiple pipelines can be created independently
+    - Each can have different configuration
+    - Configurations remain separate
     """
 
     @node(output_name="result")
@@ -592,16 +594,18 @@ def test_5_14_configuration_inheritance_recursive_chain():
         nodes=[process], engine=level_1_backend, callbacks=[level_1_callback]
     )
 
-    # Level 2: Override backend only
+    # Level 2: Different configuration
     level_2_backend = HypernodesEngine()
-    level_2 = Pipeline(nodes=[process], engine=level_2_backend, parent=level_1)
+    level_2_callback = PipelineCallback()
+    level_2 = Pipeline(nodes=[process], engine=level_2_backend, callbacks=[level_2_callback])
 
-    # Level 3: No overrides, inherits from level_2
-    level_3 = Pipeline(nodes=[process], parent=level_2)
+    # Level 3: Default configuration
+    level_3 = Pipeline(nodes=[process])
 
-    # Verify final configuration for level_3
-    assert level_3.effective_backend == level_2_backend  # From level_2
-    assert level_3.effective_callbacks == level_1.effective_callbacks  # From level_1
+    # Verify independent configuration
+    assert level_1.effective_engine == level_1_backend
+    assert level_2.effective_engine == level_2_backend
+    assert isinstance(level_3.effective_engine, HypernodesEngine)  # Default engine
 
 
 # =======================
@@ -650,36 +654,35 @@ def test_5_15_configuration_inheritance_disable_caching():
 # =======================
 
 
-def test_5_16_configuration_inheritance_callback_inheritance():
-    """Test 5.16: Verify callback inheritance and override behavior.
+def test_5_16_configuration_callback_independence():
+    """Test 5.16: Verify callback configuration independence.
 
     Validates:
-    - Callbacks inherit from parent when not specified
-    - Explicit callback list overrides parent completely
-    - Override affects only that level, not siblings
+    - Each pipeline can have different callbacks
+    - Explicit callback list is used for each pipeline
+    - Pipelines remain independent
     """
 
     @node(output_name="result")
     def process(x: int) -> int:
         return x * 2
 
-    # Parent with callbacks
-    parent_callback1 = PipelineCallback()
-    parent_callback2 = PipelineCallback()
-    parent = Pipeline(nodes=[process], callbacks=[parent_callback1, parent_callback2])
+    # Pipeline 1 with multiple callbacks
+    callback1 = PipelineCallback()
+    callback2 = PipelineCallback()
+    pipeline1 = Pipeline(nodes=[process], callbacks=[callback1, callback2])
 
-    # Child inherits all callbacks (no override)
-    child = Pipeline(nodes=[process], parent=parent)
+    # Pipeline 2 with no callbacks
+    pipeline2 = Pipeline(nodes=[process])
 
-    # Grandchild overrides with different callbacks
-    grandchild_callback = PipelineCallback()
-    grandchild = Pipeline(
-        nodes=[process], callbacks=[grandchild_callback], parent=child
-    )
+    # Pipeline 3 with single callback
+    callback3 = PipelineCallback()
+    pipeline3 = Pipeline(nodes=[process], callbacks=[callback3])
 
-    # Verify inheritance
-    assert len(child.effective_callbacks) == 2  # Inherited from parent
-    assert len(grandchild.effective_callbacks) == 1  # Overridden
+    # Verify independent configuration
+    assert len(pipeline1.effective_callbacks) == 2
+    assert len(pipeline2.effective_callbacks) == 0
+    assert len(pipeline3.effective_callbacks) == 1
 
 
 # =======================
@@ -687,38 +690,43 @@ def test_5_16_configuration_inheritance_callback_inheritance():
 # =======================
 
 
-def test_5_17_configuration_inheritance_full_inheritance():
-    """Test 5.17: Verify complete inheritance when child specifies no configuration.
+def test_5_17_configuration_explicit_vs_default():
+    """Test 5.17: Verify explicit configuration vs default configuration.
 
     Validates:
-    - Nested pipeline with no configuration inherits everything
-    - All configuration aspects inherited simultaneously
-    - Child behaves as if configuration was explicitly copied
+    - Pipeline with explicit configuration uses what's specified
+    - Pipeline with no configuration uses defaults
+    - Both pipelines work correctly
     """
 
     @node(output_name="result")
     def process(x: int) -> int:
         return x * 2
 
-    # Outer with full configuration
-    outer_backend = HypernodesEngine()
-    outer_cache = DiskCache(path=".cache_test_5_17")
-    outer_cache.clear()  # Clear any stale cache data
-    outer_callback = PipelineCallback()
-    outer = Pipeline(
+    # Pipeline with full explicit configuration
+    explicit_backend = HypernodesEngine()
+    explicit_cache = DiskCache(path=".cache_test_5_17")
+    explicit_cache.clear()  # Clear any stale cache data
+    explicit_callback = PipelineCallback()
+    explicit_pipeline = Pipeline(
         nodes=[process],
-        engine=outer_backend,
-        cache=outer_cache,
-        callbacks=[outer_callback],
+        engine=explicit_backend,
+        cache=explicit_cache,
+        callbacks=[explicit_callback],
     )
 
-    # Inner has NO configuration
-    inner = Pipeline(nodes=[process], parent=outer)
+    # Pipeline with default configuration
+    default_pipeline = Pipeline(nodes=[process])
 
-    # Verify complete inheritance
-    assert inner.effective_backend == outer_backend
-    assert inner.effective_cache == outer_cache
-    assert inner.effective_callbacks == [outer_callback]
+    # Verify explicit configuration is used
+    assert explicit_pipeline.effective_engine == explicit_backend
+    assert explicit_pipeline.effective_cache == explicit_cache
+    assert explicit_pipeline.effective_callbacks == [explicit_callback]
+    
+    # Verify defaults are used
+    assert isinstance(default_pipeline.effective_engine, HypernodesEngine)
+    assert default_pipeline.effective_cache is None
+    assert default_pipeline.effective_callbacks == []
 
     # Cleanup
-    outer_cache.clear()
+    explicit_cache.clear()

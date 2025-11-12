@@ -245,7 +245,7 @@ def compute_pipeline_node_signature(pipeline_node, inputs, node_signatures):
     # Dependencies
     deps_signatures = [
         node_signatures[param]
-        for param in pipeline_node.parameters
+        for param in pipeline_node.root_args
         if param in node_signatures
     ]
     deps_hash = ":".join(sorted(deps_signatures))

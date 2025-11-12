@@ -57,8 +57,8 @@ class PipelineCompiler:
         row_count: Optional[int] = None,
     ) -> CompilationResult:
         """Compile a pipeline for the provided inputs."""
-        plan = pipeline._compute_required_nodes(output_name)
-        nodes = plan if plan is not None else pipeline.execution_order
+        plan = pipeline.graph.get_required_nodes(output_name)
+        nodes = plan if plan is not None else pipeline.graph.execution_order
 
         df_inputs, stateful_inputs = self._prepare_inputs(inputs, row_count)
         

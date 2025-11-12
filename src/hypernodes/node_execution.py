@@ -60,7 +60,9 @@ def _get_node_id(node) -> str:
 
 def _get_sync_runner_strategy(pipeline: "Pipeline") -> str:
     """Determine how to run coroutines for this pipeline's engine."""
-    engine = getattr(pipeline, "effective_engine", None) or getattr(pipeline, "effective_backend", None)
+    engine = pipeline.engine
+    if engine is None:
+        return "per_call"
     strategy = getattr(engine, "async_strategy", "per_call")
     if strategy in ("thread_local", "auto", "async_native"):
         return "thread_local"
@@ -68,9 +70,7 @@ def _get_sync_runner_strategy(pipeline: "Pipeline") -> str:
 
 
 def compute_node_signature(
-    node: "Node",
-    inputs: Dict[str, Any],
-    node_signatures: Dict[str, str]
+    node: "Node", inputs: Dict[str, Any], node_signatures: Dict[str, str]
 ) -> str:
     """Compute signature for a regular node.
 
@@ -92,7 +92,7 @@ def compute_node_signature(
 
     # Compute dependencies hash from upstream node signatures
     deps_signatures = []
-    for param in node.parameters:
+    for param in node.root_args:
         if param in node_signatures:
             deps_signatures.append(node_signatures[param])
     deps_hash = ":".join(sorted(deps_signatures))
@@ -105,9 +105,7 @@ def compute_node_signature(
 
 
 def compute_pipeline_node_signature(
-    pipeline_node,
-    inputs: Dict[str, Any],
-    node_signatures: Dict[str, str]
+    pipeline_node, inputs: Dict[str, Any], node_signatures: Dict[str, str]
 ) -> str:
     """Compute signature for a PipelineNode.
 
@@ -125,7 +123,7 @@ def compute_pipeline_node_signature(
 
     # Hash the inner pipeline structure (all node functions)
     inner_code_hashes = []
-    for inner_node in inner_pipeline.execution_order:
+    for inner_node in inner_pipeline.graph.execution_order:
         if hasattr(inner_node, "pipeline"):
             # Nested PipelineNode - use its pipeline ID
             inner_code_hashes.append(inner_node.pipeline.id)
@@ -140,7 +138,7 @@ def compute_pipeline_node_signature(
 
     # Compute dependencies hash from upstream node signatures
     deps_signatures = []
-    for param in pipeline_node.parameters:
+    for param in pipeline_node.root_args:
         if param in node_signatures:
             deps_signatures.append(node_signatures[param])
     deps_hash = ":".join(sorted(deps_signatures))
@@ -157,7 +155,7 @@ def _execute_pipeline_node(
     inputs: Dict[str, Any],
     pipeline: "Pipeline",
     callbacks: List[PipelineCallback],
-    ctx: CallbackContext
+    ctx: CallbackContext,
 ) -> Dict[str, Any]:
     """Execute a PipelineNode and return its outputs.
 
@@ -182,20 +180,9 @@ def _execute_pipeline_node(
     for callback in callbacks:
         callback.on_nested_pipeline_start(pipeline.id, inner_pipeline.id, ctx)
 
-    # Pass context to PipelineNode so it can share with nested pipeline
-    pipeline_node._exec_ctx = ctx
-
-    # Temporarily set parent so nested pipeline inherits callbacks/cache/backend
-    old_parent = inner_pipeline._parent
-    inner_pipeline._parent = pipeline
-
-    try:
-        # Call the PipelineNode (it handles all mapping internally)
-        result = pipeline_node(**inputs)
-    finally:
-        # Restore original parent and clean up
-        inner_pipeline._parent = old_parent
-        pipeline_node._exec_ctx = None
+    # Call the PipelineNode (it handles all mapping internally)
+    # Context is already available through contextvar
+    result = pipeline_node(**inputs)
 
     # Trigger nested pipeline end callbacks
     nested_duration = time.time() - nested_start_time
@@ -213,7 +200,7 @@ def execute_single_node(
     pipeline: "Pipeline",
     callbacks: List[PipelineCallback],
     ctx: CallbackContext,
-    node_signatures: Dict[str, str]
+    node_signatures: Dict[str, str],
 ) -> Tuple[Any, str]:
     """Synchronous wrapper that delegates to the async implementation."""
     runner_strategy = _get_sync_runner_strategy(pipeline)
@@ -243,18 +230,14 @@ async def execute_single_node_async(
     """Execute a single node with caching, supporting async contexts."""
     node_id = _get_node_id(node)
 
-    # Get effective cache (support inheritance)
-    effective_cache = (
-        pipeline.effective_cache
-        if hasattr(pipeline, "effective_cache")
-        else pipeline.cache
-    )
-    cache_enabled = effective_cache is not None and node.cache
-    
+    # Get cache from pipeline
+    cache = pipeline.cache
+    cache_enabled = cache is not None and node.cache
+
     # Only compute signature if caching is enabled (optimization)
     signature = None
     result = None
-    
+
     if cache_enabled:
         # Compute signature based on node type
         if hasattr(node, "pipeline"):
@@ -263,9 +246,9 @@ async def execute_single_node_async(
         else:
             # Regular node
             signature = compute_node_signature(node, inputs, node_signatures)
-        
+
         # Check cache
-        result = effective_cache.get(signature)
+        result = cache.get(signature)
 
         if result is not None:
             # Cache hit - trigger callbacks
@@ -309,7 +292,9 @@ async def execute_single_node_async(
                 result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
         else:
             # Regular node - call directly
-            call_async = hasattr(node, "func") and inspect.iscoroutinefunction(node.func)
+            call_async = hasattr(node, "func") and inspect.iscoroutinefunction(
+                node.func
+            )
             if offload_sync and not call_async:
                 result = await asyncio.to_thread(node, **inputs)
             else:
@@ -352,9 +337,9 @@ async def execute_single_node_async(
             signature = compute_pipeline_node_signature(node, inputs, node_signatures)
         else:
             signature = compute_node_signature(node, inputs, node_signatures)
-    
+
     # Store in cache if enabled
-    if cache_enabled and effective_cache is not None:
-        effective_cache.put(signature, result)
+    if cache_enabled and cache is not None:
+        cache.put(signature, result)
 
     return result, signature

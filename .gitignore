@@ -8,8 +8,6 @@ mlruns/*
 *.bak
 .codex/config.toml
 .codex/config.toml.bak
-.cursor/rules/ruler_cursor_instructions.mdc
-.cursor/rules/ruler_cursor_instructions.mdc.bak
 .mcp.json
 .mcp.json.bak
 .vscode/mcp.json

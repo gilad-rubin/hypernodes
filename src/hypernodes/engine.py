@@ -38,6 +38,7 @@ from .node_execution import (
 # Import loky for robust parallel execution with cloudpickle support
 try:
     from loky import get_reusable_executor
+
     _LOKY_AVAILABLE = True
 except ImportError:
     _LOKY_AVAILABLE = False
@@ -47,16 +48,18 @@ if TYPE_CHECKING:
     from .pipeline import Pipeline
 
 
-def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> List[List]:
+def _compute_dependency_levels(
+    pipeline: "Pipeline", nodes_to_execute: List
+) -> List[List]:
     """Compute levels of nodes that can execute in parallel using NetworkX.
-    
+
     Uses NetworkX's topological_generations to identify groups of nodes that
     have no dependencies on each other and can run concurrently.
-    
+
     Args:
         pipeline: The pipeline containing the dependency graph
         nodes_to_execute: List of nodes to execute (may be subset of all nodes)
-    
+
     Returns:
         List of lists where each inner list contains nodes that can run in parallel.
         Example: [[node_a, node_b], [node_c], [node_d, node_e]]
@@ -66,7 +69,7 @@ def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> 
     """
     # Build a subgraph where vertices are actual node objects (not output names)
     # This handles nodes that produce multiple outputs by keeping a single vertex
-    # and connecting dependencies based on pipeline.output_to_node mapping.
+    # and connecting dependencies based on pipeline.graph.output_to_node mapping.
     subgraph = nx.DiGraph()
 
     # Add all nodes as vertices
@@ -75,9 +78,9 @@ def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> 
 
     # Build dependency edges: producer_node -> consumer_node
     for consumer in nodes_to_execute:
-        for param in consumer.parameters:
+        for param in consumer.root_args:
             # If this param is produced by another node in the same execution set
-            producer = pipeline.output_to_node.get(param)
+            producer = pipeline.graph.output_to_node.get(param)
             if producer is not None and producer in nodes_to_execute:
                 subgraph.add_edge(producer, consumer)
 
@@ -92,7 +95,7 @@ def _compute_dependency_levels(pipeline: "Pipeline", nodes_to_execute: List) -> 
 
 def _pipeline_supports_async_native(pipeline: "Pipeline") -> bool:
     """Check if all nodes in the pipeline are native async functions."""
-    for node in pipeline.execution_order:
+    for node in pipeline.graph.execution_order:
         if hasattr(node, "pipeline"):
             # Nested pipelines introduce sync boundaries for now
             return False
@@ -100,7 +103,7 @@ def _pipeline_supports_async_native(pipeline: "Pipeline") -> bool:
             return False
         if not inspect.iscoroutinefunction(node.func):
             return False
-    return len(pipeline.execution_order) > 0
+    return len(pipeline.graph.execution_order) > 0
 
 
 def _execute_pipeline_for_map_item(
@@ -166,21 +169,17 @@ def _execute_pipeline_impl(
     if ctx is None:
         ctx = CallbackContext()
 
-    # Determine callbacks to use (support inheritance via effective_callbacks)
-    callbacks = (
-        pipeline.effective_callbacks
-        if hasattr(pipeline, "effective_callbacks")
-        else (pipeline.callbacks or [])
-    )
+    # Get callbacks from pipeline (with fallback to empty list)
+    callbacks = pipeline.callbacks or []
 
     # Get node IDs for metadata
-    node_ids = [_get_node_id(n) for n in pipeline.execution_order]
+    node_ids = [_get_node_id(n) for n in pipeline.graph.execution_order]
 
     # Set pipeline metadata
     ctx.set_pipeline_metadata(
         pipeline.id,
         {
-            "total_nodes": len(pipeline.execution_order),
+            "total_nodes": len(pipeline.graph.execution_order),
             "node_ids": node_ids,
             "pipeline_name": pipeline.name or pipeline.id,
         },
@@ -190,9 +189,9 @@ def _execute_pipeline_impl(
     ctx.push_pipeline(pipeline.id)
 
     # Compute required nodes based on output_name
-    required_nodes = pipeline._compute_required_nodes(output_name)
+    required_nodes = pipeline.graph.get_required_nodes(output_name)
     nodes_to_execute = (
-        required_nodes if required_nodes is not None else pipeline.execution_order
+        required_nodes if required_nodes is not None else pipeline.graph.execution_order
     )
 
     # Trigger pipeline start callbacks
@@ -212,19 +211,19 @@ def _execute_pipeline_impl(
 
         # Determine execution strategy based on executor type
         executor_class_name = executor.__class__.__name__
-        is_sequential = executor_class_name == 'SequentialExecutor'
-        is_async = executor_class_name == 'AsyncExecutor'
+        is_sequential = executor_class_name == "SequentialExecutor"
+        is_async = executor_class_name == "AsyncExecutor"
         is_threaded = isinstance(executor, ThreadPoolExecutor)
-        
+
         # Use node-level parallelism for async and threaded executors
         use_node_parallelism = (is_async or is_threaded) and len(nodes_to_execute) > 1
-        
+
         if is_sequential:
             # Sequential execution - simple loop
             for node in nodes_to_execute:
                 # Collect inputs for this node
                 node_inputs = {
-                    param: available_values[param] for param in node.parameters
+                    param: available_values[param] for param in node.root_args
                 }
 
                 # Execute node
@@ -244,24 +243,24 @@ def _execute_pipeline_impl(
                     outputs[node.output_name] = result
                     available_values[node.output_name] = result
                     node_signatures[node.output_name] = signature
-                    
+
         elif use_node_parallelism:
             # Node-level parallelism using dependency levels
             # Compute dependency levels (nodes that can run in parallel)
             levels = _compute_dependency_levels(pipeline, nodes_to_execute)
-            
+
             # Execute nodes level by level
             for level in levels:
                 if len(level) == 1:
                     # Single node in this level - execute directly (no parallelism benefit)
                     node = level[0]
                     node_inputs = {
-                        param: available_values[param] for param in node.parameters
+                        param: available_values[param] for param in node.root_args
                     }
                     result, signature = execute_single_node(
                         node, node_inputs, pipeline, callbacks, ctx, node_signatures
                     )
-                    
+
                     # Store output and signature
                     if hasattr(node, "pipeline"):
                         outputs.update(result)
@@ -272,15 +271,15 @@ def _execute_pipeline_impl(
                         outputs[node.output_name] = result
                         available_values[node.output_name] = result
                         node_signatures[node.output_name] = signature
-                        
+
                 else:
                     # Multiple independent nodes - submit in parallel
                     futures = {}
                     for node in level:
                         node_inputs = {
-                            param: available_values[param] for param in node.parameters
+                            param: available_values[param] for param in node.root_args
                         }
-                        
+
                         # Submit to executor
                         future = executor.submit(
                             execute_single_node,
@@ -292,12 +291,12 @@ def _execute_pipeline_impl(
                             node_signatures,
                         )
                         futures[future] = node
-                    
+
                     # Wait for all nodes in this level to complete
                     for future in as_completed(futures.keys()):
                         node = futures[future]
                         result, signature = future.result()
-                        
+
                         # Store output and signature
                         if hasattr(node, "pipeline"):
                             outputs.update(result)
@@ -320,7 +319,7 @@ def _execute_pipeline_impl(
                 for node in list(pending_nodes):
                     # Check if all dependencies are available
                     deps_satisfied = all(
-                        param in available_values for param in node.parameters
+                        param in available_values for param in node.root_args
                     )
                     if deps_satisfied:
                         ready_nodes.append(node)
@@ -331,7 +330,7 @@ def _execute_pipeline_impl(
 
                     # Collect inputs for this node
                     node_inputs = {
-                        param: available_values[param] for param in node.parameters
+                        param: available_values[param] for param in node.root_args
                     }
 
                     # Submit to executor
@@ -386,7 +385,9 @@ def _execute_pipeline_impl(
             requested_names = list(output_name)
 
         # Filter to only include requested outputs
-        filtered_outputs = {name: outputs[name] for name in requested_names if name in outputs}
+        filtered_outputs = {
+            name: outputs[name] for name in requested_names if name in outputs
+        }
         return filtered_outputs
 
     return outputs
@@ -402,26 +403,22 @@ async def _execute_pipeline_impl_async(
     if ctx is None:
         ctx = CallbackContext()
 
-    callbacks = (
-        pipeline.effective_callbacks
-        if hasattr(pipeline, "effective_callbacks")
-        else (pipeline.callbacks or [])
-    )
+    callbacks = pipeline.callbacks or []
 
-    node_ids = [_get_node_id(n) for n in pipeline.execution_order]
+    node_ids = [_get_node_id(n) for n in pipeline.graph.execution_order]
     ctx.set_pipeline_metadata(
         pipeline.id,
         {
-            "total_nodes": len(pipeline.execution_order),
+            "total_nodes": len(pipeline.graph.execution_order),
             "node_ids": node_ids,
             "pipeline_name": pipeline.name or pipeline.id,
         },
     )
     ctx.push_pipeline(pipeline.id)
 
-    required_nodes = pipeline._compute_required_nodes(output_name)
+    required_nodes = pipeline.graph.get_required_nodes(output_name)
     nodes_to_execute = (
-        required_nodes if required_nodes is not None else pipeline.execution_order
+        required_nodes if required_nodes is not None else pipeline.graph.execution_order
     )
 
     pipeline_start_time = time.time()
@@ -434,7 +431,7 @@ async def _execute_pipeline_impl_async(
         node_signatures: Dict[str, str] = {}
 
         for node in nodes_to_execute:
-            node_inputs = {param: available_values[param] for param in node.parameters}
+            node_inputs = {param: available_values[param] for param in node.root_args}
             result, signature = await execute_single_node_async(
                 node,
                 node_inputs,
@@ -484,7 +481,6 @@ class Engine(ABC):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx: Optional["CallbackContext"] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with the given inputs.
 
@@ -492,7 +488,6 @@ class Engine(ABC):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
             output_name: Optional output name(s) to compute
-            _ctx: Internal callback context
 
         Returns:
             Dictionary containing the requested pipeline outputs
@@ -506,7 +501,6 @@ class Engine(ABC):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx: Optional["CallbackContext"] = None,
     ) -> List[Dict[str, Any]]:
         """Execute a pipeline over multiple items.
 
@@ -515,7 +509,6 @@ class Engine(ABC):
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
             output_name: Optional output name(s) to compute
-            _ctx: Internal callback context
 
         Returns:
             List of output dictionaries (one per item)
@@ -568,16 +561,22 @@ class HypernodesEngine(Engine):
         # Store original specs to track ownership
         self._node_executor_spec = node_executor
         self._map_executor_spec = map_executor
-        
+
         # Track if we're using reusable executors (shouldn't be shut down)
         self._node_executor_is_reusable = False
         self._map_executor_is_reusable = False
 
         # Resolve executors
-        self.node_executor, self._node_executor_is_reusable = self._resolve_executor(node_executor, role="node")
-        self.map_executor, self._map_executor_is_reusable = self._resolve_executor(map_executor, role="map")
+        self.node_executor, self._node_executor_is_reusable = self._resolve_executor(
+            node_executor, role="node"
+        )
+        self.map_executor, self._map_executor_is_reusable = self._resolve_executor(
+            map_executor, role="map"
+        )
 
-    def _resolve_executor(self, executor_spec: Union[str, Any], role: str) -> tuple[Any, bool]:
+    def _resolve_executor(
+        self, executor_spec: Union[str, Any], role: str
+    ) -> tuple[Any, bool]:
         """Resolve an executor specification to an executor instance.
 
         Args:
@@ -599,7 +598,11 @@ class HypernodesEngine(Engine):
             elif executor_spec == "async":
                 return AsyncExecutor(max_workers=DEFAULT_WORKERS["async"]), False
             elif executor_spec == "threaded":
-                workers = self.max_workers if hasattr(self, 'max_workers') else DEFAULT_WORKERS["threaded"]
+                workers = (
+                    self.max_workers
+                    if hasattr(self, "max_workers")
+                    else DEFAULT_WORKERS["threaded"]
+                )
                 return ThreadPoolExecutor(max_workers=workers), False
             elif executor_spec == "parallel":
                 if role == "node":
@@ -611,11 +614,17 @@ class HypernodesEngine(Engine):
                         "Node-level 'parallel' is disabled. Use node_executor='threaded' "
                         "for node concurrency or map_executor='parallel' for parallel map."
                     )
-                workers = self.max_workers if hasattr(self, 'max_workers') else DEFAULT_WORKERS["parallel"]
+                workers = (
+                    self.max_workers
+                    if hasattr(self, "max_workers")
+                    else DEFAULT_WORKERS["parallel"]
+                )
                 # Use loky for robust parallel execution with automatic cloudpickle support
                 if _LOKY_AVAILABLE:
                     try:
-                        return get_reusable_executor(max_workers=workers, timeout=self.loky_timeout), True  # type: ignore
+                        return get_reusable_executor(
+                            max_workers=workers, timeout=self.loky_timeout
+                        ), True  # type: ignore
                     except TypeError:
                         return get_reusable_executor(max_workers=workers), True  # type: ignore
                 else:
@@ -658,7 +667,6 @@ class HypernodesEngine(Engine):
         pipeline: "Pipeline",
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx: Optional["CallbackContext"] = None,
     ) -> Dict[str, Any]:
         """Execute a pipeline with the configured node executor.
 
@@ -666,12 +674,17 @@ class HypernodesEngine(Engine):
             pipeline: The pipeline to execute
             inputs: Dictionary of input values for root arguments
             output_name: Optional output name(s) to compute
-            _ctx: Internal callback context
 
         Returns:
             Dictionary containing the requested pipeline outputs
         """
-        return self._execute_pipeline(pipeline, inputs, self.node_executor, _ctx, output_name)
+        from .execution_context import get_callback_context
+        
+        # Get context from contextvar (may be None for top-level calls)
+        ctx = get_callback_context()
+        return self._execute_pipeline(
+            pipeline, inputs, self.node_executor, ctx, output_name
+        )
 
     def map(
         self,
@@ -679,7 +692,6 @@ class HypernodesEngine(Engine):
         items: List[Dict[str, Any]],
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx: Optional["CallbackContext"] = None,
     ) -> List[Dict[str, Any]]:
         """Execute a pipeline over multiple items using map executor.
 
@@ -688,11 +700,12 @@ class HypernodesEngine(Engine):
             items: List of input dictionaries (one per item)
             inputs: Shared inputs for all items
             output_name: Optional output name(s) to compute
-            _ctx: Internal callback context
 
         Returns:
             List of output dictionaries (one per item)
         """
+        from .execution_context import get_callback_context
+        
         # For sequential executor, process items one by one
         is_sequential = isinstance(self.map_executor, SequentialExecutor)
         is_thread_pool = isinstance(self.map_executor, ThreadPoolExecutor)
@@ -701,8 +714,10 @@ class HypernodesEngine(Engine):
             # Sequential map: run items one by one while annotating context
             # so per-item callbacks (start/end/cached) can fire correctly.
             results = []
-            # Create a context if none provided (should be provided by Pipeline.map)
-            ctx = _ctx if _ctx is not None else CallbackContext()
+            # Get context from contextvar (should be set by Pipeline.map)
+            ctx = get_callback_context()
+            if ctx is None:
+                ctx = CallbackContext()
             for idx, item in enumerate(items):
                 # Mark this execution as part of a map operation
                 ctx.set("_in_map", True)
@@ -746,6 +761,7 @@ class HypernodesEngine(Engine):
 
         # Thread pools can execute map items without detaching pipeline metadata
         if is_thread_pool:
+
             def run_item(item_inputs: Dict[str, Any]) -> Dict[str, Any]:
                 merged_inputs = {**inputs, **item_inputs}
                 return _execute_pipeline_impl(
@@ -761,17 +777,15 @@ class HypernodesEngine(Engine):
 
         # For process-based executors (or unknown ones that likely need pickling),
         # submit all items and collect results via the standalone helper.
-        original_backend = getattr(pipeline, "backend", None)
-        original_parent = getattr(pipeline, "_parent", None)
-        effective_cache = getattr(pipeline, "effective_cache", None)
-        effective_callbacks = getattr(pipeline, "effective_callbacks", [])
+        original_engine = pipeline.engine
+        original_cache = pipeline.cache
+        original_callbacks = pipeline.callbacks
 
-        pipeline.backend = None  # type: ignore[assignment]
-        pipeline._parent = None  # type: ignore[attr-defined]
-        if effective_cache is not None:
-            pipeline.cache = effective_cache
-        if effective_callbacks is not None:
-            pipeline.callbacks = list(effective_callbacks)
+        pipeline.engine = None
+        if original_cache is not None:
+            pipeline.cache = original_cache
+        if original_callbacks:
+            pipeline.callbacks = list(original_callbacks)
 
         try:
             futures = []
@@ -786,15 +800,14 @@ class HypernodesEngine(Engine):
                 futures.append(future)
             return [future.result() for future in futures]
         finally:
-            pipeline.backend = original_backend
-            pipeline._parent = original_parent  # type: ignore[attr-defined]
+            pipeline.engine = original_engine
 
     def shutdown(self, wait: bool = True):
         """Shutdown executors that we own.
 
         Only shuts down executors that were created by this engine
         (from string specs), not user-provided instances or reusable executors.
-        
+
         Note: Loky's get_reusable_executor() returns a singleton that should NOT
         be shut down as it's meant to be reused across multiple operations.
 
@@ -802,11 +815,17 @@ class HypernodesEngine(Engine):
             wait: If True, wait for pending tasks to complete
         """
         # Shutdown node executor if we created it and it's not reusable
-        if isinstance(self._node_executor_spec, str) and not self._node_executor_is_reusable:
+        if (
+            isinstance(self._node_executor_spec, str)
+            and not self._node_executor_is_reusable
+        ):
             if hasattr(self.node_executor, "shutdown"):
                 self.node_executor.shutdown(wait=wait)
 
         # Shutdown map executor if we created it and it's not reusable
-        if isinstance(self._map_executor_spec, str) and not self._map_executor_is_reusable:
+        if (
+            isinstance(self._map_executor_spec, str)
+            and not self._map_executor_is_reusable
+        ):
             if hasattr(self.map_executor, "shutdown"):
                 self.map_executor.shutdown(wait=wait)
