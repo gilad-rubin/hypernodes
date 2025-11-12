@@ -35,6 +35,8 @@ class PipelineNode(Node):
         input_mapping: Optional[Dict[str, str]] = None,
         output_mapping: Optional[Dict[str, str]] = None,
         map_over: Optional[Union[str, List[str]]] = None,
+        # @should add map_mode
+        # @should add engine, cache, callbacks + "with_X, with_Y"
         name: Optional[str] = None,
     ):
         """Initialize a PipelineNode wrapper.
@@ -240,6 +242,20 @@ class PipelineNode(Node):
         return self is other
 
 
+# @@@this pipeline init should
+# 0. define a name (self.name = ...)
+# 1. create a graph from the nodes (call a single function "create_graph" using a separate class that handles that (NetworkXGraphBuilder that inherits from graphbuilder))
+# 2. setup the engine, cache, callbacks
+# 3. we need to remove "backend" and "parent". since pipelines can be nested in multiple different parent pipelines - i think we need to track them from their parents and not the opposite.
+
+# the graph builder should output errors if there are cycles, ambiguities etc...
+
+# a .graph should be availble as a property and it should have properties like the execution order, etc...
+
+# root_args should be available like it is now, but the code should not handle the pipelinenode inside, but somehow differentely (?) perhaps we should \
+# "expand" the pipelinenode into "regular nodes" and apply the same function or something? we should anyway do that in order to identify loops, issues/clashes with namings etc...
+
+
 class Pipeline:
     """Pipeline that manages DAG execution of nodes.
 
@@ -427,7 +443,11 @@ class Pipeline:
         return tuple(self.root_args)
 
     @property
-    def output_name(self) -> tuple:
+    def output_name(
+        self,
+    ) -> (
+        tuple
+    ):  # @should be changed to output_names. should return a list of all output names
         """Get all output names from this pipeline.
 
         For nested pipelines, this allows parent pipelines to know
@@ -448,7 +468,7 @@ class Pipeline:
                 outputs.append(node.output_name)
         return tuple(outputs)
 
-    def _validate(self) -> None:
+    def _validate(self) -> None:  # @this should happen within the graph builder
         """Validate pipeline integrity.
 
         Checks:
@@ -480,7 +500,7 @@ class Pipeline:
         # Check for cycles (accessing execution_order will raise if cycle exists)
         _ = self.execution_order
 
-    def _compute_required_nodes(
+    def _compute_required_nodes(  # @this should happen within the graph builder
         self, output_names: Union[str, List[str], None]
     ) -> Optional[List[Node]]:
         """Compute minimal set of nodes needed to produce requested outputs.
@@ -535,7 +555,7 @@ class Pipeline:
         self,
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
-        _ctx=None,
+        _ctx=None,  # @ideally this shouldn't be available here, but somehow differently. perhaps with a setter
     ) -> Dict[str, Any]:
         """Execute pipeline with given inputs.
 
@@ -775,6 +795,8 @@ class Pipeline:
             name=name,
         )
 
+    # @this should create items from the map_over and map_mode using a helper function
+    # @the just call engine.map(...) or something like that
     def map(
         self,
         inputs: Dict[str, Any],
@@ -1123,58 +1145,3 @@ class Pipeline:
             style=style,
             return_type=return_type,
         )
-    
-    def show_daft_code(self, inputs: Dict[str, Any], output_name: Union[str, List[str], None] = None) -> str:
-        """Generate executable Daft code equivalent to this pipeline.
-        
-        This method creates a DaftEngine in code generation mode and runs the pipeline
-        through it to produce actual executable Daft code. The generated code can be
-        used to:
-        - Understand how HyperNodes translates to native Daft operations
-        - Identify potential performance bottlenecks
-        - Hand-optimize the generated code for better performance
-        - Learn Daft patterns for complex operations
-        
-        Args:
-            inputs: Dictionary of input values (same as you'd pass to .run())
-            output_name: Optional output name(s) to generate code for
-        
-        Returns:
-            String containing executable Daft code
-        
-        Example:
-            >>> pipeline = Pipeline(nodes=[...])
-            >>> code = pipeline.show_daft_code(inputs={"x": 5})
-            >>> print(code)
-            >>> # Save to file
-            >>> with open("generated_daft.py", "w") as f:
-            ...     f.write(code)
-        
-        Note:
-            This requires the DaftEngine to be available (install with: pip install daft)
-        """
-        try:
-            from .engines import DaftEngine
-        except ImportError:
-            raise ImportError(
-                "DaftEngine is not available. Install daft with: pip install daft"
-            )
-        
-        # Create a code generation engine
-        code_engine = DaftEngine(code_generation_mode=True)
-        
-        # Create a temporary pipeline with the code generation engine
-        temp_pipeline = self.with_engine(code_engine)
-        
-        # Run in code generation mode (doesn't actually execute, just generates code)
-        try:
-            temp_pipeline.run(inputs=inputs, output_name=output_name)
-        except Exception as e:
-            # Even if there's an error, we can still get partial code
-            if not code_engine.generated_code:
-                raise RuntimeError(
-                    f"Failed to generate Daft code: {e}"
-                ) from e
-        
-        # Return the generated code
-        return code_engine.get_generated_code()
