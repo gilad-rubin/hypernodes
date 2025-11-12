@@ -12,6 +12,7 @@ Key responsibilities:
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 import networkx as nx
@@ -20,6 +21,24 @@ from .exceptions import CycleError, DependencyError
 
 if TYPE_CHECKING:
     from .node import Node
+
+
+@dataclass
+class GraphResult:
+    """Result of building a pipeline graph.
+    
+    Contains all computed information about the pipeline structure.
+    
+    Attributes:
+        graph: NetworkX DiGraph representing dependencies
+        output_to_node: Mapping from output names to nodes that produce them
+        execution_order: Topologically sorted list of nodes
+        root_args: External input parameters required by pipeline
+    """
+    graph: nx.DiGraph
+    output_to_node: Dict[str, "Node"]
+    execution_order: List["Node"]
+    root_args: List[str]
 
 
 class GraphBuilder(ABC):
@@ -32,51 +51,21 @@ class GraphBuilder(ABC):
     @abstractmethod
     def build_graph(
         self,
-        nodes: List["Node"],
-        output_to_node: Dict[str, "Node"]
-    ) -> Any:
+        nodes: List["Node"]
+    ) -> GraphResult:
         """Build dependency graph from nodes.
         
-        Args:
-            nodes: List of Node instances (including PipelineNodes)
-            output_to_node: Mapping from output names to nodes
-            
-        Returns:
-            Graph object (implementation-specific)
-        """
-        pass
-
-    @abstractmethod
-    def compute_execution_order(self, graph: Any) -> List["Node"]:
-        """Compute topologically sorted execution order.
+        Performs all graph construction, validation, and analysis in one operation.
         
         Args:
-            graph: Graph object from build_graph()
+            nodes: List of Node instances (already wrapped, PipelineNodes for nested pipelines)
             
         Returns:
-            List of nodes in execution order
+            GraphResult containing graph, output_to_node, execution_order, root_args
             
         Raises:
             CycleError: If cycle detected in graph
-        """
-        pass
-
-    @abstractmethod
-    def compute_root_args(
-        self,
-        nodes: List["Node"],
-        output_to_node: Dict[str, "Node"]
-    ) -> List[str]:
-        """Compute external input parameters (root arguments).
-        
-        Root arguments are parameters not produced by any node.
-        
-        Args:
-            nodes: List of Node instances
-            output_to_node: Mapping from output names to nodes
-            
-        Returns:
-            List of root argument names
+            DependencyError: If dependency cannot be satisfied
         """
         pass
 
@@ -104,30 +93,6 @@ class GraphBuilder(ABC):
         """
         pass
 
-    @abstractmethod
-    def validate_graph(
-        self,
-        graph: Any,
-        nodes: List["Node"],
-        root_args: List[str],
-        output_to_node: Dict[str, "Node"]
-    ) -> None:
-        """Validate graph integrity.
-        
-        Checks for missing dependencies and cycles.
-        
-        Args:
-            graph: Graph object from build_graph()
-            nodes: List of Node instances
-            root_args: Root arguments from compute_root_args()
-            output_to_node: Mapping from output names to nodes
-            
-        Raises:
-            DependencyError: If dependency cannot be satisfied
-            CycleError: If cycle detected
-        """
-        pass
-
 
 class NetworkXGraphBuilder(GraphBuilder):
     """NetworkX-based graph builder implementation.
@@ -137,31 +102,36 @@ class NetworkXGraphBuilder(GraphBuilder):
 
     def build_graph(
         self,
-        nodes: List["Node"],
-        output_to_node: Dict[str, "Node"]
-    ) -> nx.DiGraph:
-        """Build NetworkX dependency graph.
+        nodes: List["Node"]
+    ) -> GraphResult:
+        """Build NetworkX dependency graph with full analysis.
         
-        Constructs a directed graph where:
-        - Nodes are functions or input parameters
-        - Edges represent dependencies (parameter → function)
+        Performs all graph operations in one pass:
+        1. Builds output_to_node mapping
+        2. Constructs dependency graph
+        3. Validates (cycles, missing dependencies)
+        4. Computes execution order
+        5. Computes root arguments
         
         Args:
-            nodes: List of Node instances (including PipelineNodes)
-            output_to_node: Mapping from output names to nodes
+            nodes: List of Node instances (already wrapped)
             
         Returns:
-            NetworkX DiGraph representing pipeline dependencies
+            GraphResult with all computed information
+            
+        Raises:
+            CycleError: If cycle detected
+            DependencyError: If dependency missing
         """
+        # 1. Build output_to_node mapping
+        output_to_node = self._build_output_mapping(nodes)
+        
+        # 2. Build graph
         g = nx.DiGraph()
-
         for node in nodes:
             g.add_node(node)
-
-            # Get parameters for this node
             params = self._get_node_parameters(node)
-
-            # Add edges based on dependencies
+            
             for param in params:
                 if param in output_to_node:
                     # Dependency: another node's output
@@ -169,19 +139,48 @@ class NetworkXGraphBuilder(GraphBuilder):
                     g.add_edge(producer, node)
                 else:
                     # Root argument: external input
-                    # Add string node for input parameter
                     g.add_edge(param, node)
+        
+        # 3. Compute execution order (validates cycles)
+        execution_order = self._compute_execution_order(g)
+        
+        # 4. Compute root args
+        root_args = self._compute_root_args(nodes, output_to_node)
+        
+        # 5. Validate dependencies
+        self._validate_dependencies(g, nodes, root_args, output_to_node)
+        
+        return GraphResult(
+            graph=g,
+            output_to_node=output_to_node,
+            execution_order=execution_order,
+            root_args=root_args
+        )
+    
+    def _build_output_mapping(self, nodes: List["Node"]) -> Dict[str, "Node"]:
+        """Build output_name -> Node mapping.
+        
+        Args:
+            nodes: List of Node instances (already wrapped)
+            
+        Returns:
+            Dictionary mapping output names to nodes
+        """
+        output_to_node = {}
+        for node in nodes:
+            outputs = self._get_node_outputs(node)
+            for output in outputs:
+                output_to_node[output] = node
+        return output_to_node
 
-        return g
-
-    def compute_execution_order(self, graph: nx.DiGraph) -> List["Node"]:
+    def _compute_execution_order(self, graph: nx.DiGraph) -> List["Node"]:
         """Compute topological execution order using NetworkX.
         
         Uses topological sort to determine the order in which nodes
         should be executed to satisfy all dependencies.
         
         Args:
-            graph: NetworkX DiGraph from build_graph()
+            graph: NetworkX DiGraph
             
         Returns:
             List of nodes in execution order
@@ -199,7 +198,7 @@ class NetworkXGraphBuilder(GraphBuilder):
         except nx.NetworkXError as e:
             raise CycleError(f"Cycle detected in pipeline: {e}") from e
 
-    def compute_root_args(
+    def _compute_root_args(
         self,
         nodes: List["Node"],
         output_to_node: Dict[str, "Node"]
@@ -289,7 +288,7 @@ class NetworkXGraphBuilder(GraphBuilder):
         # Return nodes in execution order
         return [n for n in execution_order if n in required_nodes]
 
-    def validate_graph(
+    def _validate_dependencies(
         self,
         graph: nx.DiGraph,
         nodes: List["Node"],
@@ -303,14 +302,14 @@ class NetworkXGraphBuilder(GraphBuilder):
         2. No cycles exist in the dependency graph
         
         Args:
-            graph: NetworkX DiGraph from build_graph()
+            graph: NetworkX DiGraph
             nodes: List of Node instances
-            root_args: Root arguments from compute_root_args()
+            root_args: Root arguments
             output_to_node: Mapping from output names to nodes
             
         Raises:
             DependencyError: If a dependency cannot be satisfied
-            CycleError: If a cycle is detected (via compute_execution_order)
+            CycleError: If a cycle is detected (via _compute_execution_order)
         """
         root_args_set = set(root_args)
 
@@ -326,7 +325,7 @@ class NetworkXGraphBuilder(GraphBuilder):
 
         # Check for cycles (will raise CycleError if cycle exists)
         try:
-            _ = self.compute_execution_order(graph)
+            _ = self._compute_execution_order(graph)
         except CycleError:
             raise  # Re-raise with original message
 

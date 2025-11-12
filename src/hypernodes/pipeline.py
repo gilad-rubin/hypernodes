@@ -1,18 +1,14 @@
 """Pipeline class for managing and executing DAGs of nodes."""
 
-import functools
 import itertools
 import time
 from typing import Any, Dict, List, Optional, Union
 
-import networkx as nx
-
 from .cache import Cache
 from .callbacks import PipelineCallback
 from .engine import Engine
-from .graph_builder import GraphBuilder, NetworkXGraphBuilder
+from .graph_builder import NetworkXGraphBuilder
 from .node import Node
-from .pipeline_config import PipelineConfiguration
 
 
 class PipelineNode(Node):
@@ -68,22 +64,20 @@ class PipelineNode(Node):
         if isinstance(self.map_over, str):
             self.map_over = [self.map_over]
         
-        # Store configuration (for potential overrides)
-        self.config = PipelineConfiguration(
-            engine=engine,
-            cache=cache,
-            callbacks=callbacks,
-            name=name
-        )
+        # Store configuration directly
+        self._name = name
+        self._engine = engine
+        self._cache = cache
+        self._callbacks = callbacks
     
     @property
     def name(self) -> Optional[str]:
         """Node name for display."""
-        return self.config.name
+        return self._name
     
     @name.setter
     def name(self, name: Optional[str]) -> None:
-        self.config.name = name
+        self._name = name
     
     # Fluent API methods
     def with_engine(self, engine: Engine) -> "PipelineNode":
@@ -95,7 +89,7 @@ class PipelineNode(Node):
         Returns:
             Self for method chaining
         """
-        self.config.engine = engine
+        self._engine = engine
         return self
     
     def with_cache(self, cache: Cache) -> "PipelineNode":
@@ -107,7 +101,7 @@ class PipelineNode(Node):
         Returns:
             Self for method chaining
         """
-        self.config.cache = cache
+        self._cache = cache
         return self
     
     def with_callbacks(self, callbacks: List[PipelineCallback]) -> "PipelineNode":
@@ -119,7 +113,7 @@ class PipelineNode(Node):
         Returns:
             Self for method chaining
         """
-        self.config.callbacks = callbacks
+        self._callbacks = callbacks
         return self
     
     def with_name(self, name: str) -> "PipelineNode":
@@ -131,7 +125,7 @@ class PipelineNode(Node):
         Returns:
             Self for method chaining
         """
-        self.config.name = name
+        self._name = name
         return self
 
     @property
@@ -343,10 +337,8 @@ class Pipeline:
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
-        graph_builder: Optional[GraphBuilder] = None, #@remove this. I don't want the user to input that. it's internal
         # Deprecated parameters (kept for backward compatibility)
         parent: Optional["Pipeline"] = None,
-        backend: Optional[Engine] = None,
     ):
         """Initialize a Pipeline from a list of nodes.
 
@@ -356,46 +348,37 @@ class Pipeline:
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
             name: Human-readable name for the pipeline (used in visualization)
-            graph_builder: GraphBuilder for graph operations (default: NetworkXGraphBuilder())
             parent: DEPRECATED - Parent pipeline for configuration inheritance (use ExecutionContext instead)
-            backend: DEPRECATED - Use engine parameter instead
 
         Raises:
             CycleError: If a cycle is detected in the dependency graph
             DependencyError: If a dependency cannot be satisfied
         """
-        # Handle deprecated parameters #@remove this whole block, I don't care about backends now
-        if engine is not None and backend is not None:
-            raise ValueError("Specify either engine or backend, not both")
-        
-        selected_engine = engine if engine is not None else backend #@perhaps here we can put the default engine HypernodesEngine() or in the init default
-        
-        # 1. Setup configuration (no more parent tracking in init)
-        self.config = PipelineConfiguration( #@Let's drop this class, it's too thin
-            engine=selected_engine,
-            cache=cache,
-            callbacks=callbacks,
-            name=name
-        )
+        # 1. Store configuration directly (no more PipelineConfiguration)
+        self.engine = engine
+        self.cache = cache
+        self.callbacks = callbacks if callbacks is not None else []
+        self.name = name
         
         # Store parent for backward compatibility (will be phased out)
         self._parent = parent
         
-        # 2. Auto-wrap Pipeline instances in PipelineNode for consistency #@this should happen in the graph builder
+        # 2. Auto-wrap Pipeline instances in PipelineNode for consistency
         self.nodes = self._wrap_nodes(nodes)
         
-        # 3. Build output_name -> Node mapping
-        self.output_to_node = self._build_output_mapping(self.nodes)
+        # 3. Build graph eagerly using graph builder (validates and computes all)
+        graph_builder = NetworkXGraphBuilder()
+        result = graph_builder.build_graph(self.nodes)
         
-        # 4. Setup graph builder #@just convert it to self.graph and that's it. (which also validates)
-        self.graph_builder = graph_builder if graph_builder is not None else NetworkXGraphBuilder()
+        # Store all graph-related properties from GraphResult
+        self.graph = result.graph
+        self.output_to_node = result.output_to_node
+        self.execution_order = result.execution_order
+        self.root_args = result.root_args
         
-        # 5. Generate deterministic pipeline ID
+        # 4. Generate deterministic pipeline ID
         import builtins
         self.id = f"pipeline_{builtins.id(self)}"
-        
-        # 6. Validate graph at construction
-        self._validate_graph()
     
     def _wrap_nodes(self, nodes: List[Union[Node, "Pipeline"]]) -> List[Node]:
         """Auto-wrap Pipeline instances in PipelineNode for consistency.
@@ -438,57 +421,7 @@ class Pipeline:
                 output_to_node[node.output_name] = node
         return output_to_node
     
-    def _validate_graph(self) -> None: #@should be removed. validation should happen in graph builder
-        """Validate graph using graph builder.
-        
-        Raises:
-            CycleError: If cycle detected
-            DependencyError: If dependency missing
-        """
-        # Build graph first to trigger validation
-        graph = self.graph
-        root_args = self.root_args
-        self.graph_builder.validate_graph(graph, self.nodes, root_args, self.output_to_node)
 
-    @functools.cached_property
-    def graph(self) -> nx.DiGraph: #@should be called / constructed when pipeline is initialized
-        """Build dependency graph using graph builder.
-
-        Constructs a directed graph where:
-        - Nodes are functions or input parameters
-        - Edges represent dependencies (parameter → function)
-
-        Returns:
-            NetworkX DiGraph representing the pipeline dependencies
-        """
-        return self.graph_builder.build_graph(self.nodes, self.output_to_node)
-
-    @functools.cached_property
-    def execution_order(self) -> List[Node]:
-        """Get topological execution order using graph builder.
-
-        Uses topological sort to determine the order in which nodes
-        should be executed to satisfy all dependencies.
-
-        Returns:
-            List of nodes in execution order
-
-        Raises:
-            CycleError: If a cycle is detected in the graph
-        """
-        return self.graph_builder.compute_execution_order(self.graph)
-
-    @property
-    def root_args(self) -> List[str]:
-        """Get external input parameters required by this pipeline.
-
-        Root arguments are parameters that are not produced by any node
-        in the pipeline and must be provided as inputs.
-
-        Returns:
-            List of parameter names that are external inputs
-        """
-        return self.graph_builder.compute_root_args(self.nodes, self.output_to_node)
 
     @property
     def parameters(self) -> tuple:
@@ -497,14 +430,14 @@ class Pipeline:
         Returns:
             Tuple of root argument names
         """
-        return tuple(self.root_args)
+        return tuple(self.root_args) #@maybe we can consolidate this?
 
     @property
     def output_name(
         self,
     ) -> (
         tuple
-    ):  # @should be changed to output_names. should return a list of all output names
+    ):  # @should be changed to output_names. should return a list of all available output names from the pipeline
         """Get all output names from this pipeline.
 
         For nested pipelines, this allows parent pipelines to know
@@ -542,7 +475,8 @@ class Pipeline:
         Raises:
             ValueError: If any output_name is not found in the pipeline
         """
-        return self.graph_builder.compute_required_nodes(
+        graph_builder = NetworkXGraphBuilder()
+        return graph_builder.compute_required_nodes(
             self.graph, self.execution_order, self.output_to_node, output_names
         )
 
@@ -606,51 +540,17 @@ class Pipeline:
     # Fluent Builder Methods
     # ======================
 
-    # Properties for backward compatibility with direct attribute access
-    @property
-    def engine(self) -> Optional[Engine]:
-        """Current execution engine for the pipeline."""
-        return self.config.engine
-
-    @engine.setter
-    def engine(self, engine: Optional[Engine]) -> None:
-        self.config.engine = engine
-
+    # Note: engine, cache, callbacks, and name are stored as direct attributes
+    # They are set in __init__ and can be accessed/modified directly
+    
     @property
     def backend(self) -> Optional[Engine]:
         """Deprecated alias for engine (kept for backward compatibility)."""
-        return self.config.engine
+        return self.engine
 
     @backend.setter
     def backend(self, engine: Optional[Engine]) -> None:
-        self.config.engine = engine
-    
-    @property
-    def cache(self) -> Optional[Cache]:
-        """Current cache backend for the pipeline."""
-        return self.config.cache
-    
-    @cache.setter
-    def cache(self, cache: Optional[Cache]) -> None:
-        self.config.cache = cache
-    
-    @property
-    def callbacks(self) -> Optional[List[PipelineCallback]]:
-        """Current callbacks for the pipeline."""
-        return self.config.callbacks
-    
-    @callbacks.setter
-    def callbacks(self, callbacks: Optional[List[PipelineCallback]]) -> None:
-        self.config.callbacks = callbacks
-    
-    @property
-    def name(self) -> Optional[str]:
-        """Current name for the pipeline."""
-        return self.config.name
-    
-    @name.setter
-    def name(self, name: Optional[str]) -> None:
-        self.config.name = name
+        self.engine = engine
 
     # Fluent Builder Methods
     def with_engine(self, engine: "Engine") -> "Pipeline":
@@ -669,7 +569,7 @@ class Pipeline:
             ...     HypernodesEngine(node_executor="threaded")
             ... )
         """
-        self.config.engine = engine
+        self.engine = engine
         return self
 
     def with_backend(self, backend: "Engine") -> "Pipeline":
@@ -693,7 +593,7 @@ class Pipeline:
             ...     DiskCache(path="./cache")
             ... )
         """
-        self.config.cache = cache
+        self.cache = cache
         return self
 
     def with_callbacks(self, callbacks: List["PipelineCallback"]) -> "Pipeline":
@@ -713,7 +613,7 @@ class Pipeline:
             ...     ProgressCallback()
             ... ])
         """
-        self.config.callbacks = callbacks
+        self.callbacks = callbacks
         return self
 
     def with_name(self, name: str) -> "Pipeline":
@@ -730,20 +630,21 @@ class Pipeline:
         Example:
             >>> pipeline = Pipeline(nodes=[...]).with_name("preprocessing")
         """
-        self.config.name = name
+        self.name = name
         return self
 
     # Effective properties with inheritance support (for backward compatibility)
     @property
-    def effective_engine(self):
+    def effective_engine(self): #@This should be configured from the parent and not like this, since a pipeline can have multiple parents.
         """Get effective engine (inherited from parent if not set)."""
-        # Support legacy parent-based inheritance
-        if self._parent is not None:
-            parent_config = getattr(self._parent, "config", None)
-            if parent_config is not None:
-                merged = self.config.merge_with(parent_config)
-                return merged.effective_engine
-        return self.config.effective_engine
+        if self.engine is not None:
+            return self.engine
+        # Fallback to parent if available
+        if self._parent is not None and hasattr(self._parent, "effective_engine"):
+            return self._parent.effective_engine
+        # Default to HypernodesEngine
+        from .engine import HypernodesEngine
+        return HypernodesEngine()
 
     @property
     def effective_backend(self):
@@ -757,13 +658,12 @@ class Pipeline:
         Returns:
             Cache to use for caching
         """
-        # Support legacy parent-based inheritance
-        if self._parent is not None:
-            parent_config = getattr(self._parent, "config", None)
-            if parent_config is not None:
-                merged = self.config.merge_with(parent_config)
-                return merged.effective_cache
-        return self.config.effective_cache
+        if self.cache is not None:
+            return self.cache
+        # Fallback to parent if available
+        if self._parent is not None and hasattr(self._parent, "effective_cache"):
+            return self._parent.effective_cache
+        return None
 
     @property
     def effective_callbacks(self):
@@ -772,16 +672,15 @@ class Pipeline:
         Returns:
             List of callbacks to use
         """
-        # Support legacy parent-based inheritance
-        if self._parent is not None:
-            parent_config = getattr(self._parent, "config", None)
-            if parent_config is not None:
-                merged = self.config.merge_with(parent_config)
-                return merged.effective_callbacks
-        return self.config.effective_callbacks
+        if self.callbacks:
+            return self.callbacks
+        # Fallback to parent if available
+        if self._parent is not None and hasattr(self._parent, "effective_callbacks"):
+            return self._parent.effective_callbacks
+        return []
 
     # Helper methods for map operations
-    def _prepare_map_inputs(
+    def _prepare_map_inputs( 
         self,
         inputs: Dict[str, Any],
         map_over: List[str],
