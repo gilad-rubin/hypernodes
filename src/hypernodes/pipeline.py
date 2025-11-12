@@ -397,31 +397,6 @@ class Pipeline:
             else:
                 wrapped_nodes.append(node)
         return wrapped_nodes
-    
-    def _build_output_mapping(self, nodes: List[Node]) -> Dict[str, Node]: #@why do we need this? I don't like that it's here
-        """Build output_name -> Node mapping.
-        
-        Args:
-            nodes: List of Node instances (already wrapped)
-            
-        Returns:
-            Dictionary mapping output names to nodes
-        """
-        output_to_node = {}
-        for node in nodes:
-            # Handle nested pipelines and PipelineNodes
-            if isinstance(node, (Pipeline, PipelineNode)):
-                # Get outputs from the node
-                outputs = node.output_name if hasattr(node, "output_name") else []
-                if not isinstance(outputs, tuple):
-                    outputs = (outputs,)
-                for output in outputs:
-                    output_to_node[output] = node
-            else:
-                output_to_node[node.output_name] = node
-        return output_to_node
-    
-
 
     @property
     def parameters(self) -> tuple:
@@ -430,14 +405,10 @@ class Pipeline:
         Returns:
             Tuple of root argument names
         """
-        return tuple(self.root_args) #@maybe we can consolidate this?
+        return tuple(self.root_args)
 
     @property
-    def output_name(
-        self,
-    ) -> (
-        tuple
-    ):  # @should be changed to output_names. should return a list of all available output names from the pipeline
+    def output_names(self) -> tuple:
         """Get all output names from this pipeline.
 
         For nested pipelines, this allows parent pipelines to know
@@ -457,6 +428,19 @@ class Pipeline:
             else:
                 outputs.append(node.output_name)
         return tuple(outputs)
+
+    @property
+    def output_name(self) -> tuple:
+        """Deprecated alias for output_names. Use output_names instead.
+        
+        .. deprecated:: 
+            Use :attr:`output_names` instead. This property is maintained for
+            backward compatibility with the Node interface.
+
+        Returns:
+            Tuple of all output names produced by this pipeline
+        """
+        return self.output_names
 
     def _compute_required_nodes(
         self, output_names: Union[str, List[str], None]
@@ -635,12 +619,25 @@ class Pipeline:
 
     # Effective properties with inheritance support (for backward compatibility)
     @property
-    def effective_engine(self): #@This should be configured from the parent and not like this, since a pipeline can have multiple parents.
-        """Get effective engine (inherited from parent if not set)."""
+    def effective_engine(self):
+        """Get effective engine (inherited from parent if not set).
+        
+        .. deprecated::
+            Parent-based configuration inheritance is deprecated. In future versions,
+            configuration will be managed through ExecutionContext. For now, if you need
+            configuration inheritance, set the engine explicitly on each pipeline.
+        """
         if self.engine is not None:
             return self.engine
-        # Fallback to parent if available
+        # Fallback to parent if available (deprecated)
         if self._parent is not None and hasattr(self._parent, "effective_engine"):
+            import warnings
+            warnings.warn(
+                "Parent-based configuration inheritance is deprecated and will be removed in a future version. "
+                "Set the engine explicitly on each pipeline instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             return self._parent.effective_engine
         # Default to HypernodesEngine
         from .engine import HypernodesEngine
@@ -655,13 +652,24 @@ class Pipeline:
     def effective_cache(self):
         """Get effective cache (inherited from parent if not set).
 
+        .. deprecated::
+            Parent-based configuration inheritance is deprecated. Set the cache
+            explicitly on each pipeline instead.
+
         Returns:
             Cache to use for caching
         """
         if self.cache is not None:
             return self.cache
-        # Fallback to parent if available
+        # Fallback to parent if available (deprecated)
         if self._parent is not None and hasattr(self._parent, "effective_cache"):
+            import warnings
+            warnings.warn(
+                "Parent-based configuration inheritance is deprecated and will be removed in a future version. "
+                "Set the cache explicitly on each pipeline instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             return self._parent.effective_cache
         return None
 
@@ -669,13 +677,24 @@ class Pipeline:
     def effective_callbacks(self):
         """Get effective callbacks (inherited from parent if not set).
 
+        .. deprecated::
+            Parent-based configuration inheritance is deprecated. Set the callbacks
+            explicitly on each pipeline instead.
+
         Returns:
             List of callbacks to use
         """
         if self.callbacks:
             return self.callbacks
-        # Fallback to parent if available
+        # Fallback to parent if available (deprecated)
         if self._parent is not None and hasattr(self._parent, "effective_callbacks"):
+            import warnings
+            warnings.warn(
+                "Parent-based configuration inheritance is deprecated and will be removed in a future version. "
+                "Set the callbacks explicitly on each pipeline instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             return self._parent.effective_callbacks
         return []
 
