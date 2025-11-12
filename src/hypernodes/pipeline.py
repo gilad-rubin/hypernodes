@@ -3,15 +3,16 @@
 import functools
 import itertools
 import time
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Union
 
 import networkx as nx
 
 from .cache import Cache
 from .callbacks import PipelineCallback
-from .engine import Engine, HypernodesEngine
-from .exceptions import CycleError, DependencyError
+from .engine import Engine
+from .graph_builder import GraphBuilder, NetworkXGraphBuilder
 from .node import Node
+from .pipeline_config import PipelineConfiguration
 
 
 class PipelineNode(Node):
@@ -35,9 +36,12 @@ class PipelineNode(Node):
         input_mapping: Optional[Dict[str, str]] = None,
         output_mapping: Optional[Dict[str, str]] = None,
         map_over: Optional[Union[str, List[str]]] = None,
-        # @should add map_mode
-        # @should add engine, cache, callbacks + "with_X, with_Y"
+        map_mode: str = "zip",
         name: Optional[str] = None,
+        # Configuration overrides
+        engine: Optional[Engine] = None,
+        cache: Optional[Cache] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
     ):
         """Initialize a PipelineNode wrapper.
 
@@ -46,7 +50,11 @@ class PipelineNode(Node):
             input_mapping: Maps {outer_name: inner_name} for inputs
             output_mapping: Maps {inner_name: outer_name} for outputs
             map_over: Parameter name(s) to map over (from outer perspective)
+            map_mode: Mode for map operation ("zip" or "product")
             name: Optional name for this node (displayed in visualizations)
+            engine: Override engine for this node's execution
+            cache: Override cache for this node's execution
+            callbacks: Override callbacks for this node's execution
         """
         # Don't call super().__init__() since we have a different initialization pattern
         # We'll override the necessary properties instead
@@ -54,11 +62,77 @@ class PipelineNode(Node):
         self.input_mapping = input_mapping or {}
         self.output_mapping = output_mapping or {}
         self.map_over = map_over
-        self.name = name
-
+        self.map_mode = map_mode
+        
         # Make map_over a list if it's a string
         if isinstance(self.map_over, str):
             self.map_over = [self.map_over]
+        
+        # Store configuration (for potential overrides)
+        self.config = PipelineConfiguration(
+            engine=engine,
+            cache=cache,
+            callbacks=callbacks,
+            name=name
+        )
+    
+    @property
+    def name(self) -> Optional[str]:
+        """Node name for display."""
+        return self.config.name
+    
+    @name.setter
+    def name(self, name: Optional[str]) -> None:
+        self.config.name = name
+    
+    # Fluent API methods
+    def with_engine(self, engine: Engine) -> "PipelineNode":
+        """Configure node with specific engine.
+        
+        Args:
+            engine: Engine instance
+            
+        Returns:
+            Self for method chaining
+        """
+        self.config.engine = engine
+        return self
+    
+    def with_cache(self, cache: Cache) -> "PipelineNode":
+        """Configure node with specific cache.
+        
+        Args:
+            cache: Cache instance
+            
+        Returns:
+            Self for method chaining
+        """
+        self.config.cache = cache
+        return self
+    
+    def with_callbacks(self, callbacks: List[PipelineCallback]) -> "PipelineNode":
+        """Configure node with specific callbacks.
+        
+        Args:
+            callbacks: List of callback instances
+            
+        Returns:
+            Self for method chaining
+        """
+        self.config.callbacks = callbacks
+        return self
+    
+    def with_name(self, name: str) -> "PipelineNode":
+        """Configure node with specific name.
+        
+        Args:
+            name: Display name
+            
+        Returns:
+            Self for method chaining
+        """
+        self.config.name = name
+        return self
 
     @property
     def parameters(self) -> tuple:
@@ -170,7 +244,7 @@ class PipelineNode(Node):
                 inner_results = self.pipeline.map(
                     inputs=inner_inputs,
                     map_over=inner_map_over,
-                    map_mode="zip",
+                    map_mode=self.map_mode,
                     _ctx=exec_ctx,
                 )
             else:
@@ -208,7 +282,7 @@ class PipelineNode(Node):
                 inner_results = self.pipeline.map(
                     inputs=inner_inputs,
                     map_over=inner_map_over,
-                    map_mode="zip",
+                    map_mode=self.map_mode,
                     _ctx=exec_ctx,
                 )
         else:
@@ -242,20 +316,6 @@ class PipelineNode(Node):
         return self is other
 
 
-# @@@this pipeline init should
-# 0. define a name (self.name = ...)
-# 1. create a graph from the nodes (call a single function "create_graph" using a separate class that handles that (NetworkXGraphBuilder that inherits from graphbuilder))
-# 2. setup the engine, cache, callbacks
-# 3. we need to remove "backend" and "parent". since pipelines can be nested in multiple different parent pipelines - i think we need to track them from their parents and not the opposite.
-
-# the graph builder should output errors if there are cycles, ambiguities etc...
-
-# a .graph should be availble as a property and it should have properties like the execution order, etc...
-
-# root_args should be available like it is now, but the code should not handle the pipelinenode inside, but somehow differentely (?) perhaps we should \
-# "expand" the pipelinenode into "regular nodes" and apply the same function or something? we should anyway do that in order to identify loops, issues/clashes with namings etc...
-
-
 class Pipeline:
     """Pipeline that manages DAG execution of nodes.
 
@@ -268,7 +328,8 @@ class Pipeline:
 
     Attributes:
         nodes: List of Node instances or nested Pipelines
-        engine: Engine for executing the pipeline (default: HypernodesEngine)
+        config: Pipeline configuration (engine, cache, callbacks, name)
+        graph_builder: GraphBuilder for graph operations
         output_to_node: Mapping from output names to nodes
         graph: NetworkX DiGraph representing dependencies (cached)
         execution_order: Topologically sorted list of nodes (cached)
@@ -282,6 +343,8 @@ class Pipeline:
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
+        graph_builder: Optional[GraphBuilder] = None, #@remove this. I don't want the user to input that. it's internal
+        # Deprecated parameters (kept for backward compatibility)
         parent: Optional["Pipeline"] = None,
         backend: Optional[Engine] = None,
     ):
@@ -293,14 +356,56 @@ class Pipeline:
             cache: Cache backend for result caching (default: None, no caching)
             callbacks: List of callbacks for lifecycle hooks (default: None)
             name: Human-readable name for the pipeline (used in visualization)
-            parent: Parent pipeline for configuration inheritance (internal)
-            backend: Deprecated alias for engine (will be removed in a future release)
+            graph_builder: GraphBuilder for graph operations (default: NetworkXGraphBuilder())
+            parent: DEPRECATED - Parent pipeline for configuration inheritance (use ExecutionContext instead)
+            backend: DEPRECATED - Use engine parameter instead
 
         Raises:
             CycleError: If a cycle is detected in the dependency graph
             DependencyError: If a dependency cannot be satisfied
         """
-        # Auto-wrap Pipeline instances in PipelineNode for consistency
+        # Handle deprecated parameters #@remove this whole block, I don't care about backends now
+        if engine is not None and backend is not None:
+            raise ValueError("Specify either engine or backend, not both")
+        
+        selected_engine = engine if engine is not None else backend #@perhaps here we can put the default engine HypernodesEngine() or in the init default
+        
+        # 1. Setup configuration (no more parent tracking in init)
+        self.config = PipelineConfiguration( #@Let's drop this class, it's too thin
+            engine=selected_engine,
+            cache=cache,
+            callbacks=callbacks,
+            name=name
+        )
+        
+        # Store parent for backward compatibility (will be phased out)
+        self._parent = parent
+        
+        # 2. Auto-wrap Pipeline instances in PipelineNode for consistency #@this should happen in the graph builder
+        self.nodes = self._wrap_nodes(nodes)
+        
+        # 3. Build output_name -> Node mapping
+        self.output_to_node = self._build_output_mapping(self.nodes)
+        
+        # 4. Setup graph builder #@just convert it to self.graph and that's it. (which also validates)
+        self.graph_builder = graph_builder if graph_builder is not None else NetworkXGraphBuilder()
+        
+        # 5. Generate deterministic pipeline ID
+        import builtins
+        self.id = f"pipeline_{builtins.id(self)}"
+        
+        # 6. Validate graph at construction
+        self._validate_graph()
+    
+    def _wrap_nodes(self, nodes: List[Union[Node, "Pipeline"]]) -> List[Node]:
+        """Auto-wrap Pipeline instances in PipelineNode for consistency.
+        
+        Args:
+            nodes: List of Node or Pipeline instances
+            
+        Returns:
+            List of Node instances (Pipelines wrapped in PipelineNode)
+        """
         wrapped_nodes = []
         for node in nodes:
             if isinstance(node, Pipeline):
@@ -308,27 +413,19 @@ class Pipeline:
                 wrapped_nodes.append(PipelineNode(pipeline=node))
             else:
                 wrapped_nodes.append(node)
-
-        self.nodes = wrapped_nodes
-        if engine is not None and backend is not None:
-            raise ValueError("Specify either engine or backend, not both")
-
-        selected_engine = engine if engine is not None else backend
-        self._engine = selected_engine
-        self.cache = cache
-        self.callbacks = callbacks
-        self._parent = parent
-        self.name = name
-
-        # Generate deterministic pipeline ID based on object identity
-        # Same pipeline instance always gets same ID for callback tracking
-        import builtins
-
-        self.id = f"pipeline_{builtins.id(self)}"
-
-        # Build output_name -> Node mapping (inspired by pipefunc)
-        self.output_to_node = {}
-        for node in self.nodes:  # Use wrapped nodes (PipelineNode for nested pipelines)
+        return wrapped_nodes
+    
+    def _build_output_mapping(self, nodes: List[Node]) -> Dict[str, Node]: #@why do we need this? I don't like that it's here
+        """Build output_name -> Node mapping.
+        
+        Args:
+            nodes: List of Node instances (already wrapped)
+            
+        Returns:
+            Dictionary mapping output names to nodes
+        """
+        output_to_node = {}
+        for node in nodes:
             # Handle nested pipelines and PipelineNodes
             if isinstance(node, (Pipeline, PipelineNode)):
                 # Get outputs from the node
@@ -336,16 +433,26 @@ class Pipeline:
                 if not isinstance(outputs, tuple):
                     outputs = (outputs,)
                 for output in outputs:
-                    self.output_to_node[output] = node
+                    output_to_node[output] = node
             else:
-                self.output_to_node[node.output_name] = node
-
-        # Validate at construction
-        self._validate()
+                output_to_node[node.output_name] = node
+        return output_to_node
+    
+    def _validate_graph(self) -> None: #@should be removed. validation should happen in graph builder
+        """Validate graph using graph builder.
+        
+        Raises:
+            CycleError: If cycle detected
+            DependencyError: If dependency missing
+        """
+        # Build graph first to trigger validation
+        graph = self.graph
+        root_args = self.root_args
+        self.graph_builder.validate_graph(graph, self.nodes, root_args, self.output_to_node)
 
     @functools.cached_property
-    def graph(self) -> nx.DiGraph:
-        """Build dependency graph using NetworkX.
+    def graph(self) -> nx.DiGraph: #@should be called / constructed when pipeline is initialized
+        """Build dependency graph using graph builder.
 
         Constructs a directed graph where:
         - Nodes are functions or input parameters
@@ -354,36 +461,11 @@ class Pipeline:
         Returns:
             NetworkX DiGraph representing the pipeline dependencies
         """
-        g = nx.DiGraph()
-
-        for node in self.nodes:
-            g.add_node(node)
-
-            # Get parameters for this node
-            if isinstance(node, (Pipeline, PipelineNode)):
-                # Nested pipeline or PipelineNode - use parameters property
-                params = (
-                    node.parameters if hasattr(node, "parameters") else node.root_args
-                )
-            else:
-                params = node.parameters
-
-            # Add edges based on dependencies
-            for param in params:
-                if param in self.output_to_node:
-                    # Dependency: another node's output
-                    producer = self.output_to_node[param]
-                    g.add_edge(producer, node)
-                else:
-                    # Root argument: external input
-                    # Add string node for input parameter
-                    g.add_edge(param, node)
-
-        return g
+        return self.graph_builder.build_graph(self.nodes, self.output_to_node)
 
     @functools.cached_property
     def execution_order(self) -> List[Node]:
-        """Get topological execution order using NetworkX.
+        """Get topological execution order using graph builder.
 
         Uses topological sort to determine the order in which nodes
         should be executed to satisfy all dependencies.
@@ -394,14 +476,7 @@ class Pipeline:
         Raises:
             CycleError: If a cycle is detected in the graph
         """
-        try:
-            # Use topological_sort from networkx
-            sorted_nodes = list(nx.topological_sort(self.graph))
-            # Filter to only Node/PipelineNode instances (not string inputs)
-            # Note: We don't include raw Pipeline because they're auto-wrapped in PipelineNode
-            return [n for n in sorted_nodes if isinstance(n, (Node, PipelineNode))]
-        except nx.NetworkXError as e:
-            raise CycleError(f"Cycle detected in pipeline: {e}") from e
+        return self.graph_builder.compute_execution_order(self.graph)
 
     @property
     def root_args(self) -> List[str]:
@@ -413,25 +488,7 @@ class Pipeline:
         Returns:
             List of parameter names that are external inputs
         """
-        all_params: Set[str] = set()
-        all_outputs: Set[str] = set()
-
-        for node in self.nodes:
-            if isinstance(node, (Pipeline, PipelineNode)):
-                # Nested pipeline or PipelineNode
-                all_params.update(
-                    node.parameters if hasattr(node, "parameters") else node.root_args
-                )
-                # Get outputs
-                outputs = node.output_name if hasattr(node, "output_name") else []
-                if not isinstance(outputs, tuple):
-                    outputs = (outputs,) if outputs else ()
-                all_outputs.update(outputs)
-            else:
-                all_params.update(node.parameters)
-                all_outputs.add(node.output_name)
-
-        return list(all_params - all_outputs)
+        return self.graph_builder.compute_root_args(self.nodes, self.output_to_node)
 
     @property
     def parameters(self) -> tuple:
@@ -468,42 +525,12 @@ class Pipeline:
                 outputs.append(node.output_name)
         return tuple(outputs)
 
-    def _validate(self) -> None:  # @this should happen within the graph builder
-        """Validate pipeline integrity.
-
-        Checks:
-        1. All dependencies can be satisfied
-        2. No cycles exist in the dependency graph
-
-        Raises:
-            DependencyError: If a dependency cannot be satisfied
-            CycleError: If a cycle is detected
-        """
-        root_args_set = set(self.root_args)
-
-        # Check for missing dependencies
-        for node in self.nodes:
-            if isinstance(node, (Pipeline, PipelineNode)):
-                params = (
-                    node.parameters if hasattr(node, "parameters") else node.root_args
-                )
-            else:
-                params = node.parameters
-
-            for param in params:
-                if param not in self.output_to_node and param not in root_args_set:
-                    raise DependencyError(
-                        f"Node {node} requires parameter '{param}' but it's not "
-                        f"provided by any node or as an input"
-                    )
-
-        # Check for cycles (accessing execution_order will raise if cycle exists)
-        _ = self.execution_order
-
-    def _compute_required_nodes(  # @this should happen within the graph builder
+    def _compute_required_nodes(
         self, output_names: Union[str, List[str], None]
     ) -> Optional[List[Node]]:
         """Compute minimal set of nodes needed to produce requested outputs.
+
+        Delegates to graph builder for computation.
 
         Args:
             output_names: Output name(s) to compute, or None for all outputs
@@ -515,41 +542,9 @@ class Pipeline:
         Raises:
             ValueError: If any output_name is not found in the pipeline
         """
-        if output_names is None:
-            return None
-
-        # Normalize to list
-        if isinstance(output_names, str):
-            output_names = [output_names]
-
-        # Validate all output names exist
-        for output_name in output_names:
-            if output_name not in self.output_to_node:
-                available = ", ".join(sorted(self.output_to_node.keys()))
-                raise ValueError(
-                    f"Output '{output_name}' not found in pipeline. "
-                    f"Available outputs: {available}"
-                )
-
-        # Find nodes that produce the requested outputs
-        target_nodes = set()
-        for output_name in output_names:
-            target_nodes.add(self.output_to_node[output_name])
-
-        # Use NetworkX to find all ancestors (dependencies) of target nodes
-        required_nodes = set()
-        for target_node in target_nodes:
-            # Add the target node itself
-            required_nodes.add(target_node)
-            # Add all its ancestors (dependencies)
-            ancestors = nx.ancestors(self.graph, target_node)
-            # Filter to only Node/PipelineNode instances (not string inputs)
-            for ancestor in ancestors:
-                if isinstance(ancestor, (Node, PipelineNode)):
-                    required_nodes.add(ancestor)
-
-        # Return nodes in execution order
-        return [n for n in self.execution_order if n in required_nodes]
+        return self.graph_builder.compute_required_nodes(
+            self.graph, self.execution_order, self.output_to_node, output_names
+        )
 
     def run(
         self,
@@ -611,24 +606,53 @@ class Pipeline:
     # Fluent Builder Methods
     # ======================
 
+    # Properties for backward compatibility with direct attribute access
     @property
     def engine(self) -> Optional[Engine]:
         """Current execution engine for the pipeline."""
-        return self._engine
+        return self.config.engine
 
     @engine.setter
     def engine(self, engine: Optional[Engine]) -> None:
-        self._engine = engine
+        self.config.engine = engine
 
     @property
     def backend(self) -> Optional[Engine]:
         """Deprecated alias for engine (kept for backward compatibility)."""
-        return self._engine
+        return self.config.engine
 
     @backend.setter
     def backend(self, engine: Optional[Engine]) -> None:
-        self._engine = engine
+        self.config.engine = engine
+    
+    @property
+    def cache(self) -> Optional[Cache]:
+        """Current cache backend for the pipeline."""
+        return self.config.cache
+    
+    @cache.setter
+    def cache(self, cache: Optional[Cache]) -> None:
+        self.config.cache = cache
+    
+    @property
+    def callbacks(self) -> Optional[List[PipelineCallback]]:
+        """Current callbacks for the pipeline."""
+        return self.config.callbacks
+    
+    @callbacks.setter
+    def callbacks(self, callbacks: Optional[List[PipelineCallback]]) -> None:
+        self.config.callbacks = callbacks
+    
+    @property
+    def name(self) -> Optional[str]:
+        """Current name for the pipeline."""
+        return self.config.name
+    
+    @name.setter
+    def name(self, name: Optional[str]) -> None:
+        self.config.name = name
 
+    # Fluent Builder Methods
     def with_engine(self, engine: "Engine") -> "Pipeline":
         """Configure pipeline with a specific engine.
 
@@ -645,7 +669,7 @@ class Pipeline:
             ...     HypernodesEngine(node_executor="threaded")
             ... )
         """
-        self.engine = engine
+        self.config.engine = engine
         return self
 
     def with_backend(self, backend: "Engine") -> "Pipeline":
@@ -669,7 +693,7 @@ class Pipeline:
             ...     DiskCache(path="./cache")
             ... )
         """
-        self.cache = cache
+        self.config.cache = cache
         return self
 
     def with_callbacks(self, callbacks: List["PipelineCallback"]) -> "Pipeline":
@@ -689,7 +713,7 @@ class Pipeline:
             ...     ProgressCallback()
             ... ])
         """
-        self.callbacks = callbacks
+        self.config.callbacks = callbacks
         return self
 
     def with_name(self, name: str) -> "Pipeline":
@@ -706,17 +730,20 @@ class Pipeline:
         Example:
             >>> pipeline = Pipeline(nodes=[...]).with_name("preprocessing")
         """
-        self.name = name
+        self.config.name = name
         return self
 
+    # Effective properties with inheritance support (for backward compatibility)
     @property
     def effective_engine(self):
         """Get effective engine (inherited from parent if not set)."""
-        if self.engine is not None:
-            return self.engine
+        # Support legacy parent-based inheritance
         if self._parent is not None:
-            return self._parent.effective_engine
-        return HypernodesEngine()  # Default engine
+            parent_config = getattr(self._parent, "config", None)
+            if parent_config is not None:
+                merged = self.config.merge_with(parent_config)
+                return merged.effective_engine
+        return self.config.effective_engine
 
     @property
     def effective_backend(self):
@@ -730,11 +757,13 @@ class Pipeline:
         Returns:
             Cache to use for caching
         """
-        if self.cache is not None:
-            return self.cache
+        # Support legacy parent-based inheritance
         if self._parent is not None:
-            return self._parent.effective_cache
-        return None  # Default: no caching
+            parent_config = getattr(self._parent, "config", None)
+            if parent_config is not None:
+                merged = self.config.merge_with(parent_config)
+                return merged.effective_cache
+        return self.config.effective_cache
 
     @property
     def effective_callbacks(self):
@@ -743,18 +772,121 @@ class Pipeline:
         Returns:
             List of callbacks to use
         """
-        if self.callbacks is not None:
-            return self.callbacks
+        # Support legacy parent-based inheritance
         if self._parent is not None:
-            return self._parent.effective_callbacks
-        return []  # Default: no callbacks
+            parent_config = getattr(self._parent, "config", None)
+            if parent_config is not None:
+                merged = self.config.merge_with(parent_config)
+                return merged.effective_callbacks
+        return self.config.effective_callbacks
+
+    # Helper methods for map operations
+    def _prepare_map_inputs(
+        self,
+        inputs: Dict[str, Any],
+        map_over: List[str],
+        map_mode: str
+    ) -> tuple[Dict[str, Any], Dict[str, Any], List[int]]:
+        """Prepare inputs for map operation.
+        
+        Separates varying and fixed parameters, validates inputs.
+        
+        Args:
+            inputs: All input parameters
+            map_over: List of parameters that vary
+            map_mode: "zip" or "product"
+            
+        Returns:
+            Tuple of (varying_params, fixed_params, zip_lengths)
+            
+        Raises:
+            ValueError: If validation fails
+        """
+        # Separate varying and fixed parameters
+        varying_params = {}
+        fixed_params = {}
+
+        for key, value in inputs.items():
+            if key in map_over:
+                if not isinstance(value, list):
+                    raise ValueError(
+                        f"Parameter '{key}' is in map_over but value is not a list"
+                    )
+                varying_params[key] = value
+            else:
+                fixed_params[key] = value
+
+        # Validate that all map_over parameters are present
+        for param in map_over:
+            if param not in varying_params:
+                raise ValueError(f"Parameter '{param}' in map_over not found in inputs")
+        
+        # Validate zip mode lengths
+        zip_lengths: List[int] = []
+        if map_mode == "zip":
+            zip_lengths = [len(lst) for lst in varying_params.values()]
+            if zip_lengths and not all(length == zip_lengths[0] for length in zip_lengths):
+                length_info = {k: len(v) for k, v in varying_params.items()}
+                raise ValueError(
+                    f"In zip mode, all lists must have the same length. "
+                    f"Got lengths: {length_info}"
+                )
+        
+        return varying_params, fixed_params, zip_lengths
+    
+    def _build_execution_plans(
+        self,
+        varying_params: Dict[str, Any],
+        fixed_params: Dict[str, Any],
+        map_mode: str,
+        zip_lengths: List[int]
+    ) -> List[Dict[str, Any]]:
+        """Build list of execution plans based on map_mode.
+        
+        Args:
+            varying_params: Parameters that vary across items
+            fixed_params: Parameters that stay constant
+            map_mode: "zip" or "product"
+            zip_lengths: List lengths (for empty detection in zip mode)
+            
+        Returns:
+            List of input dictionaries, one per execution
+        """
+        if map_mode == "zip":
+            # Create execution plans by zipping
+            if not varying_params or not zip_lengths or zip_lengths[0] == 0:
+                # Empty case
+                return []
+            else:
+                # Zip the varying parameters together
+                param_names = list(varying_params.keys())
+                param_lists = [varying_params[name] for name in param_names]
+                return [
+                    {**fixed_params, **{k: v for k, v in zip(param_names, values)}}
+                    for values in zip(*param_lists)
+                ]
+        else:  # product mode
+            # Create all combinations
+            if not varying_params:
+                return [fixed_params]
+            else:
+                param_names = list(varying_params.keys())
+                param_lists = [varying_params[name] for name in param_names]
+                return [
+                    {**fixed_params, **{k: v for k, v in zip(param_names, values)}}
+                    for values in itertools.product(*param_lists)
+                ]
 
     def as_node(
         self,
         input_mapping: Optional[Dict[str, str]] = None,
         output_mapping: Optional[Dict[str, str]] = None,
         map_over: Optional[Union[str, List[str]]] = None,
+        map_mode: str = "zip",
         name: Optional[str] = None,
+        engine: Optional[Engine] = None,
+        cache: Optional[Cache] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
     ) -> PipelineNode:
         """Wrap this pipeline as a node with custom input/output mapping.
 
@@ -771,7 +903,11 @@ class Pipeline:
             map_over: Parameter name(s) that should be mapped over.
                      From outer pipeline's perspective, this is a list parameter.
                      Internally, the pipeline maps over each item.
+            map_mode: Mode for map operation ("zip" or "product")
             name: Optional name for this node (displayed in visualizations)
+            engine: Override engine for this node's execution
+            cache: Override cache for this node's execution
+            callbacks: Override callbacks for this node's execution
 
         Returns:
             PipelineNode that wraps this pipeline with the specified mapping
@@ -780,7 +916,8 @@ class Pipeline:
             >>> inner = Pipeline(nodes=[clean_text])  # expects "passage"
             >>> adapted = inner.as_node(
             ...     input_mapping={"document": "passage"},  # outer -> inner
-            ...     output_mapping={"cleaned": "processed"}  # inner -> outer
+            ...     output_mapping={"cleaned": "processed"},  # inner -> outer
+            ...     map_mode="zip",
             ...     name="adapted_clean"
             ... )
             >>> outer = Pipeline(nodes=[adapted])
@@ -792,7 +929,11 @@ class Pipeline:
             input_mapping=input_mapping,
             output_mapping=output_mapping,
             map_over=map_over,
+            map_mode=map_mode,
             name=name,
+            engine=engine,
+            cache=cache,
+            callbacks=callbacks,
         )
 
     # @this should create items from the map_over and map_mode using a helper function
@@ -850,11 +991,10 @@ class Pipeline:
             >>> results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
             >>> assert results == {"result": [2, 3, 4]}
         """
-        # Normalize map_over to list
+        # Normalize and validate inputs
         if isinstance(map_over, str):
             map_over = [map_over]
 
-        # Validate map_mode
         if map_mode not in ("zip", "product"):
             raise ValueError(f"map_mode must be 'zip' or 'product', got '{map_mode}'")
 
@@ -865,47 +1005,24 @@ class Pipeline:
                 f"got '{return_format}'"
             )
 
-        # Separate varying and fixed parameters
-        varying_params = {}
-        fixed_params = {}
-
-        for key, value in inputs.items():
-            if key in map_over:
-                if not isinstance(value, list):
-                    raise ValueError(
-                        f"Parameter '{key}' is in map_over but value is not a list"
-                    )
-                varying_params[key] = value
-            else:
-                fixed_params[key] = value
-
-        # Validate that all map_over parameters are present
-        for param in map_over:
-            if param not in varying_params:
-                raise ValueError(f"Parameter '{param}' in map_over not found in inputs")
+        # Use helper to prepare inputs
+        varying_params, fixed_params, zip_lengths = self._prepare_map_inputs(
+            inputs, map_over, map_mode
+        )
 
         engine = self.effective_engine
         columnar_result = None
         columnar_error: Optional[Exception] = None
-        total_items_hint: Optional[int] = None
+        total_items_hint = zip_lengths[0] if zip_lengths else 0
 
-        zip_lengths: List[int] = []
-        if map_mode == "zip":
-            zip_lengths = [len(lst) for lst in varying_params.values()]
-            if zip_lengths and not all(length == zip_lengths[0] for length in zip_lengths):
-                raise ValueError(
-                    f"In zip mode, all lists must have the same length. "
-                    f"Got lengths: {dict(zip(varying_params.keys(), zip_lengths))}"
-                )
-            total_items_hint = zip_lengths[0] if zip_lengths else 0
-
+        # Try columnar execution if available (e.g., DaftEngine)
         if (
             map_mode == "zip"
             and hasattr(engine, "map_columnar")
             and callable(getattr(engine, "map_columnar"))
         ):
             try:
-                columnar_result = engine.map_columnar(
+                columnar_result = engine.map_columnar(  # type: ignore[attr-defined]
                     pipeline=self,
                     varying_inputs=varying_params,
                     fixed_inputs=fixed_params,
@@ -917,6 +1034,7 @@ class Pipeline:
                 columnar_result = None
                 columnar_error = exc
 
+        # Fallback to row-based execution
         if columnar_result is None:
             if return_format != "python":
                 detail = (
@@ -927,32 +1045,10 @@ class Pipeline:
                     raise ValueError(detail) from columnar_error
                 raise ValueError(detail)
 
-            # Generate execution plans based on map_mode
-            if map_mode == "zip":
-                # Create execution plans by zipping
-                if not varying_params or not zip_lengths or zip_lengths[0] == 0:
-                    # Empty case
-                    execution_plans = []
-                else:
-                    # Zip the varying parameters together
-                    param_names = list(varying_params.keys())
-                    param_lists = [varying_params[name] for name in param_names]
-                    execution_plans = [
-                        {**fixed_params, **dict(zip(param_names, values))}
-                        for values in zip(*param_lists)
-                    ]
-
-            else:  # product mode
-                # Create all combinations
-                if not varying_params:
-                    execution_plans = [fixed_params]
-                else:
-                    param_names = list(varying_params.keys())
-                    param_lists = [varying_params[name] for name in param_names]
-                    execution_plans = [
-                        {**fixed_params, **dict(zip(param_names, values))}
-                        for values in itertools.product(*param_lists)
-                    ]
+            # Use helper to build execution plans
+            execution_plans = self._build_execution_plans(
+                varying_params, fixed_params, map_mode, zip_lengths
+            )
         else:
             execution_plans = None
 
