@@ -8,6 +8,7 @@ Skips gracefully if graphviz is not installed in the environment.
 import pytest
 
 from hypernodes import Pipeline, node
+from hypernodes.pipeline_node import PipelineNode
 
 
 @pytest.mark.skipif(pytest.importorskip("graphviz", reason="graphviz not installed") is None, reason="graphviz not installed")
@@ -21,12 +22,15 @@ def test_visualization_depth_graph_has_more_nodes_when_expanded():
         return cleaned.upper()
 
     inner_pipeline = Pipeline(nodes=[clean_text, uppercase_text]).with_name("preprocessing")
+    
+    # Wrap the inner pipeline in a PipelineNode
+    nested_node = PipelineNode(pipeline=inner_pipeline, name="preprocessing")
 
     @node(output_name="result")
     def add_prefix(uppercased: str, prefix: str) -> str:
         return f"{prefix}: {uppercased}"
 
-    outer_pipeline = Pipeline(nodes=[inner_pipeline, add_prefix]).with_name("main_pipeline")
+    outer_pipeline = Pipeline(nodes=[nested_node, add_prefix]).with_name("main_pipeline")
 
     # Depth=1: collapsed view, Depth=2: expanded inner pipeline
     g1 = outer_pipeline.visualize(depth=1, return_type="graphviz")

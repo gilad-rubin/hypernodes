@@ -389,7 +389,9 @@ class SimpleGraphBuilder(GraphBuilder):
         # 2. Build dependencies: node -> [nodes it depends on]
         dependencies: Dict[Node, List[Node]] = {}
         for node in nodes:
-            node_deps = []
+            # Use a set to avoid duplicate dependencies
+            # (e.g., when a node needs multiple outputs from the same producer)
+            node_deps_set: Set[Node] = set()
 
             # Get parameters this node needs
             # For PipelineNode, use root_args; for regular Node, use parameters
@@ -399,10 +401,10 @@ class SimpleGraphBuilder(GraphBuilder):
                 if param in output_to_node:
                     producer = output_to_node[param]
                     if producer != node:  # Don't add self-dependency
-                        node_deps.append(producer)
+                        node_deps_set.add(producer)
                 # If param not in output_to_node, it's an external input (root_arg)
 
-            dependencies[node] = node_deps
+            dependencies[node] = list(node_deps_set)
 
         # 3. Validate: check for missing dependencies and cycles
         self._validate_dependencies(nodes, dependencies, output_to_node)

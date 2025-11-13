@@ -39,7 +39,6 @@ from .pipeline import Pipeline
 from .visualization import (
     DESIGN_STYLES,
     GraphvizStyle,
-    build_graph,
     visualize,
 )
 
@@ -69,7 +68,6 @@ __all__ = [
     "GraphvizStyle",
     "DESIGN_STYLES",
     "visualize",
-    "build_graph",
     # Exceptions
     "HyperNodesError",
     "CycleError",

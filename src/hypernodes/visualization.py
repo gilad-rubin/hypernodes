@@ -3,10 +3,9 @@
 import inspect
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Union, get_type_hints
+from typing import Any, Dict, List, Literal, Optional, Set, Union, get_type_hints
 
 import graphviz
-import networkx as nx
 
 from .node import Node
 from .pipeline import Pipeline, PipelineNode
@@ -346,142 +345,108 @@ def _format_return_type(func: Any) -> str:
     return ""
 
 
-def build_graph(
+@dataclass
+class VisualizationGraph:
+    """Simplified graph structure for visualization.
+
+    Attributes:
+        nodes: Set of nodes to display
+        edges: List of (source, target) tuples where source is Node or str
+        root_args: Set of external input parameter names
+        output_to_node: Mapping from output names to nodes
+    """
+
+    nodes: Set[Node]
+    edges: List[tuple[Union[Node, str], Node]]
+    root_args: Set[str]
+    output_to_node: Dict[str, Node]
+
+
+def _collect_visualization_data(
     pipeline: Pipeline,
     depth: Optional[int] = 1,
-    _current_depth: int = 1,
-    _parent_output_map: Optional[Dict[str, Any]] = None,
-) -> nx.DiGraph:
-    """Build NetworkX graph from pipeline.
+) -> VisualizationGraph:
+    """Collect nodes and edges for visualization from pipeline's GraphResult.
 
     Args:
         pipeline: Pipeline to visualize
         depth: How many levels of nesting to expand (None = all levels)
-        _current_depth: Internal tracker for recursion depth
-        _parent_output_map: Mapping from output names to producing nodes (internal)
 
     Returns:
-        NetworkX DiGraph with nodes and edges
+        VisualizationGraph with nodes, edges, and root args
     """
-    g = nx.DiGraph()
+    # Start with pipeline's graph result
+    graph_result = pipeline.graph
 
-    # Build a map of which nodes produce which outputs in THIS pipeline
-    # If a nested pipeline is expanded at this depth, map its outputs to the
-    # actual inner producing Node (not the Pipeline object). Otherwise map to
-    # the Pipeline object (collapsed).
-    local_output_map: Dict[str, Any] = {}
-    for n in pipeline.nodes:
-        # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
-        inner_pipeline = None
-        is_pipeline_node = False
-        if isinstance(n, Pipeline):
-            inner_pipeline = n
-        elif isinstance(n, PipelineNode):
-            inner_pipeline = n.pipeline
-            is_pipeline_node = True
+    nodes_to_display: Set[Node] = set()
+    edges: List[tuple[Union[Node, str], Node]] = []
+    all_root_args: Set[str] = set(graph_result.root_args)
+    output_to_node = dict(graph_result.output_to_node)
 
-        if inner_pipeline is not None:
-            expanded = depth is None or _current_depth < depth
-            if expanded:
-                if is_pipeline_node:
-                    # For PipelineNode, map the OUTER output names (after output_mapping)
-                    # to the inner nodes that produce them
-                    outer_outputs = n.output_name
-                    if not isinstance(outer_outputs, tuple):
-                        outer_outputs = (outer_outputs,)
-                    inner_outputs = inner_pipeline.output_name
-                    if not isinstance(inner_outputs, tuple):
-                        inner_outputs = (inner_outputs,)
-                    # Build reverse mapping: inner -> outer from PipelineNode.output_mapping
-                    inner_to_outer = {}
-                    for inner_out in inner_outputs:
-                        outer_out = n.output_mapping.get(inner_out, inner_out)
-                        inner_to_outer[inner_out] = outer_out
-                    # Map outer names to the actual inner nodes that produce them
-                    for inner_node in inner_pipeline.nodes:
-                        inner_out = inner_node.output_name
-                        if inner_out in inner_to_outer:
-                            outer_out = inner_to_outer[inner_out]
-                            local_output_map[outer_out] = inner_node
-                else:
-                    # Direct Pipeline: no output remapping
-                    for inner in inner_pipeline.nodes:
-                        local_output_map[inner.output_name] = inner
-            else:
-                # Collapsed: map outputs from the node's perspective
-                outputs = n.output_name
-                if not isinstance(outputs, tuple):
-                    outputs = (outputs,)
-                for out in outputs:
-                    local_output_map[out] = n
-        else:
-            outputs = n.output_name
-            if isinstance(outputs, tuple):
-                for out in outputs:
-                    local_output_map[out] = n
-            else:
-                local_output_map[outputs] = n
-
-    for node in pipeline.nodes:
-        # Check if this is a Pipeline or PipelineNode wrapping a Pipeline
-        inner_pipeline = None
-        if isinstance(node, Pipeline):
-            inner_pipeline = node
-        elif isinstance(node, PipelineNode):
-            inner_pipeline = node.pipeline
-
-        # Handle nested pipelines (both direct Pipeline and PipelineNode)
-        if inner_pipeline is not None:
+    # Process each node in the pipeline
+    for node in graph_result.execution_order:
+        # Check if this is a PipelineNode (nested pipeline)
+        if isinstance(node, PipelineNode):
             # Check if we should expand this nested pipeline
-            should_expand = depth is None or _current_depth < depth
+            should_expand = depth is None or depth > 1
 
-            if should_expand:
-                # Recursively build graph for nested pipeline
-                nested_graph = build_graph(
-                    inner_pipeline, depth, _current_depth + 1, local_output_map
-                )
-                # Add nested graph as a subgraph
-                g = nx.compose(g, nested_graph)
-                # Note: Edges into the nested pipeline are handled inside the
-                # nested_graph via the _parent_output_map. We don't duplicate
-                # connections here to avoid stray inputs or pipeline-ID nodes.
+            if should_expand and depth is not None:
+                # Recursively expand nested pipeline
+                nested_depth = None if depth is None else depth - 1
+                nested_viz = _collect_visualization_data(node.pipeline, nested_depth)
+
+                # Add nested nodes
+                nodes_to_display.update(nested_viz.nodes)
+
+                # Add nested edges
+                edges.extend(nested_viz.edges)
+
+                # Update output mapping for inner nodes
+                # Map the PipelineNode's output names to the actual inner nodes
+                for inner_output, inner_node in nested_viz.output_to_node.items():
+                    # Check if this output is remapped by the PipelineNode
+                    outer_output = node.output_mapping.get(inner_output, inner_output)
+                    output_to_node[outer_output] = inner_node
+
+                # Add root args from nested pipeline
+                all_root_args.update(nested_viz.root_args)
             else:
-                # Treat as a single collapsed node
-                g.add_node(node, node_type="pipeline")
+                # Collapsed: treat as single node
+                nodes_to_display.add(node)
 
-                # Add edges for pipeline's root args
-                # Both PipelineNode and Pipeline have root_args property
-                params = node.root_args
-                for param in params:
-                    if param in local_output_map:
-                        producer = local_output_map[param]
-                        g.add_edge(producer, node, param_name=param)
-                    else:
-                        # External input
-                        g.add_edge(param, node, param_name=param)
+                # Add edges for this node's dependencies
+                for dep_node in graph_result.dependencies.get(node, []):
+                    edges.append((dep_node, node))
+
+                # Add edges for root args
+                for param in node.root_args:
+                    if param not in output_to_node:
+                        edges.append((param, node))
+                        all_root_args.add(param)
         else:
             # Regular node
-            g.add_node(node, node_type="function")
+            nodes_to_display.add(node)
 
-            # Add edges based on dependencies
+            # Add edges for dependencies (node -> node)
+            for dep_node in graph_result.dependencies.get(node, []):
+                edges.append((dep_node, node))
+
+            # Add edges for root args (string -> node)
             for param in node.root_args:
-                if param in local_output_map:
-                    # Dependency: another node's output
-                    producer = local_output_map[param]
-                    g.add_edge(producer, node, param_name=param)
-                elif _parent_output_map is not None and param in _parent_output_map:
-                    # Produced by parent (e.g., sibling nested pipeline)
-                    producer = _parent_output_map[param]
-                    g.add_edge(producer, node, param_name=param)
-                else:
-                    # Root argument: external input
-                    g.add_edge(param, node, param_name=param)
+                if param not in output_to_node:
+                    edges.append((param, node))
+                    all_root_args.add(param)
 
-    return g
+    return VisualizationGraph(
+        nodes=nodes_to_display,
+        edges=edges,
+        root_args=all_root_args,
+        output_to_node=output_to_node,
+    )
 
 
 def _identify_grouped_inputs(
-    g: nx.DiGraph,
+    viz_graph: VisualizationGraph,
     min_group_size: Optional[int] = 2,
 ) -> Dict[Node, List[str]]:
     """Identify input parameters that should be grouped together.
@@ -489,7 +454,7 @@ def _identify_grouped_inputs(
     Groups inputs that are used exclusively by a single function.
 
     Args:
-        g: NetworkX graph
+        viz_graph: VisualizationGraph with nodes and edges
         min_group_size: Minimum number of inputs to create a group (None = no grouping)
 
     Returns:
@@ -498,28 +463,23 @@ def _identify_grouped_inputs(
     if min_group_size is None:
         return {}
 
-    # Find string nodes (input parameters)
-    input_nodes = [n for n in g.nodes() if isinstance(n, str)]
-
-    # Map each input to its consumers
+    # Map each input parameter (string) to its consumers
     input_consumers: Dict[str, List[Node]] = {}
-    for input_node in input_nodes:
-        consumers = list(g.successors(input_node))
-        # Filter to only Node/Pipeline/PipelineNode instances
-        consumers = [
-            c for c in consumers if isinstance(c, (Node, Pipeline, PipelineNode))
-        ]
-        input_consumers[input_node] = consumers
+    for source, target in viz_graph.edges:
+        if isinstance(source, str):  # Input parameter
+            if source not in input_consumers:
+                input_consumers[source] = []
+            input_consumers[source].append(target)
 
     # Group inputs by their consumer
     consumer_inputs: Dict[Node, List[str]] = {}
-    for input_node, consumers in input_consumers.items():
+    for input_param, consumers in input_consumers.items():
         # Only group if used by exactly one consumer
         if len(consumers) == 1:
             consumer = consumers[0]
             if consumer not in consumer_inputs:
                 consumer_inputs[consumer] = []
-            consumer_inputs[consumer].append(input_node)
+            consumer_inputs[consumer].append(input_param)
 
     # Filter to only groups that meet min_group_size
     grouped = {
@@ -538,16 +498,25 @@ def _create_node_label(
 ) -> str:
     """Create HTML label for a function node."""
     # Handle PipelineNode which wraps a Pipeline
-    if hasattr(node.func, "__name__"):
-        func_name = node.func.__name__
-    elif isinstance(node.func, Pipeline):
-        # PipelineNode case - check if it has a custom name
+    if hasattr(node, "func"):
+        # Regular Node
+        if hasattr(node.func, "__name__"):
+            func_name = node.func.__name__
+        elif isinstance(node.func, Pipeline):
+            # PipelineNode case - check if it has a custom name
+            if hasattr(node, "name") and node.name:
+                func_name = node.name
+            else:
+                func_name = "nested_pipeline"
+        else:
+            func_name = str(node.func)
+    else:
+        # PipelineNode without func attribute
         if hasattr(node, "name") and node.name:
             func_name = node.name
         else:
-            func_name = "nested_pipeline"
-    else:
-        func_name = str(node.func)
+            func_name = "pipeline"
+    
     output_name = node.output_name
 
     # Handle tuple output names
@@ -556,7 +525,7 @@ def _create_node_label(
 
     # Get return type
     return_type = ""
-    if show_types:
+    if show_types and hasattr(node, "func"):
         return_type = _format_return_type(node.func)
 
     # Build HTML table - simpler layout without nested cells
@@ -590,7 +559,8 @@ def _create_input_label(
     """Create label for an input parameter node."""
     param_name_esc = _escape_html(param_name)
 
-    if node and show_types:
+    if node and show_types and hasattr(node, "func"):
+        # Only try to format type hints for regular nodes (not PipelineNode)
         type_hint = _format_type_hint(param_name, node.func)
         default_val = _format_default_value(param_name, node.func)
 
@@ -612,7 +582,8 @@ def _create_grouped_inputs_label(
     rows = []
     for param in param_names:
         param_esc = _escape_html(param)
-        if show_types:
+        if show_types and hasattr(consumer_node, "func"):
+            # Only try to format type hints for regular nodes (not PipelineNode)
             type_hint = _format_type_hint(param, consumer_node.func)
             default_val = _format_default_value(param, consumer_node.func)
             if type_hint:
@@ -644,19 +615,20 @@ def _create_pipeline_label(
     if hasattr(pipeline, "name") and pipeline.name:
         pipeline_name = pipeline.name
     else:
-        # Use output names as identifier
-        outputs = pipeline.output_name
-        if outputs:
-            # Take first output or join if multiple
-            if len(outputs) == 1:
-                pipeline_name = f"{outputs[0]}_pipeline"
+        # Use output names as identifier from graph
+        outputs_list = pipeline.graph.available_output_names
+        if outputs_list:
+            # Take first output or use generic name if multiple
+            if len(outputs_list) == 1:
+                pipeline_name = f"{outputs_list[0]}_pipeline"
             else:
                 pipeline_name = "nested_pipeline"
         else:
             pipeline_name = "pipeline"
 
-    # Show output mapping
-    outputs = ", ".join(pipeline.output_name) if pipeline.output_name else "..."
+    # Show output mapping from graph
+    outputs_list = pipeline.graph.available_output_names
+    outputs = ", ".join(outputs_list) if outputs_list else "..."
 
     # Escape HTML
     pipeline_name_esc = _escape_html(pipeline_name)
@@ -710,11 +682,11 @@ def visualize(
     else:
         style_obj = style
 
-    # Build graph
-    g = build_graph(pipeline, depth=depth)
+    # Collect visualization data from pipeline's graph
+    viz_graph = _collect_visualization_data(pipeline, depth=depth)
 
     # Identify grouped inputs
-    grouped_inputs = _identify_grouped_inputs(g, min_arg_group_size)
+    grouped_inputs = _identify_grouped_inputs(viz_graph, min_arg_group_size)
 
     # Create graphviz digraph
     dot = graphviz.Digraph(comment="Pipeline")
@@ -740,7 +712,8 @@ def visualize(
             return str(pl.id)
         if hasattr(pl, "name") and pl.name:
             return str(pl.name)
-        outs = pl.output_name
+        # Pipeline doesn't have output_name, use graph.available_output_names
+        outs = pl.graph.available_output_names
         if outs:
             return outs[0] if len(outs) == 1 else "pipeline"
         return "pipeline"
@@ -888,13 +861,20 @@ def visualize(
     add_nodes_in_container(dot, pipeline, current_depth=1)
 
     # Add remaining input nodes (not grouped) at top level
-    for n in g.nodes():
-        if isinstance(n, str) and n not in added_grouped_inputs:
-            consumers = [c for c in g.successors(n) if isinstance(c, Node)]
-            consumer_node = consumers[0] if consumers else None
-            label = _create_input_label(n, consumer_node, style_obj, show_types)
+    for input_param in viz_graph.root_args:
+        if input_param not in added_grouped_inputs:
+            # Find a consumer node for type hints
+            consumer_node = None
+            for source, target in viz_graph.edges:
+                if source == input_param:
+                    consumer_node = target
+                    break
+
+            label = _create_input_label(
+                input_param, consumer_node, style_obj, show_types
+            )
             dot.node(
-                str(id(n)),
+                str(id(input_param)),
                 label=label,
                 shape="box",
                 style="dashed,filled",
@@ -906,14 +886,13 @@ def visualize(
             )
 
     # Add edges
-    for source, target in g.edges():
+    for source, target in viz_graph.edges:
         # Handle grouped inputs
-        if isinstance(target, (Node, Pipeline, PipelineNode)):
-            if target in grouped_inputs:
-                # Check if source is one of the grouped inputs
-                if isinstance(source, str) and source in grouped_inputs[target]:
-                    # Skip individual edges, we'll add one from the group
-                    continue
+        if target in grouped_inputs:
+            # Check if source is one of the grouped inputs
+            if isinstance(source, str) and source in grouped_inputs[target]:
+                # Skip individual edges, we'll add one from the group
+                continue
 
         # Determine node IDs
         if isinstance(source, str):
@@ -923,10 +902,7 @@ def visualize(
             source_id = str(id(source))
             edge_color = style_obj.output_edge_color
 
-        if isinstance(target, str):
-            target_id = str(id(target))
-        else:
-            target_id = str(id(target))
+        target_id = str(id(target))
 
         dot.edge(
             source_id,

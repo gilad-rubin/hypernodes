@@ -14,6 +14,8 @@ mlruns/*
 .vscode/mcp.json.bak
 .windsurf/rules/ruler_windsurf_instructions.md
 .windsurf/rules/ruler_windsurf_instructions.md.bak
+AGENT.md
+AGENT.md.bak
 AGENTS.md
 AGENTS.md.bak
 CLAUDE.md
