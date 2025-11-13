@@ -477,7 +477,8 @@ class SimpleGraphBuilder(GraphBuilder):
 
         while queue:
             # Sort by node name for deterministic ordering
-            queue.sort(key=lambda n: n.name)
+            # Use empty string for nodes without names (None)
+            queue.sort(key=lambda n: n.name if n.name is not None else "")
             node = queue.pop(0)
             result.append(node)
 
