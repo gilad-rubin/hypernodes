@@ -24,20 +24,16 @@ Example:
 from .protocols import Engine
 from .sequential_engine import SequentialEngine
 
-# Backward compatibility alias
-HypernodesEngine = SequentialEngine
-
 # Build __all__ dynamically
 __all__ = [
     "Engine",
     "SequentialEngine",
-    "HypernodesEngine",  # Backward compatibility
 ]
 
 # Optional engines
 try:
-    from .integrations.daft.engine import DaftEngine, fix_script_classes_for_modal
+    from .integrations.daft.engine import DaftEngine
 
-    __all__.extend(["DaftEngine", "fix_script_classes_for_modal"])
+    __all__.extend(["DaftEngine"])
 except ImportError:
     pass
