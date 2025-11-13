@@ -382,7 +382,7 @@ class SimpleGraphBuilder(GraphBuilder):
                 if output in output_to_node:
                     raise DependencyError(
                         f"Multiple nodes produce output '{output}': "
-                        f"{output_to_node[output].func.__name__} and {node.func.__name__}"
+                        f"{output_to_node[output].name} and {node.name}"
                     )
                 output_to_node[output] = node
 
@@ -441,7 +441,7 @@ class SimpleGraphBuilder(GraphBuilder):
                 # Found a cycle
                 cycle_start = path.index(node)
                 cycle = path[cycle_start:] + [node]
-                cycle_names = [self._node_name(n) for n in cycle]
+                cycle_names = [n.name for n in cycle]
                 raise CycleError(
                     f"Cycle detected in pipeline: {' -> '.join(cycle_names)}"
                 )
@@ -466,11 +466,8 @@ class SimpleGraphBuilder(GraphBuilder):
         self, nodes: List["Node"], dependencies: Dict["Node", List["Node"]]
     ) -> List["Node"]:
         """Compute topological order using Kahn's algorithm."""
-        # Calculate in-degree for each node
-        in_degree = {node: 0 for node in nodes}
-        for node in nodes:
-            for dep in dependencies[node]:
-                in_degree[dep] = in_degree.get(dep, 0) + 1
+        # Calculate in-degree for each node (number of dependencies)
+        in_degree = {node: len(dependencies[node]) for node in nodes}
 
         # Start with nodes that have no dependencies
         queue = [node for node in nodes if in_degree[node] == 0]
@@ -478,7 +475,7 @@ class SimpleGraphBuilder(GraphBuilder):
 
         while queue:
             # Sort by node name for deterministic ordering
-            queue.sort(key=lambda n: self._node_name(n))
+            queue.sort(key=lambda n: n.name)
             node = queue.pop(0)
             result.append(node)
 
@@ -494,21 +491,6 @@ class SimpleGraphBuilder(GraphBuilder):
             raise CycleError("Topological sort failed - possible cycle")
 
         return result
-
-    def _node_name(self, node: "Node") -> str:
-        """Get display name for a node."""
-        from .pipeline_node import PipelineNode
-
-        if isinstance(node, PipelineNode) and node.name:
-            return node.name
-
-        if hasattr(node.func, "__name__"):
-            return node.func.__name__
-
-        outputs = node.output_name
-        if isinstance(outputs, tuple):
-            return f"node({','.join(outputs)})"
-        return f"node({outputs})"
 
     def compute_required_nodes(
         self,

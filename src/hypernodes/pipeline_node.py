@@ -3,10 +3,8 @@ from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 if TYPE_CHECKING:
     from .pipeline import Pipeline
 
-from .node_protocol import HyperNode
 
-
-class PipelineNode(HyperNode):
+class PipelineNode:
     """Wraps a Pipeline to behave like a Node with custom input/output mapping.
 
     This class adapts a Pipeline interface to work as a node in another pipeline,
@@ -45,14 +43,14 @@ class PipelineNode(HyperNode):
             cache: Whether to cache the node. Not to be confused with the pipeline's cache.
             name: Optional name for this node (displayed in visualizations)
         """
-        self.pipeline = pipeline
+        self._pipeline = pipeline
         self.input_mapping = input_mapping or {}
         self.output_mapping = output_mapping or {}
         self.map_mode = map_mode
         self.map_over = [map_over] if isinstance(map_over, str) else map_over
 
         self.cache = cache
-        self.name = name if name is not None else self.pipeline.name
+        self.name = name if name is not None else pipeline.name
 
         # Pre-compute and cache aggregated code hash to avoid expensive recomputation
         # This aggregates hashes from all inner nodes (including nested pipelines)
@@ -72,7 +70,7 @@ class PipelineNode(HyperNode):
             return tuple(self.map_over)
 
         # Get inner pipeline's root parameters
-        inner_params = self.pipeline.graph.root_args
+        inner_params = self._pipeline.graph.root_args
 
         # Create reverse mapping: inner -> outer
         reverse_mapping = {inner: outer for outer, inner in self.input_mapping.items()}
@@ -96,7 +94,7 @@ class PipelineNode(HyperNode):
             Output name(s) from outer pipeline's perspective
         """
         # Get inner pipeline outputs (List[str] from graph)
-        inner_outputs = self.pipeline.graph.available_output_names
+        inner_outputs = self._pipeline.graph.available_output_names
 
         # Apply output mapping
         outer_outputs = []
@@ -124,11 +122,16 @@ class PipelineNode(HyperNode):
 
     @property
     def pipeline(self) -> "Pipeline":
-        return self.pipeline
+        """Get the wrapped pipeline.
+
+        Returns:
+            The Pipeline instance wrapped by this PipelineNode
+        """
+        return self._pipeline
 
     def __repr__(self) -> str:
         """Return string representation."""
-        return f"PipelineNode({self.pipeline})"
+        return f"PipelineNode({self._pipeline})"
 
     def __hash__(self) -> int:
         """Make PipelineNode hashable."""

@@ -4,11 +4,11 @@ import functools
 import inspect
 from typing import Any, Callable, Union
 
-from .node_protocol import HyperNode
 
-
-class Node(HyperNode):
+class Node:
     """Wraps a function with pipeline metadata.
+
+    Implements the HyperNode protocol through structural subtyping.
 
     A Node represents an atomic unit of computation in a pipeline. It stores
     the original function along with metadata about its inputs and outputs.
@@ -34,11 +34,12 @@ class Node(HyperNode):
             cache: Whether to cache this node's output (default: True)
         """
         self.func = func
-        self.output_name = output_name
+        self.name = func.__name__
+        self._output_name = output_name
         self.cache = cache
 
         sig = inspect.signature(func)
-        self.root_args = tuple(sig.parameters.keys())
+        self._root_args = tuple(sig.parameters.keys())
 
         # Pre-compute and cache code hash to avoid expensive recomputation
         # This is computed once at node creation and persists through pickling
@@ -48,6 +49,24 @@ class Node(HyperNode):
 
         # Preserve function metadata
         functools.update_wrapper(self, func)
+
+    @property
+    def output_name(self) -> Union[str, tuple]:
+        """Get the output name(s) of this node.
+
+        Returns:
+            Output name(s) for this node
+        """
+        return self._output_name
+
+    @property
+    def root_args(self) -> tuple:
+        """Get the input parameter names required by this node.
+
+        Returns:
+            Tuple of parameter names from function signature
+        """
+        return self._root_args
 
     @property
     def code_hash(self) -> str:

@@ -24,28 +24,29 @@ Example:
     {'doubled': 10, 'result': 11}
 """
 
-from .node import Node, node
-from .node_protocol import HyperNode
-from .pipeline import Pipeline
-from .engines import Engine, HypernodesEngine
 from .cache import DiskCache
-from .callbacks import PipelineCallback, CallbackContext
+from .callbacks import CallbackContext, PipelineCallback
+from .engines import Engine, HypernodesEngine
 from .exceptions import (
-    HyperNodesError,
     CycleError,
     DependencyError,
     ExecutionError,
+    HyperNodesError,
 )
+from .hypernode import HyperNode
+from .node import Node, node
+from .pipeline import Pipeline
 from .visualization import (
-    GraphvizStyle,
     DESIGN_STYLES,
-    visualize,
+    GraphvizStyle,
     build_graph,
+    visualize,
 )
 
 # Optional: DaftEngine (requires daft to be installed)
 try:
     from .engines import DaftEngine
+
     _DAFT_AVAILABLE = True
 except ImportError:
     _DAFT_AVAILABLE = False
