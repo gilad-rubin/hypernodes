@@ -69,13 +69,9 @@ class PipelineNode:
         if self.map_over and not self.input_mapping:
             return tuple(self.map_over)
 
-        # Get inner pipeline's root parameters
+        # Get inner pipeline's root parameters and apply reverse mapping
         inner_params = self._pipeline.graph.root_args
-
-        # Create reverse mapping: inner -> outer
-        reverse_mapping = {inner: outer for outer, inner in self.input_mapping.items()}
-
-        # Map each inner param to outer name (or keep same if not in mapping)
+        reverse_mapping = self._create_reverse_input_mapping()
         outer_params = [reverse_mapping.get(p, p) for p in inner_params]
 
         # Add any map_over params that aren't already included
@@ -93,14 +89,9 @@ class PipelineNode:
         Returns:
             Output name(s) from outer pipeline's perspective
         """
-        # Get inner pipeline outputs (List[str] from graph)
+        # Get inner pipeline outputs and apply output mapping
         inner_outputs = self._pipeline.graph.available_output_names
-
-        # Apply output mapping
-        outer_outputs = []
-        for inner_output in inner_outputs:
-            outer_output = self.output_mapping.get(inner_output, inner_output)
-            outer_outputs.append(outer_output)
+        outer_outputs = self._map_names(inner_outputs, self.output_mapping)
 
         # Return single string or tuple (matching Node convention)
         if len(outer_outputs) == 1:
@@ -128,6 +119,113 @@ class PipelineNode:
             The Pipeline instance wrapped by this PipelineNode
         """
         return self._pipeline
+
+    def _create_reverse_input_mapping(self) -> Dict[str, str]:
+        """Create reverse mapping from inner to outer parameter names.
+
+        Returns:
+            Dictionary mapping inner names to outer names
+        """
+        return {inner: outer for outer, inner in self.input_mapping.items()}
+
+    def _apply_input_mapping(self, inputs: Dict) -> Dict:
+        """Map outer input names to inner parameter names.
+
+        Args:
+            inputs: Input parameters from outer perspective
+
+        Returns:
+            Mapped inputs ready for inner pipeline
+        """
+        inner_inputs = {}
+        for outer_name, value in inputs.items():
+            inner_name = self.input_mapping.get(outer_name, outer_name)
+            inner_inputs[inner_name] = value
+        return inner_inputs
+
+    def _translate_map_over_to_inner(self) -> Union[str, List[str]]:
+        """Translate map_over parameters from outer to inner names.
+
+        Returns:
+            Inner parameter name(s) to map over
+        """
+        if not self.map_over:
+            return None
+
+        map_over_inner = [
+            self.input_mapping.get(outer_param, outer_param)
+            for outer_param in self.map_over
+        ]
+        # Return as list if multiple, otherwise return single string
+        return map_over_inner if len(map_over_inner) > 1 else map_over_inner[0]
+
+    def _map_names(self, names: List[str], mapping: Dict[str, str]) -> List[str]:
+        """Apply a name mapping to a list of names.
+
+        Args:
+            names: List of names to map
+            mapping: Dictionary mapping original names to new names
+
+        Returns:
+            List of mapped names
+        """
+        return [mapping.get(name, name) for name in names]
+
+    def _apply_output_mapping(self, result: Dict) -> Dict:
+        """Map inner output names to outer names for a single result.
+
+        Args:
+            result: Output dictionary from inner pipeline
+
+        Returns:
+            Mapped output ready for outer perspective
+        """
+        outer_result = {}
+        for inner_name, value in result.items():
+            outer_name = self.output_mapping.get(inner_name, inner_name)
+            outer_result[outer_name] = value
+        return outer_result
+
+    def _collect_mapped_results(self, results: List[Dict]) -> Dict[str, List]:
+        """Collect and map results from pipeline.map() into outer format.
+
+        Args:
+            results: List of result dictionaries from inner pipeline
+
+        Returns:
+            Dictionary with outer names mapping to lists of values
+        """
+        outer_results: Dict[str, List] = {}
+        for result_dict in results:
+            mapped_result = self._apply_output_mapping(result_dict)
+            for outer_name, value in mapped_result.items():
+                if outer_name not in outer_results:
+                    outer_results[outer_name] = []
+                outer_results[outer_name].append(value)
+        return outer_results
+
+    def __call__(self, **inputs):
+        """Execute the wrapped pipeline with input/output mapping.
+
+        Args:
+            **inputs: Input parameters from outer perspective
+
+        Returns:
+            Dictionary of outputs (with output_mapping applied)
+        """
+        inner_inputs = self._apply_input_mapping(inputs)
+
+        if self.map_over:
+            map_over_inner = self._translate_map_over_to_inner()
+            results = self._pipeline.map(
+                inputs=inner_inputs,
+                map_over=map_over_inner,
+                map_mode=self.map_mode,
+            )
+            return self._collect_mapped_results(results)
+        else:
+            result = self._pipeline.run(inputs=inner_inputs)
+            return self._apply_output_mapping(result)
 
     def __repr__(self) -> str:
         """Return string representation."""

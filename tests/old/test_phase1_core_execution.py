@@ -158,7 +158,8 @@ def test_1_6_simple_nested_pipeline():
     def square(incremented: int) -> int:
         return incremented ** 2
     
-    outer_pipeline = Pipeline(nodes=[inner_pipeline, square])
+    # Wrap inner pipeline as a node
+    outer_pipeline = Pipeline(nodes=[inner_pipeline.as_node(), square])
     result = outer_pipeline.run(inputs={"x": 5})
     
     # All outputs from inner and outer pipeline

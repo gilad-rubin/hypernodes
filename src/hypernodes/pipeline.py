@@ -4,11 +4,11 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from .cache import Cache
 from .callbacks import PipelineCallback
-from .engine import HypernodesEngine
 from .graph_builder import SimpleGraphBuilder
 from .node import Node
 from .pipeline_node import PipelineNode
 from .protocols import Engine
+from .sequential_engine import SequentialEngine
 
 
 class Pipeline:
@@ -20,8 +20,8 @@ class Pipeline:
         callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
     ):
-        # Set engine with default fallback
-        self.engine = engine if engine is not None else HypernodesEngine()
+        # Set engine with default fallback to SequentialEngine
+        self.engine = engine if engine is not None else SequentialEngine()
 
         self.cache = cache
         self.callbacks = callbacks if callbacks is not None else []

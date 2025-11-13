@@ -146,11 +146,19 @@ def _execute_pipeline_node(
     ctx: CallbackContext,
 ) -> Dict[str, Any]:
     """Execute a PipelineNode and return its outputs.
+    
+    IMPORTANT: The inner pipeline inherits the parent's configuration:
+    - cache: Parent's cache instance is used for inner nodes
+    - callbacks: Parent's callbacks receive events from inner nodes
+    - engine: Parent's engine is used to execute the inner pipeline
+    
+    This ensures unified behavior across nested pipelines and prevents
+    dual caching/callback systems.
 
     Args:
         pipeline_node: The PipelineNode to execute
         inputs: Input values for the pipeline node
-        pipeline: The parent pipeline (for context)
+        pipeline: The parent pipeline (provides config to inherit)
         callbacks: List of callbacks to trigger
         ctx: Callback context
 
@@ -163,23 +171,45 @@ def _execute_pipeline_node(
     # Mark this as a PipelineNode in context
     ctx.set(f"_is_pipeline_node:{node_id}", True)
 
-    # Trigger nested pipeline start callbacks
-    nested_start_time = time.time()
-    for callback in callbacks:
-        callback.on_nested_pipeline_start(pipeline.id, inner_pipeline.id, ctx)
+    # Save inner pipeline's original configuration
+    original_cache = inner_pipeline.cache
+    original_callbacks = inner_pipeline.callbacks
+    original_engine = inner_pipeline.engine
 
-    # Call the PipelineNode (it handles all mapping internally)
-    # Context is already available through contextvar
-    result = pipeline_node(**inputs)
+    # INHERIT PARENT CONFIGURATION
+    # This ensures:
+    # - Inner nodes cache to parent's cache
+    # - Parent's callbacks see all nested node events
+    # - Parent's engine controls execution strategy
+    inner_pipeline.cache = pipeline.cache
+    inner_pipeline.callbacks = pipeline.callbacks
+    inner_pipeline.engine = pipeline.engine
 
-    # Trigger nested pipeline end callbacks
-    nested_duration = time.time() - nested_start_time
-    for callback in callbacks:
-        callback.on_nested_pipeline_end(
-            pipeline.id, inner_pipeline.id, nested_duration, ctx
-        )
+    try:
+        # Trigger nested pipeline start callbacks
+        nested_start_time = time.time()
+        for callback in callbacks:
+            callback.on_nested_pipeline_start(pipeline.id, inner_pipeline.id, ctx)
 
-    return result
+        # Call the PipelineNode (it handles all mapping internally)
+        # Context is already available through contextvar
+        result = pipeline_node(**inputs)
+
+        # Trigger nested pipeline end callbacks
+        nested_duration = time.time() - nested_start_time
+        for callback in callbacks:
+            callback.on_nested_pipeline_end(
+                pipeline.id, inner_pipeline.id, nested_duration, ctx
+            )
+
+        return result
+
+    finally:
+        # Restore inner pipeline's original configuration
+        # This is important if the pipeline is reused elsewhere
+        inner_pipeline.cache = original_cache
+        inner_pipeline.callbacks = original_callbacks
+        inner_pipeline.engine = original_engine
 
 
 def execute_single_node(

@@ -38,7 +38,7 @@ def test_5_1_simple_nested_pipeline():
     def square(incremented: int) -> int:
         return incremented**2
 
-    outer_pipeline = Pipeline(nodes=[inner_pipeline, square])
+    outer_pipeline = Pipeline(nodes=[inner_pipeline.as_node(), square])
 
     result = outer_pipeline.run(inputs={"x": 5})
     assert result == {"doubled": 10, "incremented": 11, "result": 121}
@@ -67,7 +67,7 @@ def test_5_2_nested_pipeline_with_map():
 
     inner_pipeline = Pipeline(nodes=[double, add_one])
 
-    outer_pipeline = Pipeline(nodes=[inner_pipeline])
+    outer_pipeline = Pipeline(nodes=[inner_pipeline.as_node()])
 
     results = outer_pipeline.map(inputs={"x": [1, 2, 3]}, map_over=["x"])
     assert results == [
@@ -100,13 +100,13 @@ def test_5_3_two_level_nesting():
     def add_one(doubled: int) -> int:
         return doubled + 1
 
-    inner = Pipeline(nodes=[inner_inner, add_one])
+    inner = Pipeline(nodes=[inner_inner.as_node(), add_one])
 
     @node(output_name="result")
     def square(incremented: int) -> int:
         return incremented**2
 
-    outer = Pipeline(nodes=[inner, square])
+    outer = Pipeline(nodes=[inner.as_node(), square])
 
     result = outer.run(inputs={"x": 5})
     assert result == {"doubled": 10, "incremented": 11, "result": 121}
@@ -529,7 +529,7 @@ def test_5_12_configuration_inheritance_backend_only():
     inner = Pipeline(nodes=[double, add_one])
 
     # Parent defines backend
-    outer = Pipeline(nodes=[inner], engine=HypernodesEngine())
+    outer = Pipeline(nodes=[inner.as_node()], engine=HypernodesEngine())
 
     result = outer.run(inputs={"x": 5})
     assert result["result"] == 11
