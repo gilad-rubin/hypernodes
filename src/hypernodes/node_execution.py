@@ -13,13 +13,12 @@ traversal.
 """
 
 import asyncio
-import hashlib
 import inspect
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from .async_utils import run_coroutine_sync
-from .cache import compute_signature, hash_code, hash_inputs
+from .cache import compute_signature, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
 
 if TYPE_CHECKING:
@@ -119,19 +118,8 @@ def compute_pipeline_node_signature(
     Returns:
         64-character hex string (SHA256)
     """
-    inner_pipeline = pipeline_node.pipeline
-
-    # Hash the inner pipeline structure (all node functions)
-    inner_code_hashes = []
-    for inner_node in inner_pipeline.graph.execution_order:
-        if hasattr(inner_node, "pipeline"):
-            # Nested PipelineNode - use its pipeline ID
-            inner_code_hashes.append(inner_node.pipeline.id)
-        elif hasattr(inner_node, "func"):
-            # Regular node - hash its function
-            inner_code_hashes.append(hash_code(inner_node.func))
-
-    code_hash = hashlib.sha256("::".join(inner_code_hashes).encode()).hexdigest()
+    # Use cached code hash from pipeline_node (computed at initialization)
+    code_hash = pipeline_node.code_hash
 
     # Hash inputs
     inputs_hash = hash_inputs(inputs)

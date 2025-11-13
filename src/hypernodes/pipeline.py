@@ -6,12 +6,11 @@ from .cache import Cache
 from .callbacks import PipelineCallback
 from .engine import Engine, HypernodesEngine
 from .graph_builder import SimpleGraphBuilder
-from .mixins import BuilderMixin
 from .node import Node
 from .pipeline_node import PipelineNode
 
 
-class Pipeline(BuilderMixin):
+class Pipeline:
     def __init__(
         self,
         nodes: List[Node],
@@ -202,6 +201,54 @@ class Pipeline(BuilderMixin):
             style=style,
             return_type=return_type,
         )
+
+    def with_engine(self, engine: Engine) -> "Pipeline":
+        """Configure with a specific engine.
+
+        Args:
+            engine: Engine instance (HypernodesEngine, DaftEngine, etc.)
+
+        Returns:
+            Self for method chaining
+        """
+        self.engine = engine
+        return self
+
+    def with_cache(self, cache: Cache) -> "Pipeline":
+        """Configure with a cache backend.
+
+        Args:
+            cache: Cache instance (DiskCache, etc.)
+
+        Returns:
+            Self for method chaining
+        """
+        self.cache = cache
+        return self
+
+    def with_callbacks(self, callbacks: List[PipelineCallback]) -> "Pipeline":
+        """Configure with pipeline callbacks.
+
+        Args:
+            callbacks: List of callback instances
+
+        Returns:
+            Self for method chaining
+        """
+        self.callbacks = callbacks
+        return self
+
+    def with_name(self, name: str) -> "Pipeline":
+        """Set the pipeline name.
+
+        Args:
+            name: Name for the pipeline
+
+        Returns:
+            Self for method chaining
+        """
+        self.name = name
+        return self
 
     def __repr__(self) -> str:
         """Return string representation of the Pipeline."""

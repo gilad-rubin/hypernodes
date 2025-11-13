@@ -37,7 +37,6 @@ class Node(HyperNode):
         self.output_name = output_name
         self.cache = cache
 
-        # Extract parameters using inspect (inspired by pipefunc)
         sig = inspect.signature(func)
         self.root_args = tuple(sig.parameters.keys())
 

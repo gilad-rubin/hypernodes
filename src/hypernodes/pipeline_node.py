@@ -54,6 +54,12 @@ class PipelineNode(HyperNode):
         self.cache = cache
         self.name = name if name is not None else self.pipeline.name
 
+        # Pre-compute and cache aggregated code hash to avoid expensive recomputation
+        # This aggregates hashes from all inner nodes (including nested pipelines)
+        from .cache import compute_pipeline_code_hash
+
+        self._code_hash = compute_pipeline_code_hash(pipeline)
+
     @property
     def root_args(self) -> tuple:
         """Get outer parameter names (after applying reverse input mapping).
@@ -104,6 +110,19 @@ class PipelineNode(HyperNode):
         return tuple(outer_outputs)
 
     @property
+    def code_hash(self) -> str:
+        """Get cached aggregated code hash for this pipeline node.
+
+        The hash is computed once at node creation by aggregating all inner
+        node hashes. This avoids expensive recomputation on every execution.
+        The cached value persists through pickling/unpickling.
+
+        Returns:
+            SHA256 hash of all inner node code
+        """
+        return self._code_hash
+
+    @property
     def pipeline(self) -> "Pipeline":
         return self.pipeline
 
@@ -118,3 +137,13 @@ class PipelineNode(HyperNode):
     def __eq__(self, other) -> bool:
         """Check equality based on identity."""
         return self is other
+
+    def __getstate__(self):
+        """Custom pickle support to preserve code hash cache."""
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        """Custom unpickle support to restore code hash cache."""
+        self.__dict__.update(state)
+        # _code_hash is preserved through pickling
