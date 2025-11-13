@@ -58,3 +58,11 @@ packages = ["src/hypernodes"]
 testpaths = [
     "tests",
 ]
+# Ignore old tests that may be broken or deprecated
+norecursedirs = [
+    "old",
+    ".*",
+    "build",
+    "dist",
+    "*.egg",
+]
