@@ -3,48 +3,10 @@
 This module defines the core protocols (interfaces) used throughout the library.
 """
 
-from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Protocol, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Protocol, Union
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
-
-
-class Executor(Protocol):
-    """Protocol for executors (compatible with concurrent.futures.Executor).
-
-    Custom executors must implement this interface:
-    - submit(): Schedule a function for execution and return a Future
-    - shutdown(): Cleanup resources
-
-    This matches the concurrent.futures.Executor interface, so you can use:
-    - ThreadPoolExecutor
-    - ProcessPoolExecutor
-    - AsyncExecutor (custom)
-    - SequentialExecutor (custom)
-    - Or any custom implementation
-    """
-
-    def submit(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Future:
-        """Schedule a callable to be executed and return a Future.
-
-        Args:
-            fn: Function to execute
-            *args: Positional arguments for fn
-            **kwargs: Keyword arguments for fn
-
-        Returns:
-            Future representing the execution
-        """
-        ...
-
-    def shutdown(self, wait: bool = True) -> None:
-        """Cleanup executor resources.
-
-        Args:
-            wait: If True, wait for pending tasks to complete
-        """
-        ...
 
 
 class Engine(Protocol):
@@ -90,19 +52,5 @@ class Engine(Protocol):
 
         Returns:
             List of output dictionaries (one per item)
-        """
-        ...
-
-
-class AsyncStrategy(Protocol):
-    """Protocol for async execution strategies."""
-
-    def should_use_async(
-        self, pipeline: "Pipeline", node_executor: Any
-    ) -> tuple[bool, str]:
-        """Check if async execution should be used.
-
-        Returns:
-            Tuple of (should_use_async, runner_strategy)
         """
         ...

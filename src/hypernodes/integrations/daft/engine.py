@@ -38,12 +38,26 @@ class DaftEngine(Engine):
         >>> result = pipeline.run(x=5)
     """
 
-    def __init__(self):
-        """Initialize DaftEngine."""
+    def __init__(self, use_batch_udf: bool = True, default_daft_config: Optional[Dict[str, Any]] = None):
+        """Initialize DaftEngine.
+
+        Args:
+            use_batch_udf: If True, use batch UDFs for map operations (default: True for performance)
+            default_daft_config: Default Daft configuration:
+                - batch_size: Batch size for batch UDFs
+                - max_concurrency: Number of concurrent UDF instances
+                - use_process: Use process isolation (avoids Python GIL)
+                - gpus: Number of GPUs to request
+        """
         if not DAFT_AVAILABLE:
             raise ImportError(
                 "daft is required for DaftEngineV2. Install with: pip install getdaft"
             )
+        self.use_batch_udf = use_batch_udf
+        self.default_daft_config = default_daft_config or {}
+        self._is_map_context = False  # Track if we're in map operation
+        self._map_over_params = set()  # Track which params are mapped over
+        self._stateful_wrappers = {}  # Cache for stateful UDF wrappers
 
     def run(
         self,
@@ -110,11 +124,20 @@ class DaftEngine(Engine):
             # Empty map - return empty list
             return []
 
-        # Build Daft DataFrame with N rows (lazy)
-        df = self._build_dataframe_from_plans(pipeline, execution_plans)
+        # Set context flag for batch UDF usage
+        self._is_map_context = True
+        self._map_over_params = set(map_over_list)  # Track which params are mapped
 
-        # Collect (triggers execution)
-        result_df = df.collect()
+        try:
+            # Build Daft DataFrame with N rows (lazy)
+            df = self._build_dataframe_from_plans(pipeline, execution_plans)
+
+            # Collect (triggers execution)
+            result_df = df.collect()
+        finally:
+            # Reset context
+            self._is_map_context = False
+            self._map_over_params = set()
 
         # Extract outputs as list of dicts
         outputs = self._extract_multi_row_outputs_as_list(
@@ -197,21 +220,174 @@ class DaftEngine(Engine):
         node: Any,
         available_columns: set,
     ) -> tuple["daft.DataFrame", set]:
-        """Apply a regular node as a UDF column."""
-        # Wrap function with @daft.func
-        udf = daft.func(node.func)
+        """Apply a regular node as a UDF column (batch or row-wise)."""
+        # Check if we should use batch UDF (in map context and enabled)
+        use_batch = self._is_map_context and self.use_batch_udf
 
-        # Get input columns for this node
+        if use_batch:
+            # Use batch UDF for better performance
+            return self._apply_batch_node_transformation(df, node, available_columns)
+        else:
+            # Use row-wise UDF (for single-row or when batch disabled)
+            udf = daft.func(node.func)
+            input_cols = [daft.col(param) for param in node.root_args]
+            df = df.with_column(node.output_name, udf(*input_cols))
+
+            available_columns = available_columns.copy()
+            available_columns.add(node.output_name)
+
+            return df, available_columns
+
+    def _apply_batch_node_transformation(
+        self,
+        df: "daft.DataFrame",
+        node: Any,
+        available_columns: set,
+    ) -> tuple["daft.DataFrame", set]:
+        """Apply node as batch UDF for vectorized processing."""
+        from daft import DataType, Series
+
+        # Store node.func in closure to avoid serialization issues
+        node_func = node.func
+        node_args = node.root_args
+
+        # Use engine-level config for batch size
+        batch_kwargs = {'return_dtype': DataType.python()}
+        if 'batch_size' in self.default_daft_config:
+            batch_kwargs['batch_size'] = self.default_daft_config['batch_size']
+
+        # Wrap the user's function to handle batching
+        @daft.func.batch(**batch_kwargs)
+        def batch_udf(*series_args: Series) -> Series:
+            # Convert Series to Python types
+            # For mapped params: keep as list
+            # For constant params: extract scalar value
+            python_args = []
+
+            for i, series in enumerate(series_args):
+                pylist = series.to_pylist()
+
+                # Check if this is a constant (all values same)
+                # Use id() comparison for objects to avoid expensive comparisons
+                first_val = pylist[0]
+                is_constant = all(
+                    val is first_val or val == first_val for val in pylist[1:]
+                )
+
+                if is_constant:
+                    # Constant parameter - use scalar
+                    python_args.append(first_val)
+                else:
+                    # Varying parameter - pass as list for iteration
+                    python_args.append(pylist)
+
+            # Call user function for each item
+            # User function expects single values, so we iterate
+            first_list_idx = None
+            for i, arg in enumerate(python_args):
+                if isinstance(arg, list):
+                    first_list_idx = i
+                    break
+
+            if first_list_idx is None:
+                # All constant - call once
+                results = [node_func(*python_args)]
+            else:
+                # Iterate over the varying parameter
+                n_items = len(python_args[first_list_idx])
+                results = []
+                for idx in range(n_items):
+                    # Build args for this iteration
+                    call_args = []
+                    for i, arg in enumerate(python_args):
+                        if isinstance(arg, list):
+                            call_args.append(arg[idx])
+                        else:
+                            call_args.append(arg)
+
+                    result_item = node_func(*call_args)
+                    results.append(result_item)
+
+            # Return as Series with Python objects
+            return Series.from_pylist(results)
+
+        # Apply batch UDF
         input_cols = [daft.col(param) for param in node.root_args]
+        df = df.with_column(node.output_name, batch_udf(*input_cols))
 
-        # Apply UDF to create new column
-        df = df.with_column(node.output_name, udf(*input_cols))
-
-        # Update available columns
         available_columns = available_columns.copy()
         available_columns.add(node.output_name)
 
         return df, available_columns
+
+    def _is_stateful_param(self, param_name: str, param_value: Any, node: Any) -> bool:
+        """Check if a parameter should use stateful UDF (@daft.cls).
+        
+        Only checks for __daft_stateful__ attribute on the class.
+        
+        Args:
+            param_name: Parameter name
+            param_value: Parameter value
+            node: The node being processed
+            
+        Returns:
+            True if parameter should be stateful
+        """
+        # Check if the object has __daft_stateful__ attribute
+        if hasattr(param_value, '__class__') and hasattr(param_value.__class__, '__daft_stateful__'):
+            return True
+        
+        return False
+
+    def _create_stateful_wrapper(self, param_value: Any, param_name: str, node: Any) -> Any:
+        """Wrap a stateful object with @daft.cls.
+        
+        Args:
+            param_value: The object to wrap
+            param_name: Parameter name
+            node: The node being processed
+            
+        Returns:
+            Daft stateful UDF wrapper
+        """
+        # Check cache first
+        cache_key = (id(param_value), param_name, id(node))
+        if cache_key in self._stateful_wrappers:
+            return self._stateful_wrappers[cache_key]
+        
+        # Use engine-level config
+        config = self.default_daft_config
+        
+        # Extract @daft.cls parameters
+        cls_kwargs = {}
+        if 'max_concurrency' in config:
+            cls_kwargs['max_concurrency'] = config['max_concurrency']
+        if 'use_process' in config:
+            cls_kwargs['use_process'] = config['use_process']
+        if 'gpus' in config:
+            cls_kwargs['gpus'] = config['gpus']
+        
+        # Create stateful wrapper
+        @daft.cls(**cls_kwargs)
+        class StatefulWrapper:
+            def __init__(self):
+                # Store the original instance
+                self._instance = param_value
+            
+            def __call__(self, *args, **kwargs):
+                # Forward to the instance's __call__ if available
+                if hasattr(self._instance, '__call__'):
+                    return self._instance(*args, **kwargs)
+                # Otherwise, call a default method if hinted
+                method_name = getattr(self._instance.__class__, '__daft_method__', None)
+                if method_name:
+                    return getattr(self._instance, method_name)(*args, **kwargs)
+                # Fallback: just return the instance (for constant objects)
+                return self._instance
+        
+        wrapper = StatefulWrapper()
+        self._stateful_wrappers[cache_key] = wrapper
+        return wrapper
 
     def _apply_simple_pipeline_transformation(
         self,
@@ -322,12 +498,8 @@ class DaftEngine(Engine):
         # Step 1: Add row_id for tracking during aggregation
         row_id_col = "__daft_row_id__"
 
-        # We need unique row IDs, but daft.lit(0) gives all rows the same ID
-        # Materialize to assign proper row IDs (needed for double-nested map_over)
-        df_collected = df.to_pydict()
-        num_rows = len(list(df_collected.values())[0]) if df_collected else 0
-        df_collected[row_id_col] = list(range(num_rows))
-        df = daft.from_pydict(df_collected)
+        # Use Daft's built-in monotonically increasing id to avoid eager materialization
+        df = df._add_monotonically_increasing_id(row_id_col)
 
         # Step 2: Explode list column into multiple rows
         df = df.explode(daft.col(map_over_col))

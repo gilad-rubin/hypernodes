@@ -25,7 +25,6 @@ from .sequential_engine import SequentialEngine
 
 # Build __all__ dynamically
 __all__ = [
-    "Engine",
     "SequentialEngine",
 ]
 
