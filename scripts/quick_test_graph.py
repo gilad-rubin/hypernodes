@@ -21,3 +21,4 @@ print(f"Dependencies: {len(pipeline.dependencies)} nodes")
 # Test execution
 result = pipeline(input=5)
 print(f"\nResult: {result}")
+

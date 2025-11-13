@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 class MapPlanner:
     """Plans execution strategies for map operations.
-    
+
     Handles input validation, separation of varying/fixed parameters,
     and generation of execution plans for both 'zip' and 'product' modes.
     """
@@ -18,15 +18,15 @@ class MapPlanner:
         map_mode: str,
     ) -> List[Dict[str, Any]]:
         """Plan execution by preparing inputs and building execution plans.
-        
+
         Args:
             inputs: All input parameters
             map_over: List of parameters that vary across executions
             map_mode: "zip" or "product"
-            
+
         Returns:
             List of input dictionaries, one per execution
-            
+
         Raises:
             ValueError: If validation fails
         """
@@ -129,4 +129,3 @@ class MapPlanner:
                     {**fixed_params, **{k: v for k, v in zip(param_names, values)}}
                     for values in itertools.product(*param_lists)
                 ]
-
