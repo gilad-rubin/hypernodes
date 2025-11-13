@@ -12,12 +12,10 @@ one node at a time. It doesn't know about orchestration, parallelism, or graph
 traversal.
 """
 
-import asyncio
 import inspect
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
-from .async_utils import run_coroutine_sync
 from .cache import compute_signature, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
 
@@ -55,17 +53,6 @@ def _get_node_id(node) -> str:
 
     # Fallback to string representation
     return str(node)
-
-
-def _get_sync_runner_strategy(pipeline: "Pipeline") -> str:
-    """Determine how to run coroutines for this pipeline's engine."""
-    engine = pipeline.engine
-    if engine is None:
-        return "per_call"
-    strategy = getattr(engine, "async_strategy", "per_call")
-    if strategy in ("thread_local", "auto", "async_native"):
-        return "thread_local"
-    return "per_call"
 
 
 def compute_node_signature(
@@ -146,12 +133,12 @@ def _execute_pipeline_node(
     ctx: CallbackContext,
 ) -> Dict[str, Any]:
     """Execute a PipelineNode and return its outputs.
-    
+
     IMPORTANT: The inner pipeline inherits the parent's configuration:
     - cache: Parent's cache instance is used for inner nodes
     - callbacks: Parent's callbacks receive events from inner nodes
     - engine: Parent's engine is used to execute the inner pipeline
-    
+
     This ensures unified behavior across nested pipelines and prevents
     dual caching/callback systems.
 
@@ -220,32 +207,19 @@ def execute_single_node(
     ctx: CallbackContext,
     node_signatures: Dict[str, str],
 ) -> Tuple[Any, str]:
-    """Synchronous wrapper that delegates to the async implementation."""
-    runner_strategy = _get_sync_runner_strategy(pipeline)
-    return run_coroutine_sync(
-        execute_single_node_async(
-            node,
-            inputs,
-            pipeline,
-            callbacks,
-            ctx,
-            node_signatures,
-            offload_sync=False,
-        ),
-        strategy=runner_strategy,
-    )
+    """Execute a single node with caching and callbacks.
 
+    Args:
+        node: Node or PipelineNode to execute
+        inputs: Input values for the node
+        pipeline: Parent pipeline (for config inheritance)
+        callbacks: List of callbacks to trigger
+        ctx: Callback context for state sharing
+        node_signatures: Signatures of upstream nodes (for dependency tracking)
 
-async def execute_single_node_async(
-    node,
-    inputs: Dict[str, Any],
-    pipeline: "Pipeline",
-    callbacks: List[PipelineCallback],
-    ctx: CallbackContext,
-    node_signatures: Dict[str, str],
-    offload_sync: bool = False,
-) -> Tuple[Any, str]:
-    """Execute a single node with caching, supporting async contexts."""
+    Returns:
+        Tuple of (result, signature)
+    """
     node_id = _get_node_id(node)
 
     # Get cache from pipeline
@@ -276,8 +250,9 @@ async def execute_single_node_async(
             # If in a map operation, also trigger map item cached callback
             if ctx.get("_in_map"):
                 item_index = ctx.get("_map_item_index")
+                signature_str = signature if signature else ""
                 for callback in callbacks:
-                    callback.on_map_item_cached(item_index, signature, ctx)
+                    callback.on_map_item_cached(item_index, signature_str, ctx)
 
             # For regular nodes, return just the value (not wrapped in dict)
             if not hasattr(node, "pipeline"):
@@ -292,52 +267,27 @@ async def execute_single_node_async(
     for callback in callbacks:
         callback.on_node_start(node_id, inputs, ctx)
 
-    # If in a map operation, also trigger map item start callback
-    if ctx.get("_in_map"):
-        item_index = ctx.get("_map_item_index")
-        for callback in callbacks:
-            callback.on_map_item_start(item_index, ctx)
-
     try:
         # Execute based on node type
         if hasattr(node, "pipeline"):
             # PipelineNode - delegate to specialized function
-            if offload_sync:
-                result = await asyncio.to_thread(
-                    _execute_pipeline_node, node, inputs, pipeline, callbacks, ctx
-                )
-            else:
-                result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
+            result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
         else:
             # Regular node - call directly
-            call_async = hasattr(node, "func") and inspect.iscoroutinefunction(
-                node.func
-            )
-            if offload_sync and not call_async:
-                result = await asyncio.to_thread(node, **inputs)
-            else:
-                result = node(**inputs)
-            # If result is a coroutine, await it
+            result = node(**inputs)
+
+            # Handle async functions if needed
             if inspect.iscoroutine(result):
-                result = await result
+                raise TypeError(
+                    f"Async function {node.func.__name__} not supported in sequential execution. "
+                    "Use an async-capable executor."
+                )
 
         # Trigger node end callbacks
         node_duration = time.time() - node_start_time
         output_dict = result if isinstance(result, dict) else {node.output_name: result}
         for callback in callbacks:
             callback.on_node_end(node_id, output_dict, node_duration, ctx)
-
-        # If in a map operation, also trigger map item end callback
-        if ctx.get("_in_map"):
-            item_index = ctx.get("_map_item_index")
-            map_item_start_time = ctx.get("_map_item_start_time")
-            map_item_duration = (
-                time.time() - map_item_start_time
-                if map_item_start_time
-                else node_duration
-            )
-            for callback in callbacks:
-                callback.on_map_item_end(item_index, map_item_duration, ctx)
 
     except Exception as e:
         # Trigger error callbacks

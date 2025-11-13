@@ -10,10 +10,10 @@ class TrackingCallback(PipelineCallback):
     def __init__(self):
         self.events = []
     
-    def on_pipeline_start(self, pipeline_id: str, ctx: CallbackContext) -> None:
+    def on_pipeline_start(self, pipeline_id: str, inputs: dict, ctx: CallbackContext) -> None:
         self.events.append(("pipeline_start", pipeline_id))
     
-    def on_pipeline_end(self, pipeline_id: str, ctx: CallbackContext) -> None:
+    def on_pipeline_end(self, pipeline_id: str, outputs: dict, duration: float, ctx: CallbackContext) -> None:
         self.events.append(("pipeline_end", pipeline_id))
     
     def on_node_start(self, node_id: str, inputs: dict, ctx: CallbackContext) -> None:
@@ -31,16 +31,16 @@ class TrackingCallback(PipelineCallback):
     def on_nested_pipeline_end(self, parent_id: str, child_pipeline_id: str, duration: float, ctx: CallbackContext) -> None:
         self.events.append(("nested_end", parent_id, child_pipeline_id))
     
-    def on_map_start(self, pipeline_id: str, total_items: int, ctx: CallbackContext) -> None:
-        self.events.append(("map_start", pipeline_id, total_items))
+    def on_map_start(self, total_items: int, ctx: CallbackContext) -> None:
+        self.events.append(("map_start", total_items))
     
-    def on_map_end(self, pipeline_id: str, total_items: int, ctx: CallbackContext) -> None:
-        self.events.append(("map_end", pipeline_id, total_items))
+    def on_map_end(self, total_duration: float, ctx: CallbackContext) -> None:
+        self.events.append(("map_end",))
     
-    def on_map_item_start(self, pipeline_id: str, item_index: int, total_items: int, ctx: CallbackContext) -> None:
+    def on_map_item_start(self, item_index: int, ctx: CallbackContext) -> None:
         self.events.append(("map_item_start", item_index))
     
-    def on_map_item_end(self, pipeline_id: str, item_index: int, total_items: int, ctx: CallbackContext) -> None:
+    def on_map_item_end(self, item_index: int, duration: float, ctx: CallbackContext) -> None:
         self.events.append(("map_item_end", item_index))
 
 
@@ -168,4 +168,180 @@ def test_multiple_callbacks():
     event_types1 = [e[0] for e in callback1.events]
     event_types2 = [e[0] for e in callback2.events]
     assert event_types1 == event_types2
+
+
+def test_callback_context_state_sharing():
+    """Test that callbacks can share state via CallbackContext."""
+    
+    class SpanTracker(PipelineCallback):
+        def on_node_start(self, node_id: str, inputs: dict, ctx: CallbackContext) -> None:
+            span_id = f"span_{node_id}"
+            ctx.set("current_span", span_id)
+            ctx.set(f"span:{node_id}", span_id)
+    
+    class MetricsTracker(PipelineCallback):
+        def __init__(self):
+            self.metrics = []
+        
+        def on_node_end(self, node_id: str, outputs: dict, duration: float, ctx: CallbackContext) -> None:
+            span_id = ctx.get(f"span:{node_id}")
+            self.metrics.append({
+                "node_id": node_id,
+                "span_id": span_id,
+                "duration": duration
+            })
+    
+    @node(output_name="result")
+    def compute(x: int) -> int:
+        return x + 5
+    
+    span_tracker = SpanTracker()
+    metrics_tracker = MetricsTracker()
+    
+    pipeline = Pipeline(nodes=[compute], callbacks=[span_tracker, metrics_tracker])
+    
+    result = pipeline.run(inputs={"x": 10})
+    
+    assert result == {"result": 15}
+    assert len(metrics_tracker.metrics) == 1
+    assert metrics_tracker.metrics[0]["node_id"] == "compute"
+    assert metrics_tracker.metrics[0]["span_id"] == "span_compute"
+    assert metrics_tracker.metrics[0]["duration"] >= 0
+
+
+def test_cache_hit_callback():
+    """Test that on_node_cached is called for cache hits."""
+    import tempfile
+    from hypernodes import DiskCache
+    
+    cache_events = []
+    
+    class CacheTracker(PipelineCallback):
+        def on_node_cached(self, node_id: str, signature: str, ctx: CallbackContext) -> None:
+            cache_events.append(("cached", node_id, signature))
+        
+        def on_node_start(self, node_id: str, inputs: dict, ctx: CallbackContext) -> None:
+            cache_events.append(("executed", node_id))
+    
+    @node(output_name="result")
+    def expensive_compute(x: int) -> int:
+        return x ** 2
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pipeline = Pipeline(
+            nodes=[expensive_compute],
+            cache=DiskCache(path=tmpdir),
+            callbacks=[CacheTracker()]
+        )
+        
+        # First run - should execute
+        result1 = pipeline.run(inputs={"x": 5})
+        assert result1 == {"result": 25}
+        assert ("executed", "expensive_compute") in cache_events
+        assert not any(event[0] == "cached" for event in cache_events)
+        
+        # Second run - should be cached
+        cache_events.clear()
+        result2 = pipeline.run(inputs={"x": 5})
+        assert result2 == {"result": 25}
+        assert any(event[0] == "cached" and event[1] == "expensive_compute" for event in cache_events)
+        assert not any(event[0] == "executed" for event in cache_events)
+
+
+def test_error_handling_callback():
+    """Test that on_error is called when nodes fail."""
+    
+    error_events = []
+    
+    class ErrorTracker(PipelineCallback):
+        def on_error(self, node_id: str, error: Exception, ctx: CallbackContext) -> None:
+            error_events.append({
+                "node_id": node_id,
+                "error_type": type(error).__name__,
+                "error_msg": str(error)
+            })
+    
+    @node(output_name="result")
+    def failing_node(x: int) -> int:
+        raise ValueError("Intentional failure")
+    
+    pipeline = Pipeline(nodes=[failing_node], callbacks=[ErrorTracker()])
+    
+    try:
+        pipeline.run(inputs={"x": 10})
+        assert False, "Should have raised error"
+    except ValueError:
+        pass
+    
+    assert len(error_events) == 1
+    assert error_events[0]["node_id"] == "failing_node"
+    assert error_events[0]["error_type"] == "ValueError"
+    assert "Intentional failure" in error_events[0]["error_msg"]
+
+
+def test_map_operation_with_cache():
+    """Test that map operations properly track cache hits vs executions."""
+    import tempfile
+    from hypernodes import DiskCache
+    
+    cache_events = []
+    
+    class MapCacheTracker(PipelineCallback):
+        def on_node_cached(self, node_id: str, signature: str, ctx: CallbackContext) -> None:
+            # Track cached nodes during map
+            if ctx.get("_in_map"):
+                cache_events.append(("cached", node_id))
+        
+        def on_node_start(self, node_id: str, inputs: dict, ctx: CallbackContext) -> None:
+            # Track executed nodes during map
+            if ctx.get("_in_map"):
+                cache_events.append(("executed", node_id))
+        
+        def on_map_item_cached(self, item_index: int, signature: str, ctx: CallbackContext) -> None:
+            cache_events.append(("item_cached", item_index))
+    
+    @node(output_name="doubled")
+    def double_cached(item: int) -> int:
+        return item * 2
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pipeline = Pipeline(
+            nodes=[double_cached],
+            cache=DiskCache(path=tmpdir),
+            callbacks=[MapCacheTracker()]
+        )
+        
+        # First run - all items execute
+        result1 = pipeline.map(inputs={"item": [1, 2, 3]}, map_over="item")
+        assert result1 == [
+            {"doubled": 2},
+            {"doubled": 4},
+            {"doubled": 6},
+        ]
+        executed_count = sum(1 for e in cache_events if e[0] == "executed")
+        assert executed_count == 3
+        cached_count = sum(1 for e in cache_events if e[0] == "cached")
+        assert cached_count == 0
+        
+        # Second run - all items cached
+        cache_events.clear()
+        result2 = pipeline.map(inputs={"item": [1, 2, 3]}, map_over="item")
+        assert result2 == result1
+        cached_count = sum(1 for e in cache_events if e[0] == "cached")
+        assert cached_count == 3
+        executed_count = sum(1 for e in cache_events if e[0] == "executed")
+        assert executed_count == 0
+        
+        # Third run - partial overlap (items 1, 2 cached, item 4 executes)
+        cache_events.clear()
+        result3 = pipeline.map(inputs={"item": [1, 2, 4]}, map_over="item")
+        assert result3 == [
+            {"doubled": 2},
+            {"doubled": 4},
+            {"doubled": 8},
+        ]
+        cached_count = sum(1 for e in cache_events if e[0] == "cached")
+        assert cached_count == 2
+        executed_count = sum(1 for e in cache_events if e[0] == "executed")
+        assert executed_count == 1
 

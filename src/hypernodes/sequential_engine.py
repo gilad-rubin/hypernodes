@@ -4,6 +4,7 @@ This engine executes nodes one by one in topological order.
 For nested pipelines, it inherits the parent's cache, callbacks, and engine.
 """
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .callbacks import CallbackContext
@@ -16,19 +17,19 @@ if TYPE_CHECKING:
 
 class SequentialEngine:
     """Minimal sequential execution engine.
-    
+
     Executes nodes one by one in topological order.
     No parallelism, no async - just simple, predictable execution.
-    
+
     For nested pipelines (PipelineNode), the parent pipeline's configuration
     (cache, callbacks, engine) is inherited by the inner pipeline during execution.
-    
+
     Example:
         >>> engine = SequentialEngine()
         >>> pipeline = Pipeline(nodes=[...], engine=engine)
         >>> result = pipeline.run(inputs={"x": 5})
     """
-    
+
     def run(
         self,
         pipeline: "Pipeline",
@@ -38,54 +39,84 @@ class SequentialEngine:
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute pipeline sequentially.
-        
+
         Args:
             pipeline: Pipeline to execute
             inputs: Input values
             output_name: Optional output name(s) to filter results
             _ctx: Internal callback context (for nested pipelines)
             **kwargs: Additional arguments (ignored)
-            
+
         Returns:
             Dictionary of output values
         """
         ctx = _ctx or CallbackContext()
         callbacks = pipeline.callbacks or []
-        
-        # Trigger pipeline start
-        for callback in callbacks:
-            callback.on_pipeline_start(pipeline.id, ctx)
-        
-        # Execute nodes in topological order
-        available_values = dict(inputs)
-        outputs = {}
-        node_signatures = {}
-        
-        for node in pipeline.graph.execution_order:
-            node_id = _get_node_id(node)
-            
-            # Gather inputs for this node
-            node_inputs = {param: available_values[param] for param in node.root_args}
-            
-            # Execute the node (handles caching, callbacks, PipelineNodes)
-            result, signature = execute_single_node(
-                node, node_inputs, pipeline, callbacks, ctx, node_signatures
+
+        # Push pipeline onto context hierarchy stack (only if this is a new context)
+        # If _ctx was provided, we're being called from map() or nested pipeline,
+        # and the pipeline is already on the stack
+        is_new_context = _ctx is None
+        if is_new_context:
+            ctx.push_pipeline(pipeline.id)
+
+        try:
+            # Set pipeline metadata for callbacks (e.g., progress bars)
+            ctx.set_pipeline_metadata(
+                pipeline.id,
+                {
+                    "total_nodes": len(pipeline.graph.execution_order),
+                    "pipeline_name": pipeline.name or pipeline.id,
+                    "node_ids": [
+                        _get_node_id(node) for node in pipeline.graph.execution_order
+                    ],
+                },
             )
-            
-            # Store outputs in available values and outputs dict
-            self._store_node_outputs(node, result, outputs, available_values, node_signatures, signature)
-        
-        # Trigger pipeline end
-        for callback in callbacks:
-            callback.on_pipeline_end(pipeline.id, ctx)
-        
-        # Filter outputs if requested
-        if output_name:
-            names = [output_name] if isinstance(output_name, str) else output_name
-            return {k: outputs[k] for k in names}
-        
-        return outputs
-    
+
+            # Trigger pipeline start
+            start_time = time.time()
+            for callback in callbacks:
+                callback.on_pipeline_start(pipeline.id, inputs, ctx)
+
+            # Execute nodes in topological order
+            available_values = dict(inputs)
+            outputs = {}
+            node_signatures = {}
+
+            for node in pipeline.graph.execution_order:
+                node_id = _get_node_id(node)
+
+                # Gather inputs for this node
+                node_inputs = {
+                    param: available_values[param] for param in node.root_args
+                }
+
+                # Execute the node (handles caching, callbacks, PipelineNodes)
+                result, signature = execute_single_node(
+                    node, node_inputs, pipeline, callbacks, ctx, node_signatures
+                )
+
+                # Store outputs in available values and outputs dict
+                self._store_node_outputs(
+                    node, result, outputs, available_values, node_signatures, signature
+                )
+
+            # Trigger pipeline end
+            duration = time.time() - start_time
+            for callback in callbacks:
+                callback.on_pipeline_end(pipeline.id, outputs, duration, ctx)
+
+            # Filter outputs if requested
+            if output_name:
+                names = [output_name] if isinstance(output_name, str) else output_name
+                return {k: outputs[k] for k in names}
+
+            return outputs
+        finally:
+            # Only pop if we pushed (i.e., this was a new context)
+            if is_new_context:
+                ctx.pop_pipeline()
+
     def map(
         self,
         pipeline: "Pipeline",
@@ -97,7 +128,7 @@ class SequentialEngine:
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         """Execute pipeline for each item sequentially.
-        
+
         Args:
             pipeline: Pipeline to execute
             inputs: Input values (lists for map_over params, scalars for fixed params)
@@ -106,43 +137,79 @@ class SequentialEngine:
             output_name: Optional output name(s) to filter results
             _ctx: Internal callback context
             **kwargs: Additional arguments (ignored)
-            
+
         Returns:
             List of output dictionaries, one per item
         """
         ctx = _ctx or CallbackContext()
         callbacks = pipeline.callbacks or []
-        
-        # Normalize map_over to list
-        map_over_list = [map_over] if isinstance(map_over, str) else map_over
-        
-        # Use MapPlanner to create items
-        planner = MapPlanner()
-        items = planner.plan_execution(inputs, map_over_list, map_mode)
-        
-        # Trigger map start
-        for callback in callbacks:
-            callback.on_map_start(pipeline.id, len(items), ctx)
-        
-        # Execute each item sequentially
-        results = []
-        for idx, item_inputs in enumerate(items):
+
+        # Push pipeline onto context hierarchy stack (only if this is a new context)
+        is_new_context = _ctx is None
+        if is_new_context:
+            ctx.push_pipeline(pipeline.id)
+
+        try:
+            # Normalize map_over to list
+            map_over_list = [map_over] if isinstance(map_over, str) else map_over
+
+            # Use MapPlanner to create items
+            planner = MapPlanner()
+            items = planner.plan_execution(inputs, map_over_list, map_mode)
+
+            # Set pipeline metadata for callbacks (e.g., progress bars)
+            ctx.set_pipeline_metadata(
+                pipeline.id,
+                {
+                    "total_nodes": len(pipeline.graph.execution_order),
+                    "pipeline_name": pipeline.name or pipeline.id,
+                    "node_ids": [
+                        _get_node_id(node) for node in pipeline.graph.execution_order
+                    ],
+                },
+            )
+
+            # Trigger map start
+            map_start_time = time.time()
             for callback in callbacks:
-                callback.on_map_item_start(pipeline.id, idx, len(items), ctx)
-            
-            # Run pipeline for this item
-            result = self.run(pipeline, item_inputs, output_name, _ctx=ctx)
-            results.append(result)
-            
+                callback.on_map_start(len(items), ctx)
+
+            # Set map context
+            ctx.set("_in_map", True)
+            ctx.set("_map_total_items", len(items))
+
+            # Execute each item sequentially
+            results = []
+            for idx, item_inputs in enumerate(items):
+                item_start_time = time.time()
+                ctx.set("_map_item_index", idx)
+                ctx.set("_map_item_start_time", item_start_time)
+
+                for callback in callbacks:
+                    callback.on_map_item_start(idx, ctx)
+
+                # Run pipeline for this item
+                result = self.run(pipeline, item_inputs, output_name, _ctx=ctx)
+                results.append(result)
+
+                item_duration = time.time() - item_start_time
+                for callback in callbacks:
+                    callback.on_map_item_end(idx, item_duration, ctx)
+
+            # Clear map context
+            ctx.set("_in_map", False)
+
+            # Trigger map end
+            total_duration = time.time() - map_start_time
             for callback in callbacks:
-                callback.on_map_item_end(pipeline.id, idx, len(items), ctx)
-        
-        # Trigger map end
-        for callback in callbacks:
-            callback.on_map_end(pipeline.id, len(items), ctx)
-        
-        return results
-    
+                callback.on_map_end(total_duration, ctx)
+
+            return results
+        finally:
+            # Only pop if we pushed (i.e., this was a new context)
+            if is_new_context:
+                ctx.pop_pipeline()
+
     def _store_node_outputs(
         self,
         node,
@@ -153,7 +220,7 @@ class SequentialEngine:
         signature: str,
     ) -> None:
         """Store node outputs in results dicts.
-        
+
         Handles both regular nodes and PipelineNodes (which return dicts).
         """
         if hasattr(node, "pipeline"):
@@ -175,4 +242,3 @@ class SequentialEngine:
                 outputs[node.output_name] = result
                 available_values[node.output_name] = result
                 node_signatures[node.output_name] = signature
-

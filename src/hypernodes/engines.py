@@ -21,7 +21,6 @@ Example:
     >>> pipeline = Pipeline(nodes=[...], engine=daft_engine)
 """
 
-from .protocols import Engine
 from .sequential_engine import SequentialEngine
 
 # Build __all__ dynamically

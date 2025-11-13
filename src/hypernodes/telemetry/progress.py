@@ -121,7 +121,7 @@ class ProgressCallback(PipelineCallback):
 
         metadata = ctx.get_pipeline_metadata(pipeline_id)
         total_nodes = metadata.get("total_nodes", 0)
-        
+
         # Get pipeline name from metadata if available
         pipeline_name = metadata.get("pipeline_name", pipeline_id)
 
@@ -146,7 +146,7 @@ class ProgressCallback(PipelineCallback):
         in_map = ctx.get("_in_map", False)
         pipeline_id = ctx.current_pipeline_id
         pipeline_bar = ctx.get(f"progress_bar:{pipeline_id}")
-        
+
         if pipeline_bar:
             # Show current node in pipeline bar description
             pipeline_name = ctx.get(f"pipeline_name:{pipeline_id}", pipeline_id)
@@ -156,7 +156,7 @@ class ProgressCallback(PipelineCallback):
         # (map node bars are created at map_start instead)
         if in_map:
             return
-        
+
         # Skip creating node bar for PipelineNodes - they will create their own
         # progress bars for their internal pipeline/map execution
         # This is marked in context by backend when calling on_nested_pipeline_start
