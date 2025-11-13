@@ -95,7 +95,7 @@ class TestEngineMapOperations:
 
         # Map interface - items are passed as a list
         items = [{"x": 1}, {"x": 2}, {"x": 3}]
-        results = engine.map(pipeline, items, {}, None, None)
+        results = engine.map(pipeline, items, {}, None)
 
         assert len(results) == 3
         assert results[0] == {"doubled": 2}
@@ -126,7 +126,7 @@ class TestEngineDifferentExecutors:
 
         # Map uses map_executor
         items = [{"x": 1}, {"x": 2}]
-        results = engine.map(pipeline, items, {}, None, None)
+        results = engine.map(pipeline, items, {}, None)
         assert len(results) == 2
 
         engine.map_executor.shutdown(wait=True)

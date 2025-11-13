@@ -26,7 +26,7 @@ Example:
 
 from .cache import DiskCache
 from .callbacks import CallbackContext, PipelineCallback
-from .engines import Engine, HypernodesEngine
+from .engines import Engine, Executor, HypernodesEngine
 from .exceptions import (
     CycleError,
     DependencyError,
@@ -59,8 +59,11 @@ __all__ = [
     "HyperNode",
     "Node",
     "Pipeline",
+    # Engines & Executors
     "Engine",
+    "Executor",
     "HyperNodesEngine",
+    # Cache & Callbacks
     "DiskCache",
     "PipelineCallback",
     "CallbackContext",
