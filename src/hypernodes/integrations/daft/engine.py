@@ -38,7 +38,11 @@ class DaftEngine(Engine):
         >>> result = pipeline.run(x=5)
     """
 
-    def __init__(self, use_batch_udf: bool = True, default_daft_config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        use_batch_udf: bool = True,
+        default_daft_config: Optional[Dict[str, Any]] = None,
+    ):
         """Initialize DaftEngine.
 
         Args:
@@ -221,14 +225,14 @@ class DaftEngine(Engine):
         available_columns: set,
     ) -> tuple["daft.DataFrame", set]:
         """Apply a regular node as a UDF column (batch or row-wise)."""
-        # Check if we should use batch UDF (in map context and enabled)
-        use_batch = self._is_map_context and self.use_batch_udf
+        # Determine if we should use batch UDF (8x speedup but has limitations)
+        use_batch = self._should_use_batch_udf(node)
 
         if use_batch:
-            # Use batch UDF for better performance
+            # Use batch UDF for better performance (reduces Python overhead)
             return self._apply_batch_node_transformation(df, node, available_columns)
         else:
-            # Use row-wise UDF (for single-row or when batch disabled)
+            # Use row-wise UDF (required for list/dict types, or single-row execution)
             udf = daft.func(node.func)
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
@@ -238,23 +242,69 @@ class DaftEngine(Engine):
 
             return df, available_columns
 
+    def _should_use_batch_udf(self, node: Any) -> bool:
+        """Determine if a node should use batch UDF.
+
+        Batch UDFs provide 8x speedup BUT have limitations:
+        - Cannot return lists/dicts (Daft limitation: "List casting not implemented for dtype: Python")
+        - Cannot receive list/dict inputs from previous nodes
+
+        We use batch UDFs only when:
+        1. In map context (multiple rows to process)
+        2. Batch UDFs enabled
+        3. Function works with simple types (str, int, float, bool) NOT lists/dicts
+        """
+        import inspect
+        from typing import get_origin
+
+        if not (self._is_map_context and self.use_batch_udf):
+            return False
+
+        # Check return type hint
+        sig = inspect.signature(node.func)
+        return_annotation = sig.return_annotation
+
+        if return_annotation != inspect.Signature.empty:
+            origin = get_origin(return_annotation)
+            # Cannot use batch UDF if function returns list/dict
+            if origin in (list, dict):
+                return False
+
+        # Check parameter type hints (inputs from previous nodes)
+        for param_name in node.root_args:
+            param = sig.parameters.get(param_name)
+            if param and param.annotation != inspect.Parameter.empty:
+                origin = get_origin(param.annotation)
+                # Cannot use batch UDF if function receives list/dict
+                if origin in (list, dict):
+                    return False
+
+        return True
+
     def _apply_batch_node_transformation(
         self,
         df: "daft.DataFrame",
         node: Any,
         available_columns: set,
     ) -> tuple["daft.DataFrame", set]:
-        """Apply node as batch UDF for vectorized processing."""
+        """Apply node as batch UDF for vectorized processing.
+
+        Note: This should only be called for nodes with simple types.
+        Nodes with list/dict types should use row-wise UDFs.
+        """
         from daft import DataType, Series
 
         # Store node.func in closure to avoid serialization issues
         node_func = node.func
-        node_args = node.root_args
+
+        # Use Python dtype for simple types (str, int, float, bool)
+        # We only call this for simple types - list/dict use row-wise UDFs
+        return_dtype = DataType.python()
 
         # Use engine-level config for batch size
-        batch_kwargs = {'return_dtype': DataType.python()}
-        if 'batch_size' in self.default_daft_config:
-            batch_kwargs['batch_size'] = self.default_daft_config['batch_size']
+        batch_kwargs = {"return_dtype": return_dtype}
+        if "batch_size" in self.default_daft_config:
+            batch_kwargs["batch_size"] = self.default_daft_config["batch_size"]
 
         # Wrap the user's function to handle batching
         @daft.func.batch(**batch_kwargs)
@@ -322,31 +372,35 @@ class DaftEngine(Engine):
 
     def _is_stateful_param(self, param_name: str, param_value: Any, node: Any) -> bool:
         """Check if a parameter should use stateful UDF (@daft.cls).
-        
+
         Only checks for __daft_stateful__ attribute on the class.
-        
+
         Args:
             param_name: Parameter name
             param_value: Parameter value
             node: The node being processed
-            
+
         Returns:
             True if parameter should be stateful
         """
         # Check if the object has __daft_stateful__ attribute
-        if hasattr(param_value, '__class__') and hasattr(param_value.__class__, '__daft_stateful__'):
+        if hasattr(param_value, "__class__") and hasattr(
+            param_value.__class__, "__daft_stateful__"
+        ):
             return True
-        
+
         return False
 
-    def _create_stateful_wrapper(self, param_value: Any, param_name: str, node: Any) -> Any:
+    def _create_stateful_wrapper(
+        self, param_value: Any, param_name: str, node: Any
+    ) -> Any:
         """Wrap a stateful object with @daft.cls.
-        
+
         Args:
             param_value: The object to wrap
             param_name: Parameter name
             node: The node being processed
-            
+
         Returns:
             Daft stateful UDF wrapper
         """
@@ -354,37 +408,37 @@ class DaftEngine(Engine):
         cache_key = (id(param_value), param_name, id(node))
         if cache_key in self._stateful_wrappers:
             return self._stateful_wrappers[cache_key]
-        
+
         # Use engine-level config
         config = self.default_daft_config
-        
+
         # Extract @daft.cls parameters
         cls_kwargs = {}
-        if 'max_concurrency' in config:
-            cls_kwargs['max_concurrency'] = config['max_concurrency']
-        if 'use_process' in config:
-            cls_kwargs['use_process'] = config['use_process']
-        if 'gpus' in config:
-            cls_kwargs['gpus'] = config['gpus']
-        
+        if "max_concurrency" in config:
+            cls_kwargs["max_concurrency"] = config["max_concurrency"]
+        if "use_process" in config:
+            cls_kwargs["use_process"] = config["use_process"]
+        if "gpus" in config:
+            cls_kwargs["gpus"] = config["gpus"]
+
         # Create stateful wrapper
         @daft.cls(**cls_kwargs)
         class StatefulWrapper:
             def __init__(self):
                 # Store the original instance
                 self._instance = param_value
-            
+
             def __call__(self, *args, **kwargs):
                 # Forward to the instance's __call__ if available
-                if hasattr(self._instance, '__call__'):
+                if hasattr(self._instance, "__call__"):
                     return self._instance(*args, **kwargs)
                 # Otherwise, call a default method if hinted
-                method_name = getattr(self._instance.__class__, '__daft_method__', None)
+                method_name = getattr(self._instance.__class__, "__daft_method__", None)
                 if method_name:
                     return getattr(self._instance, method_name)(*args, **kwargs)
                 # Fallback: just return the instance (for constant objects)
                 return self._instance
-        
+
         wrapper = StatefulWrapper()
         self._stateful_wrappers[cache_key] = wrapper
         return wrapper
