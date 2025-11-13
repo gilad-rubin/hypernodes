@@ -2,10 +2,12 @@
 
 import functools
 import inspect
-from typing import Any, Callable
+from typing import Any, Callable, Union
+
+from .node_protocol import HyperNode
 
 
-class Node:
+class Node(HyperNode):
     """Wraps a function with pipeline metadata.
 
     A Node represents an atomic unit of computation in a pipeline. It stores
@@ -21,7 +23,7 @@ class Node:
     def __init__(
         self,
         func: Callable,
-        output_name: str,
+        output_name: Union[str, tuple],
         cache: bool = True,
     ):
         """Initialize a Node wrapper around a function.

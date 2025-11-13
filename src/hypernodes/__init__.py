@@ -25,6 +25,7 @@ Example:
 """
 
 from .node import Node, node
+from .node_protocol import HyperNode
 from .pipeline import Pipeline
 from .engines import Engine, HypernodesEngine
 from .cache import DiskCache
@@ -55,6 +56,7 @@ __all__ = [
     # Decorators
     "node",
     # Classes
+    "HyperNode",
     "Node",
     "Pipeline",
     "Engine",

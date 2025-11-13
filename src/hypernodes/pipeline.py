@@ -85,10 +85,11 @@ class Pipeline(BuilderMixin):
         self,
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         self._validate_inputs(inputs)
         self._validate_output_names(output_name)
-        return self.engine.run(self, inputs, output_name=output_name)
+        return self.engine.run(self, inputs, output_name=output_name, **kwargs)
 
     def map(
         self,
@@ -104,9 +105,6 @@ class Pipeline(BuilderMixin):
         if isinstance(map_over, str):
             map_over = [map_over]
 
-        if map_mode not in ("zip", "product"):
-            raise ValueError(f"map_mode must be 'zip' or 'product', got '{map_mode}'")
-
         return self.engine.map(self, inputs, map_over, map_mode, output_name, **kwargs)
 
     def as_node(
@@ -116,9 +114,7 @@ class Pipeline(BuilderMixin):
         map_over: Optional[Union[str, List[str]]] = None,
         map_mode: str = "zip",
         name: Optional[str] = None,
-        engine: Optional[Engine] = None,
-        cache: Optional[Cache] = None,
-        callbacks: Optional[List[PipelineCallback]] = None,
+        cache: bool = True,
     ) -> PipelineNode:
         """Wrap this pipeline as a node with custom input/output mapping.
 
@@ -137,9 +133,7 @@ class Pipeline(BuilderMixin):
                      Internally, the pipeline maps over each item.
             map_mode: Mode for map operation ("zip" or "product")
             name: Optional name for this node (displayed in visualizations)
-            engine: Override engine for this node's execution
-            cache: Override cache for this node's execution
-            callbacks: Override callbacks for this node's execution
+            cache: Whether to cache the node. Not to be confused with the pipeline's cache.
 
         Returns:
             PipelineNode that wraps this pipeline with the specified mapping
@@ -163,55 +157,8 @@ class Pipeline(BuilderMixin):
             map_over=map_over,
             map_mode=map_mode,
             name=name,
-            engine=engine,
             cache=cache,
-            callbacks=callbacks,
         )
-
-    def __enter__(self) -> "Pipeline":
-        """Enter context manager.
-
-        Allows using Pipeline with 'with' statement for automatic cleanup.
-
-        Returns:
-            Self for use in context
-
-        Example:
-            >>> with Pipeline(nodes=[...]) as pipeline:
-            ...     results = pipeline.run(inputs={"x": 5})
-            ... # Engine automatically shut down here
-        """
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit context manager and cleanup resources.
-
-        Automatically shuts down the configured engine if we created it.
-        """
-        self._cleanup()
-        return False  # Don't suppress exceptions
-
-    def __del__(self):
-        """Destructor to ensure cleanup happens even without context manager.
-
-        This is called when the Pipeline object is garbage collected,
-        ensuring engines are properly shut down.
-        """
-        self._cleanup()
-
-    def _cleanup(self):
-        """Internal method to cleanup resources (shutdown engines).
-
-        Only shuts down engines that we created (not user-provided ones).
-        Safe to call multiple times.
-        """
-        # Only cleanup our own engine (not inherited from parent)
-        if self.engine is not None and hasattr(self.engine, "shutdown"):
-            try:
-                self.engine.shutdown(wait=True)
-            except Exception:
-                # Ignore errors during cleanup (may already be shut down)
-                pass
 
     def visualize(
         self,
@@ -255,19 +202,6 @@ class Pipeline(BuilderMixin):
             style=style,
             return_type=return_type,
         )
-
-    def __call__(self, **kwargs) -> Dict[str, Any]:
-        """Make Pipeline callable like a Node.
-
-        This allows pipelines to be used as nodes in other pipelines.
-
-        Args:
-            **kwargs: Keyword arguments for inputs
-
-        Returns:
-            Dictionary of outputs
-        """
-        return self.run(kwargs)
 
     def __repr__(self) -> str:
         """Return string representation of the Pipeline."""
