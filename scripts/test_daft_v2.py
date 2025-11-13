@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from hypernodes import Pipeline, node
 from hypernodes.cache import DiskCache
-from hypernodes.integrations.daft.engine_v2 import DaftEngineV2
+from hypernodes.integrations.daft import DaftEngine
 from hypernodes.telemetry import ProgressCallback
 
 
@@ -44,7 +44,7 @@ def test_basic_run():
     cache = DiskCache(".daft_v2_test_cache")
     cache.clear()
 
-    engine = DaftEngineV2()
+    engine = DaftEngine()
     pipeline = Pipeline(
         nodes=[double, add_ten],
         engine=engine,
@@ -82,7 +82,7 @@ def test_map_operation():
     cache = DiskCache(".daft_v2_test_cache")
     cache.clear()
 
-    engine = DaftEngineV2()
+    engine = DaftEngine()
     pipeline = Pipeline(
         nodes=[double, add_ten],
         engine=engine,
@@ -95,8 +95,9 @@ def test_map_operation():
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     print(f"Results: {results}")
 
-    # Verify results
-    assert results["result"] == [12, 14, 16], f"Expected [12, 14, 16], got {results['result']}"
+    # Verify results - should be list of dicts
+    result_values = [r["result"] for r in results]
+    assert result_values == [12, 14, 16], f"Expected [12, 14, 16], got {result_values}"
 
     print("\n✓ Test 2 passed!\n")
 
@@ -110,7 +111,7 @@ def test_map_with_cache():
     cache = DiskCache(".daft_v2_test_cache")
     cache.clear()
 
-    engine = DaftEngineV2()
+    engine = DaftEngine()
     pipeline = Pipeline(
         nodes=[double, add_ten],
         engine=engine,
@@ -128,7 +129,8 @@ def test_map_with_cache():
     results2 = pipeline.map(inputs={"x": [2, 3, 4]}, map_over="x")
     print(f"Results: {results2}")
 
-    assert results2["result"] == [14, 16, 18], f"Expected [14, 16, 18], got {results2['result']}"
+    result_values = [r["result"] for r in results2]
+    assert result_values == [14, 16, 18], f"Expected [14, 16, 18], got {result_values}"
 
     print("\n✓ Test 3 passed!\n")
 
@@ -142,7 +144,7 @@ def test_output_filtering():
     cache = DiskCache(".daft_v2_test_cache")
     cache.clear()
 
-    engine = DaftEngineV2()
+    engine = DaftEngine()
     pipeline = Pipeline(
         nodes=[double, add_ten],
         engine=engine,

@@ -10,8 +10,8 @@ Example:
 
 try:
     from .engine import DaftEngine
-    from .engine_v2 import DaftEngineV2
-    __all__ = ["DaftEngine", "DaftEngineV2"]
+
+    __all__ = ["DaftEngine"]
 except ImportError:
     # Daft not installed
     __all__ = []
