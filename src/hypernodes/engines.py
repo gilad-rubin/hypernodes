@@ -25,8 +25,9 @@ Example:
     >>> engine = HypernodesEngine(node_executor=CustomExecutor())
 """
 
-from .engine import Engine, Executor, HypernodesEngine
+from .engine import HypernodesEngine
 from .executors import DEFAULT_WORKERS, AsyncExecutor, SequentialExecutor
+from .protocols import Engine, Executor
 
 # Build __all__ dynamically
 __all__ = [

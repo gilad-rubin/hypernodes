@@ -145,9 +145,7 @@ class TestSelectiveOutputMap:
         # Map over x, but only request 'b'
         result = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x", output_name="b")
 
-        assert result == {"b": [4, 6, 8]}
-        assert "a" not in result
-        assert "c" not in result
+        assert result == [{"b": 4}, {"b": 6}, {"b": 8}]
 
     def test_map_with_multiple_outputs(self):
         """Test map operation with multiple output selection."""
@@ -158,7 +156,11 @@ class TestSelectiveOutputMap:
             inputs={"x": [1, 2, 3]}, map_over="x", output_name=["a", "c"]
         )
 
-        assert result == {"a": [2, 3, 4], "c": [14, 16, 18]}
+        assert result == [
+            {"a": 2, "c": 14},
+            {"a": 3, "c": 16},
+            {"a": 4, "c": 18},
+        ]
         assert "b" not in result
 
     def test_map_with_none_returns_all(self):
@@ -167,7 +169,7 @@ class TestSelectiveOutputMap:
 
         result = pipeline.map(inputs={"x": [1, 2]}, map_over="x", output_name=None)
 
-        assert result == {"a": [2, 3], "b": [4, 6]}
+        assert result == [{"a": 2, "b": 4}, {"a": 3, "b": 6}]
 
 
 class TestSelectiveOutputComplexDependencies:

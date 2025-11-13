@@ -24,7 +24,7 @@ def test_2_1_map_over_single_parameter():
     pipeline = Pipeline(nodes=[add_one])
     
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
-    assert results == {"result": [2, 3, 4]}
+    assert results == [{"result": 2}, {"result": 3}, {"result": 4}]
 
 
 def test_2_2_map_over_two_sequential_nodes():
@@ -46,7 +46,11 @@ def test_2_2_map_over_two_sequential_nodes():
     pipeline = Pipeline(nodes=[double, add_one])
     
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
-    assert results == {"doubled": [2, 4, 6], "result": [3, 5, 7]}
+    assert results == [
+        {"doubled": 2, "result": 3},
+        {"doubled": 4, "result": 5},
+        {"doubled": 6, "result": 7},
+    ]
 
 
 def test_2_3_map_with_diamond_pattern():
@@ -71,7 +75,11 @@ def test_2_3_map_with_diamond_pattern():
     pipeline = Pipeline(nodes=[double, triple, add])
     
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
-    assert results == {"doubled": [2, 4, 6], "tripled": [3, 6, 9], "result": [5, 10, 15]}
+    assert results == [
+        {"doubled": 2, "tripled": 3, "result": 5},
+        {"doubled": 4, "tripled": 6, "result": 10},
+        {"doubled": 6, "tripled": 9, "result": 15},
+    ]
 
 
 def test_2_4_map_with_fixed_and_varying_parameters():
@@ -89,7 +97,7 @@ def test_2_4_map_with_fixed_and_varying_parameters():
     pipeline = Pipeline(nodes=[multiply])
     
     results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
-    assert results == {"result": [10, 20, 30]}
+    assert results == [{"result": 10}, {"result": 20}, {"result": 30}]
 
 
 def test_2_5_empty_collection():
@@ -106,7 +114,7 @@ def test_2_5_empty_collection():
     pipeline = Pipeline(nodes=[add_one])
     
     results = pipeline.map(inputs={"x": []}, map_over="x")
-    assert results == {"result": []}
+    assert results == []
 
 
 def test_2_6_map_with_multiple_parameters_zip_mode():
@@ -128,7 +136,11 @@ def test_2_6_map_with_multiple_parameters_zip_mode():
         inputs={"id": [1, 2, 3], "text": ["hello", "world", "test"]},
         map_over=["id", "text"]
     )
-    assert results == {"result": ["1: HELLO", "2: WORLD", "3: TEST"]}
+    assert results == [
+        {"result": "1: HELLO"},
+        {"result": "2: WORLD"},
+        {"result": "3: TEST"},
+    ]
 
 
 def test_2_7_zip_mode_mismatched_lengths_error():
@@ -177,7 +189,14 @@ def test_2_8_map_with_product_mode():
         map_mode="product"
     )
     # (1,10), (1,20), (1,30), (2,10), (2,20), (2,30)
-    assert results == {"result": [10, 20, 30, 20, 40, 60]}
+    assert results == [
+        {"result": 10},
+        {"result": 20},
+        {"result": 30},
+        {"result": 20},
+        {"result": 40},
+        {"result": 60},
+    ]
 
 
 def test_2_9_zip_mode_with_fixed_parameter():
@@ -199,4 +218,7 @@ def test_2_9_zip_mode_with_fixed_parameter():
         map_over=["id", "text"],
         map_mode="zip"  # Explicit, but this is default
     )
-    assert results == {"result": ["MSG-1: hello", "MSG-2: world"]}
+    assert results == [
+        {"result": "MSG-1: hello"},
+        {"result": "MSG-2: world"},
+    ]

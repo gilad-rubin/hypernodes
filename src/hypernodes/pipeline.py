@@ -4,10 +4,11 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from .cache import Cache
 from .callbacks import PipelineCallback
-from .engine import Engine, HypernodesEngine
+from .engine import HypernodesEngine
 from .graph_builder import SimpleGraphBuilder
 from .node import Node
 from .pipeline_node import PipelineNode
+from .protocols import Engine
 
 
 class Pipeline:
@@ -97,7 +98,7 @@ class Pipeline:
         map_mode: Literal["zip", "product"] = "zip",
         output_name: Union[str, List[str], None] = None,
         **kwargs: Any,
-    ) -> Dict[str, List[Any]]:
+    ) -> List[Dict[str, Any]]:
         self._validate_inputs(inputs)
         self._validate_output_names(output_name)
 

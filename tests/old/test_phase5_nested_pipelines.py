@@ -70,7 +70,11 @@ def test_5_2_nested_pipeline_with_map():
     outer_pipeline = Pipeline(nodes=[inner_pipeline])
 
     results = outer_pipeline.map(inputs={"x": [1, 2, 3]}, map_over=["x"])
-    assert results == {"doubled": [2, 4, 6], "result": [3, 5, 7]}
+    assert results == [
+        {"doubled": 2, "result": 3},
+        {"doubled": 4, "result": 5},
+        {"doubled": 6, "result": 7},
+    ]
 
 
 # =======================

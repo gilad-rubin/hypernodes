@@ -84,7 +84,7 @@ def test_mixed_builtin_and_custom_executors():
 
         # Test map
         results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
-        assert results == {"result": [3, 6, 9]}
+        assert results == [{"result": 3}, {"result": 6}, {"result": 9}]
     finally:
         custom_node_executor.shutdown(wait=True)
 
@@ -104,4 +104,4 @@ def test_type_annotation_accepts_executor_protocol():
     engine1 = HypernodesEngine(node_executor="sequential")
     engine2 = HypernodesEngine(node_executor=ThreadPoolExecutor(max_workers=2))
 
-    engine2.shutdown()
+    # No need to manually shutdown - handled by __del__

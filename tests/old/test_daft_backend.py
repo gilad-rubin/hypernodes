@@ -77,7 +77,7 @@ def test_daft_backend_map_single_parameter():
     pipeline = Pipeline(nodes=[add_one], engine=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     
-    assert results == {"result": [2, 3, 4]}
+    assert results == [{"result": 2}, {"result": 3}, {"result": 4}]
 
 
 def test_daft_backend_map_two_sequential_nodes():
@@ -93,7 +93,11 @@ def test_daft_backend_map_two_sequential_nodes():
     pipeline = Pipeline(nodes=[double, add_one], engine=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     
-    assert results == {"doubled": [2, 4, 6], "result": [3, 5, 7]}
+    assert results == [
+        {"doubled": 2, "result": 3},
+        {"doubled": 4, "result": 5},
+        {"doubled": 6, "result": 7},
+    ]
 
 
 def test_daft_backend_map_with_fixed_parameter():
@@ -105,7 +109,7 @@ def test_daft_backend_map_with_fixed_parameter():
     pipeline = Pipeline(nodes=[multiply], engine=DaftEngine())
     results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
     
-    assert results == {"result": [10, 20, 30]}
+    assert results == [{"result": 10}, {"result": 20}, {"result": 30}]
 
 
 def test_daft_backend_empty_map():
@@ -117,7 +121,7 @@ def test_daft_backend_empty_map():
     pipeline = Pipeline(nodes=[add_one], engine=DaftEngine())
     results = pipeline.map(inputs={"x": []}, map_over="x")
     
-    assert results == {"result": []}
+    assert results == []
 
 
 def test_daft_backend_multiple_inputs():
