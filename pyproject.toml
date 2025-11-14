@@ -8,6 +8,9 @@ requires-python = ">=3.12"
 dependencies = [
     "daft>=0.6.11",
     "dask[bag]>=2025.11.0",
+    "networkx>=3.5",
+    "numpy>=2.3.4",
+    "sentence-transformers>=5.1.2",
 ]
 
 [project.optional-dependencies]

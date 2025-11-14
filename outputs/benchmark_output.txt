@@ -1,0 +1,216 @@
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+================================================================================
+STATEFUL BATCH BENCHMARK
+================================================================================
+
+================================================================================
+MOCK ENCODER BENCHMARK (scale=100)
+================================================================================
+
+[V1] Running HyperNodes Sequential...
+  Setup: 0.028s | Exec: 0.001s | Total: 0.029s
+
+[V2] Running HyperNodes + DaftEngine...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.013s | Exec: 0.542s | Total: 0.555s | Speedup: 0.05x
+
+[V3a: Daft(c=1)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.196s | Total: 0.206s | Speedup: 0.14x
+
+[V3b: Daft(c=2)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.275s | Total: 0.285s | Speedup: 0.10x
+
+[V3c: Daft(c=4)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.513s | Total: 0.523s | Speedup: 0.06x
+
+[V3d: Daft(c=2,proc)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.266s | Total: 0.276s | Speedup: 0.10x
+
+================================================================================
+MOCK ENCODER BENCHMARK (scale=1000)
+================================================================================
+
+[V1] Running HyperNodes Sequential...
+  Setup: 0.013s | Exec: 0.010s | Total: 0.023s
+
+[V2] Running HyperNodes + DaftEngine...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.013s | Exec: 0.264s | Total: 0.277s | Speedup: 0.08x
+
+[V3a: Daft(c=1)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.198s | Total: 0.208s | Speedup: 0.11x
+
+[V3b: Daft(c=2)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.267s | Total: 0.277s | Speedup: 0.08x
+
+[V3c: Daft(c=4)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.520s | Total: 0.530s | Speedup: 0.04x
+
+[V3d: Daft(c=2,proc)] Running...
+  ✗ WARNING: Embeddings don't match V1!
+  Setup: 0.010s | Exec: 0.269s | Total: 0.279s | Speedup: 0.08x
+
+================================================================================
+REAL SENTENCETRANSFORMER BENCHMARK (scale=10)
+================================================================================
+
+[V1] Running HyperNodes Sequential...
+  Setup: 7.222s | Exec: 0.131s | Total: 7.353s
+
+[V2] Running HyperNodes + DaftEngine...
+  ✓ Embeddings match V1
+  Setup: 2.427s | Exec: 7.143s | Total: 9.570s | Speedup: 0.77x
+
+[V3a: Daft(c=1)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.620s | Total: 6.630s | Speedup: 1.11x
+
+[V3b: Daft(c=2)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.282s | Total: 6.292s | Speedup: 1.17x
+
+[V3c: Daft(c=4)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.195s | Total: 6.205s | Speedup: 1.18x
+
+================================================================================
+REAL SENTENCETRANSFORMER BENCHMARK (scale=100)
+================================================================================
+
+[V1] Running HyperNodes Sequential...
+  Setup: 2.597s | Exec: 0.974s | Total: 3.572s
+
+[V2] Running HyperNodes + DaftEngine...
+  ✓ Embeddings match V1
+  Setup: 2.504s | Exec: 6.822s | Total: 9.326s | Speedup: 0.38x
+
+[V3a: Daft(c=1)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.165s | Total: 6.175s | Speedup: 0.58x
+
+[V3b: Daft(c=2)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.334s | Total: 6.344s | Speedup: 0.56x
+
+[V3c: Daft(c=4)] Running...
+  ✓ Embeddings match V1
+  Setup: 0.010s | Exec: 6.166s | Total: 6.176s | Speedup: 0.58x
+
+================================================================================
+Report saved to: outputs/stateful_batch_benchmark_results.md
+================================================================================
+
+# Stateful Batch Benchmark Results
+
+Generated: 2025-11-14 00:03:20
+
+
+## Mock Encoder Results
+
+| Version | Scale | Setup (s) | Execution (s) | Total (s) | Speedup |
+|---------|-------|-----------|---------------|-----------|---------|
+| V1: Sequential | 100 | 0.028 | 0.001 | 0.029 | 1.00x |
+| V2: HN+Daft | 100 | 0.013 | 0.542 | 0.555 | 0.05x |
+| v3a_daftc1 | 100 | 0.010 | 0.196 | 0.206 | 0.14x |
+| v3b_daftc2 | 100 | 0.010 | 0.275 | 0.285 | 0.10x |
+| v3c_daftc4 | 100 | 0.010 | 0.513 | 0.523 | 0.06x |
+| v3d_daftc2_proc | 100 | 0.010 | 0.266 | 0.276 | 0.10x |
+| V1: Sequential | 1000 | 0.013 | 0.010 | 0.023 | 1.00x |
+| V2: HN+Daft | 1000 | 0.013 | 0.264 | 0.277 | 0.08x |
+| v3a_daftc1 | 1000 | 0.010 | 0.198 | 0.208 | 0.11x |
+| v3b_daftc2 | 1000 | 0.010 | 0.267 | 0.277 | 0.08x |
+| v3c_daftc4 | 1000 | 0.010 | 0.520 | 0.530 | 0.04x |
+| v3d_daftc2_proc | 1000 | 0.010 | 0.269 | 0.279 | 0.08x |
+
+## Real SentenceTransformer Results
+
+| Version | Scale | Setup (s) | Execution (s) | Total (s) | Speedup |
+|---------|-------|-----------|---------------|-----------|---------|
+| V1: Sequential | 10 | 7.222 | 0.131 | 7.353 | 1.00x |
+| V2: HN+Daft | 10 | 2.427 | 7.143 | 9.570 | 0.77x |
+| v3a_daftc1 | 10 | 0.010 | 6.620 | 6.630 | 1.11x |
+| v3b_daftc2 | 10 | 0.010 | 6.282 | 6.292 | 1.17x |
+| v3c_daftc4 | 10 | 0.010 | 6.195 | 6.205 | 1.18x |
+| V1: Sequential | 100 | 2.597 | 0.974 | 3.572 | 1.00x |
+| V2: HN+Daft | 100 | 2.504 | 6.822 | 9.326 | 0.38x |
+| v3a_daftc1 | 100 | 0.010 | 6.165 | 6.175 | 0.58x |
+| v3b_daftc2 | 100 | 0.010 | 6.334 | 6.344 | 0.56x |
+| v3c_daftc4 | 100 | 0.010 | 6.166 | 6.176 | 0.58x |
