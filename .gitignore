@@ -24,3 +24,4 @@ CLAUDE.md.bak
 *.svg
 *.html
 daft_grid_search_results.json
+data/*

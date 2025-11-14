@@ -1,10 +1,12 @@
 from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
+from .hypernode import HyperNode
+
 if TYPE_CHECKING:
     from .pipeline import Pipeline
 
 
-class PipelineNode:
+class PipelineNode(HyperNode):
     """Wraps a Pipeline to behave like a Node with custom input/output mapping.
 
     This class adapts a Pipeline interface to work as a node in another pipeline,

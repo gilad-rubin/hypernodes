@@ -4,8 +4,10 @@ import functools
 import inspect
 from typing import Any, Callable, Union
 
+from hypernodes.hypernode import HyperNode
 
-class Node:
+
+class Node(HyperNode):
     """Wraps a function with pipeline metadata.
 
     Implements the HyperNode protocol through structural subtyping.

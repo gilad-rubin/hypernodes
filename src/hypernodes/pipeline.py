@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from .cache import Cache
 from .callbacks import PipelineCallback
 from .graph_builder import SimpleGraphBuilder
-from .node import Node
+from .hypernode import HyperNode
 from .pipeline_node import PipelineNode
 from .protocols import Engine
 from .sequential_engine import SequentialEngine
@@ -14,7 +14,7 @@ from .sequential_engine import SequentialEngine
 class Pipeline:
     def __init__(
         self,
-        nodes: List[Node],
+        nodes: List[HyperNode],
         engine: Optional[Engine] = None,
         cache: Optional[Cache] = None,
         callbacks: Optional[List[PipelineCallback]] = None,
