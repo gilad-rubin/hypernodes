@@ -5,48 +5,12 @@
 - if an API key is needed, first check in the .env to make sure it exists. use dotenv to load if needed.
 - prefer to search online and in documentations before acting
 - tests go to tests folder. scripts go to scripts folder
+- when you're finished with a task - you can write a summary, but just one is enough. no need for multiple summaries and markdowns.
 
 ## Coding Principles
 - When designing and implementing features - always prefer using SOLID principles.
 - Use simple, human readable functions rather than massive long indented functions.
 - Split classes functions into helper functions if needed
-
-## API and Architecture
-
-### Current API (Post-Refactoring)
-- **Engine-based**: Use `HypernodesEngine` (NOT Backend-based)
-- **Executors**: `node_executor` and `map_executor` parameters (NOT `node_execution` or `map_execution`)
-- **Executor types**: `"sequential"`, `"async"`, `"threaded"`, `"parallel"`
-- **Import paths**:
-  - Main: `from hypernodes import Pipeline, node, HypernodesEngine, DiskCache`
-  - Engines: `from hypernodes.engines import DaftEngine`
-  - Telemetry: `from hypernodes.telemetry import ProgressCallback, TelemetryCallback`
-
-### Architecture Components
-- **Node** (`node.py`): Function wrapper with output_name and parameters
-- **Pipeline** (`pipeline.py`): DAG manager with `.run()` and `.map()` methods
-- **Engine** (`engine.py`): Execution orchestrator (HypernodesEngine is default)
-- **Executors** (`executors.py`): SequentialExecutor, AsyncExecutor (auto-wraps sync functions)
-- **Node Execution** (`node_execution.py`): Single node execution with caching and callbacks
-- **Cache** (`cache.py`): DiskCache with content-addressed signatures
-- **Callbacks** (`callbacks.py`): Lifecycle hooks (ProgressCallback, TelemetryCallback, etc.)
-
-### Example Usage
-```python
-from hypernodes import Pipeline, node, HypernodesEngine, DiskCache
-
-@node(output_name="result")
-def process(text: str) -> str:
-    return text.upper()
-
-pipeline = Pipeline(
-    nodes=[process],
-    engine=HypernodesEngine(node_executor="async"),
-    cache=DiskCache(path=".cache")
-)
-
-result = pipeline(text="hello")
-```
 
 ## Tools
 - use tavily web search and context7 MCP servers whenever you're stuck or want to understand how a library works
