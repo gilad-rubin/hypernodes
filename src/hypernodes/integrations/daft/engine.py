@@ -325,17 +325,14 @@ class DaftEngine(Engine):
             # Make function serializable for distributed execution
             serializable_func = self._make_serializable_by_value(node.func)
             
+            # ALWAYS use explicit return_dtype to avoid inference errors
+            from daft import DataType
             if inferred_type is not None:
                 # Use our inferred type
                 udf = daft.func(serializable_func, return_dtype=inferred_type)
             else:
-                # Let Daft infer automatically
-                try:
-                    udf = daft.func(serializable_func)
-                except TypeError:
-                    # Fallback to Python type if Daft can't infer
-                    from daft import DataType
-                    udf = daft.func(serializable_func, return_dtype=DataType.python())
+                # Fallback to Python type (handles all complex types)
+                udf = daft.func(serializable_func, return_dtype=DataType.python())
             
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
@@ -359,17 +356,14 @@ class DaftEngine(Engine):
             # Make function serializable for distributed execution
             serializable_func = self._make_serializable_by_value(node.func)
             
+            # ALWAYS use explicit return_dtype to avoid inference errors
+            from daft import DataType
             if inferred_type is not None:
                 # Use our inferred type
                 udf = daft.func(serializable_func, return_dtype=inferred_type)
             else:
-                # Let Daft infer automatically
-                try:
-                    udf = daft.func(serializable_func)
-                except TypeError:
-                    # Fallback to Python type if Daft can't infer
-                    from daft import DataType
-                    udf = daft.func(serializable_func, return_dtype=DataType.python())
+                # Fallback to Python type (handles all complex types)
+                udf = daft.func(serializable_func, return_dtype=DataType.python())
             
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
