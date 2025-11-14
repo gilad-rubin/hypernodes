@@ -653,7 +653,6 @@ if __name__ == "__main__":
     import sys
 
     use_daft = False
-    # Accept "--daft" (with or without dashes) anywhere in the command-line args
     for arg in sys.argv[1:]:
         if arg.lower() in {"--daft", "daft"}:
             pipeline.with_engine(DaftEngine())

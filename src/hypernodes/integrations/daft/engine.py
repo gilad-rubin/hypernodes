@@ -38,6 +38,29 @@ class DaftEngine(Engine):
         >>> result = pipeline.run(x=5)
     """
 
+    @staticmethod
+    def _make_serializable_by_value(func):
+        """Force cloudpickle to serialize function by value instead of by reference.
+        
+        By setting __module__ = "__main__", cloudpickle will serialize the entire
+        function bytecode instead of just storing an import path. This allows:
+        - Nodes defined inside functions (Modal pattern)
+        - Script files that aren't proper packages
+        - Functions with closure captures
+        
+        Args:
+            func: Function to make serializable
+            
+        Returns:
+            Same function with modified __module__ and __qualname__
+        """
+        try:
+            func.__module__ = "__main__"
+            func.__qualname__ = func.__name__
+        except (AttributeError, TypeError):
+            pass
+        return func
+    
     def __init__(
         self,
         use_batch_udf: bool = True,
@@ -296,7 +319,24 @@ class DaftEngine(Engine):
         if is_async:
             # Async functions: Use row-wise @daft.func (Daft provides concurrency)
             # This gives us 37x speedup for I/O-bound tasks!
-            udf = daft.func(node.func)
+            # Use smart type inference to handle complex types
+            inferred_type = self._infer_daft_return_type(node)
+            
+            # Make function serializable for distributed execution
+            serializable_func = self._make_serializable_by_value(node.func)
+            
+            if inferred_type is not None:
+                # Use our inferred type
+                udf = daft.func(serializable_func, return_dtype=inferred_type)
+            else:
+                # Let Daft infer automatically
+                try:
+                    udf = daft.func(serializable_func)
+                except TypeError:
+                    # Fallback to Python type if Daft can't infer
+                    from daft import DataType
+                    udf = daft.func(serializable_func, return_dtype=DataType.python())
+            
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
             
@@ -313,7 +353,24 @@ class DaftEngine(Engine):
             return self._apply_batch_node_transformation(df, node, available_columns)
         else:
             # Use row-wise UDF (required for list/dict types, or single-row execution)
-            udf = daft.func(node.func)
+            # Use smart type inference to handle complex types
+            inferred_type = self._infer_daft_return_type(node)
+            
+            # Make function serializable for distributed execution
+            serializable_func = self._make_serializable_by_value(node.func)
+            
+            if inferred_type is not None:
+                # Use our inferred type
+                udf = daft.func(serializable_func, return_dtype=inferred_type)
+            else:
+                # Let Daft infer automatically
+                try:
+                    udf = daft.func(serializable_func)
+                except TypeError:
+                    # Fallback to Python type if Daft can't infer
+                    from daft import DataType
+                    udf = daft.func(serializable_func, return_dtype=DataType.python())
+            
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
 
@@ -322,6 +379,70 @@ class DaftEngine(Engine):
 
             return df, available_columns
 
+    def _infer_daft_return_type(self, node: Any) -> Optional["daft.DataType"]:
+        """Infer Daft DataType from function return type annotation.
+        
+        Attempts to convert Python type hints to Daft DataTypes:
+        - List[T] → DataType.list(DataType.python())
+        - dict → DataType.python()
+        - Protocol → DataType.python()
+        - Simple types (str, int, float) → Daft's type inference
+        
+        Returns:
+            DataType if we can infer it, None to let Daft infer automatically
+        """
+        import inspect
+        from typing import get_origin, get_args
+        from daft import DataType
+        
+        # Get return annotation
+        sig = inspect.signature(node.func)
+        return_annotation = sig.return_annotation
+        
+        if return_annotation == inspect.Signature.empty:
+            # No annotation - let Daft try to infer
+            return None
+        
+        # Check if it's a stringified annotation (forward reference)
+        # This happens when using "from __future__ import annotations" (PEP 563)
+        if isinstance(return_annotation, str):
+            # Try to evaluate it to get the actual type
+            try:
+                import typing
+                return_annotation = eval(return_annotation, {**typing.__dict__, **node.func.__globals__})
+            except Exception:
+                # If evaluation fails, fall back to Python type
+                return DataType.python()
+        
+        # Check if it's a generic type (List, Dict, etc.)
+        origin = get_origin(return_annotation)
+        
+        if origin is list:
+            # List[T] - use Daft's list type with Python element type
+            # This allows explode/list_agg to work while supporting arbitrary element types
+            return DataType.list(DataType.python())
+        
+        if origin is dict:
+            # dict - use Python type
+            return DataType.python()
+        
+        # Check if it's a Protocol (has __protocol__ attribute)
+        if hasattr(return_annotation, "__protocol__"):
+            return DataType.python()
+        
+        # For other complex types (Pydantic models, custom classes), fall back to Python
+        # Check if it's a class (not a built-in type)
+        if inspect.isclass(return_annotation):
+            # Check if it's a built-in type that Daft can handle
+            if return_annotation in (str, int, float, bool):
+                return None  # Let Daft infer
+            else:
+                # Custom class - use Python type
+                return DataType.python()
+        
+        # Let Daft try to infer for other cases
+        return None
+    
     def _should_use_batch_udf(self, node: Any) -> bool:
         """Determine if a node should use batch UDF.
 
@@ -374,8 +495,8 @@ class DaftEngine(Engine):
         """
         from daft import DataType, Series
 
-        # Store node.func in closure to avoid serialization issues
-        node_func = node.func
+        # Make function serializable for distributed execution
+        node_func = self._make_serializable_by_value(node.func)
 
         # Use Python dtype for simple types (str, int, float, bool)
         # We only call this for simple types - list/dict use row-wise UDFs
