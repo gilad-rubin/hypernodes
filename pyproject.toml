@@ -8,6 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
     "daft>=0.6.11",
     "networkx>=3.5",
+    "optimum[onnxruntime]>=2.0.0",
 ]
 
 [project.optional-dependencies]

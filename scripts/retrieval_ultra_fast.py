@@ -13,8 +13,10 @@ This version is optimized specifically for DaftEngine performance.
 
 from __future__ import annotations
 
+import argparse
 import time
-from typing import List
+from pathlib import Path
+from typing import Any, Dict, List
 
 import daft
 import numpy as np
@@ -25,7 +27,18 @@ from daft import DataType, Series
 from hypernodes import Pipeline, node
 
 
+def stateful(cls):
+    """Mark a class as stateful for DaftEngine auto-detection."""
+    setattr(cls, "__daft_stateful__", True)
+    return cls
+
+
+def format_seconds(seconds: float) -> str:
+    return f"{seconds:0.2f}s"
+
+
 # ==================== OPTIMIZED Encoder with @daft.cls ====================
+@stateful
 @daft.cls
 class Model2VecEncoder:
     """Ultra-fast encoder with @daft.cls and batch support."""
@@ -50,6 +63,7 @@ class Model2VecEncoder:
 
 
 # ==================== Simple Classes (No Pydantic!) ====================
+@stateful
 class CosineSimIndex:
     """Cosine similarity vector index."""
 
@@ -68,6 +82,7 @@ class CosineSimIndex:
         ]
 
 
+@stateful
 class BM25IndexImpl:
     """BM25 index."""
 
@@ -88,6 +103,7 @@ class BM25IndexImpl:
         ]
 
 
+@stateful
 class CrossEncoderReranker:
     """CrossEncoder reranker."""
 
@@ -114,7 +130,37 @@ class CrossEncoderReranker:
             {"passage_uuid": uuid, "score": float(score)} for uuid, score in reranked
         ]
 
+    def score_pairs(
+        self,
+        pairs: List[tuple[str, str]],
+        batch_size: int,
+    ) -> List[float]:
+        """Score a list of (query, document) pairs in one call."""
+        if not pairs:
+            return []
+        scores = self._model.predict(
+            pairs,
+            batch_size=batch_size,
+            show_progress_bar=False,
+        )
+        return scores.tolist()
 
+
+@stateful
+class PassthroughReranker:
+    """Fallback reranker that keeps fused hits unchanged."""
+
+    def rerank(
+        self,
+        query: dict,
+        candidates: List[dict],
+        k: int,
+        encoded_passages: List[dict],
+    ) -> List[dict]:
+        return candidates[:k]
+
+
+@stateful
 class RRFFusion:
     """Reciprocal Rank Fusion."""
 
@@ -132,6 +178,7 @@ class RRFFusion:
         return [{"passage_uuid": uuid, "score": score} for uuid, score in sorted_hits]
 
 
+@stateful
 class NDCGEvaluator:
     """NDCG evaluation."""
 
@@ -172,6 +219,7 @@ class NDCGEvaluator:
         return float(np.mean(per_query_scores))
 
 
+@stateful
 class RecallEvaluator:
     """Recall evaluation."""
 
@@ -306,29 +354,71 @@ def fuse_results(
     return rrf.fuse([vector_hits, bm25_hits])
 
 
-@node(output_name="reranked_hits")
-def rerank_with_crossencoder(
-    query: dict,
-    fused_hits: List[dict],
-    reranker: CrossEncoderReranker,
+@node(output_name="all_query_predictions")
+def batch_rerank_predictions(
+    encoded_queries: List[dict],
+    all_fused_hits: List[List[dict]],
     encoded_passages: List[dict],
+    reranker: CrossEncoderReranker,
     rerank_k: int,
-) -> List[dict]:
-    """Rerank fused candidates."""
-    return reranker.rerank(query, fused_hits, rerank_k, encoded_passages)
+    reranker_batch_size: int = 128,
+) -> List[List[dict]]:
+    """Rerank all queries in batch using CrossEncoder predict."""
+    # Fallback to per-query reranking if batching disabled
+    if reranker_batch_size <= 0:
+        per_query_predictions = []
+        for query, fused_hits in zip(encoded_queries, all_fused_hits):
+            hits = fused_hits or []
+            reranked = reranker.rerank(
+                query,
+                hits,
+                rerank_k,
+                encoded_passages,
+            )
+            per_query_predictions.append(
+                [
+                    {
+                        "query_uuid": query["uuid"],
+                        "paragraph_uuid": hit["passage_uuid"],
+                        "score": hit["score"],
+                    }
+                    for hit in reranked[:rerank_k]
+                ]
+            )
+        return per_query_predictions
 
+    passage_lookup = {p["uuid"]: p["text"] for p in encoded_passages}
+    pairs: List[tuple[str, str]] = []
+    metadata: List[tuple[str, str]] = []
 
-@node(output_name="predictions")
-def hits_to_predictions(query: dict, reranked_hits: List[dict]) -> List[dict]:
-    """Convert hits to predictions."""
-    return [
-        {
-            "query_uuid": query["uuid"],
-            "paragraph_uuid": hit["passage_uuid"],
-            "score": hit["score"],
-        }
-        for hit in reranked_hits
-    ]
+    for query, fused_hits in zip(encoded_queries, all_fused_hits):
+        hits = (fused_hits or [])[:rerank_k]
+        for hit in hits:
+            passage_text = passage_lookup.get(hit["passage_uuid"])
+            if passage_text is None:
+                continue
+            pairs.append((query["text"], passage_text))
+            metadata.append((query["uuid"], hit["passage_uuid"]))
+
+    predictions_map: Dict[str, List[dict]] = {q["uuid"]: [] for q in encoded_queries}
+
+    if pairs:
+        scores = reranker.score_pairs(pairs, batch_size=reranker_batch_size)
+        for (query_uuid, passage_uuid), score in zip(metadata, scores):
+            predictions_map[query_uuid].append(
+                {
+                    "query_uuid": query_uuid,
+                    "paragraph_uuid": passage_uuid,
+                    "score": float(score),
+                }
+            )
+
+    all_predictions: List[List[dict]] = []
+    for query in encoded_queries:
+        preds = predictions_map.get(query["uuid"], [])
+        preds.sort(key=lambda x: x["score"], reverse=True)
+        all_predictions.append(preds)
+    return all_predictions
 
 
 # ==================== Evaluation Nodes ====================
@@ -373,20 +463,21 @@ retrieve_single_query = Pipeline(
         retrieve_vector,
         retrieve_bm25,
         fuse_results,
-        rerank_with_crossencoder,
-        hits_to_predictions,
     ],
     name="retrieve_single_query",
 )
 
 retrieve_queries_mapped = retrieve_single_query.as_node(
     input_mapping={"encoded_queries": "encoded_query"},
-    output_mapping={"predictions": "all_query_predictions"},
+    output_mapping={"fused_hits": "all_fused_hits"},
     map_over="encoded_queries",
     name="retrieve_queries_mapped",
 )
 
-from hypernodes.telemetry import ProgressCallback
+from hypernodes.telemetry import ProgressCallback, TelemetryCallback
+
+# Initialize telemetry callback for profiling
+telemetry_callback = TelemetryCallback()
 
 full_pipeline = Pipeline(
     nodes=[
@@ -398,80 +489,333 @@ full_pipeline = Pipeline(
         build_bm25_index,
         encode_queries_batch,
         retrieve_queries_mapped,
+        batch_rerank_predictions,
         flatten_predictions,
         compute_ndcg,
         compute_recall,
         combine_evaluation_results,
     ],
-    callbacks=[ProgressCallback()],
+    callbacks=[ProgressCallback(), telemetry_callback],
     name="ultra_fast_retrieval",
 )
 
 
-if __name__ == "__main__":
-    import sys
+def print_profiling_results(telemetry: TelemetryCallback) -> None:
+    """Display profiling results from telemetry callback."""
+    if not telemetry.span_data:
+        print("\nNo profiling data available.")
+        return
 
-    from hypernodes.engines import DaftEngine
+    print("\n" + "=" * 70)
+    print("PROFILING RESULTS (Sequential Engine)")
+    print("=" * 70)
+
+    # Filter to only nodes (not pipelines or map operations)
+    nodes = [s for s in telemetry.span_data if s.get("type") == "node"]
+
+    if not nodes:
+        print("No node data available.")
+        return
+
+    # Sort by duration (slowest first)
+    nodes_sorted = sorted(nodes, key=lambda x: x["duration"], reverse=True)
+
+    # Calculate total time from nodes
+    total_node_time = sum(s["duration"] for s in nodes)
+
+    print(f"\n{'Node Name':<40} {'Time':>12} {'% Total':>10} {'Status':>10}")
+    print("-" * 70)
+
+    for span in nodes_sorted:
+        name = span["name"]
+        duration = span["duration"]
+        percentage = (duration / total_node_time * 100) if total_node_time > 0 else 0
+        status = "⚡ cached" if span.get("cached", False) else ""
+
+        print(
+            f"{name:<40} {format_seconds(duration):>12} {percentage:>9.1f}% {status:>10}"
+        )
+
+    print("-" * 70)
+    print(
+        f"{'TOTAL (nodes only)':<40} {format_seconds(total_node_time):>12} {'100.0%':>10}"
+    )
+
+    # Show breakdown by category
+    print("\n" + "=" * 70)
+    print("CATEGORY BREAKDOWN")
+    print("=" * 70)
+
+    categories = {
+        "Data Loading": ["load_passages", "load_queries", "load_ground_truths"],
+        "Encoding": ["encode_passages_batch", "encode_queries_batch"],
+        "Index Building": ["build_vector_index", "build_bm25_index"],
+        "Retrieval": [
+            "retrieve_queries_mapped",
+            "retrieve_single_query",
+            "extract_query",
+            "retrieve_vector",
+            "retrieve_bm25",
+            "fuse_results",
+            "rerank_with_crossencoder",
+            "hits_to_predictions",
+        ],
+        "Evaluation": [
+            "flatten_predictions",
+            "compute_ndcg",
+            "compute_recall",
+            "combine_evaluation_results",
+        ],
+    }
+
+    category_times = {}
+    for category, node_names in categories.items():
+        total = sum(s["duration"] for s in nodes if s["name"] in node_names)
+        if total > 0:
+            category_times[category] = total
+
+    # Sort by time
+    for category, total in sorted(
+        category_times.items(), key=lambda x: x[1], reverse=True
+    ):
+        percentage = (total / total_node_time * 100) if total_node_time > 0 else 0
+        print(f"{category:<40} {format_seconds(total):>12} {percentage:>9.1f}%")
 
     print("=" * 70)
-    print("ULTRA FAST RETRIEVAL PIPELINE")
-    print("=" * 70)
 
-    num_examples = 5
-    use_daft = any(arg.lower() in {"--daft", "daft"} for arg in sys.argv[1:])
+    # Show map operations if any
+    map_ops = [s for s in telemetry.span_data if s.get("type") == "map"]
+    if map_ops:
+        print("\nMAP OPERATIONS")
+        print("=" * 70)
+        for span in map_ops:
+            print(f"{span['name']:<40} {format_seconds(span['duration']):>12}")
+        print("=" * 70)
 
-    # Create instances
-    encoder = Model2VecEncoder("minishlab/potion-retrieval-32M")
+    print(
+        "\nNote: Run in Jupyter and call telemetry.get_waterfall_chart() for visual timeline"
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Benchmark the Hebrew retrieval pipeline with SequentialEngine or DaftEngine."
+    )
+    parser.add_argument(
+        "--engine",
+        choices=["sequential", "daft"],
+        default="sequential",
+        help="Execution engine to use.",
+    )
+    parser.add_argument(
+        "--examples",
+        type=int,
+        default=5,
+        help="Dataset size variant (matches data/sample_<N>).",
+    )
+    parser.add_argument(
+        "--split",
+        choices=["train", "dev", "test"],
+        default="test",
+        help="Which parquet split to use for queries/labels.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Optional corpus head() limit (0 = all passages).",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=300,
+        help="Number of candidates to retrieve from each index.",
+    )
+    parser.add_argument(
+        "--rerank-k",
+        type=int,
+        default=300,
+        help="Number of fused candidates to rerank.",
+    )
+    parser.add_argument(
+        "--reranker-batch-size",
+        type=int,
+        default=128,
+        help="Batch size for CrossEncoder reranking (set <=0 to disable batching).",
+    )
+    parser.add_argument(
+        "--ndcg-k",
+        type=int,
+        default=20,
+        help="Cutoff for NDCG evaluation.",
+    )
+    parser.add_argument(
+        "--encoder-model",
+        default="minishlab/potion-retrieval-32M",
+        help="Sentence encoder checkpoint.",
+    )
+    parser.add_argument(
+        "--reranker-model",
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        help="CrossEncoder checkpoint.",
+    )
+    parser.add_argument(
+        "--disable-cross-encoder",
+        action="store_true",
+        help="Skip CrossEncoder reranking (keeps fused hits).",
+    )
+    parser.add_argument(
+        "--daft-threaded-batch",
+        action="store_true",
+        help="Enable DaftEngine's threaded batch UDFs (experiments with Series batching).",
+    )
+    parser.add_argument(
+        "--daft-batch-size",
+        type=int,
+        help="Override DaftEngine batch_size heuristic.",
+    )
+    parser.add_argument(
+        "--daft-max-workers",
+        type=int,
+        help="Override DaftEngine ThreadPoolExecutor worker count.",
+    )
+    parser.add_argument(
+        "--daft-max-concurrency",
+        type=int,
+        help="Max concurrent @daft.cls instances (passes to DaftEngine default config).",
+    )
+    parser.add_argument(
+        "--daft-use-process",
+        action="store_true",
+        help="Execute Daft UDFs in separate processes.",
+    )
+    parser.add_argument(
+        "--daft-gpus",
+        type=int,
+        help="Number of GPUs to request per @daft.cls instance.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Reduce console verbosity.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    # Configure logfire for local-only telemetry (no remote upload)
+    try:
+        import logfire
+
+        logfire.configure(send_to_logfire=False)
+    except ImportError:
+        print("Warning: logfire not installed. Telemetry will be disabled.")
+        print("Install with: pip install 'hypernodes[telemetry]'")
+
+    dataset_dir = Path("data") / f"sample_{args.examples}"
+    if not dataset_dir.exists():
+        raise SystemExit(f"Dataset directory '{dataset_dir}' not found.")
+
+    corpus_path = dataset_dir / "corpus.parquet"
+    examples_path = dataset_dir / f"{args.split}.parquet"
+
+    # Instantiate heavy objects (stateful for Daft).
+    encoder = Model2VecEncoder(args.encoder_model)
     rrf = RRFFusion(k=60)
-    ndcg_evaluator = NDCGEvaluator(k=20)
+    ndcg_evaluator = NDCGEvaluator(k=args.ndcg_k)
     recall_evaluator = RecallEvaluator(k_list=[20, 50, 100, 200, 300])
-    reranker = CrossEncoderReranker(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    reranker = (
+        PassthroughReranker()
+        if args.disable_cross_encoder
+        else CrossEncoderReranker(model_name=args.reranker_model)
+    )
 
-    if use_daft:
-        print("Engine: DaftEngine (OPTIMIZED!)")
-        print("  ✅ Explicit DataType.python() on all nodes")
-        print("  ✅ Simple dicts (no Pydantic overhead)")
-        print("  ✅ Batch UDFs disabled for complex types")
-        engine = DaftEngine(use_batch_udf=False)
-        full_pipeline = full_pipeline.with_engine(engine)
+    pipeline = full_pipeline
+    engine_name = "SequentialEngine"
+
+    if args.engine == "daft":
+        from hypernodes.engines import DaftEngine
+
+        daft_config: Dict[str, Any] = {}
+        if args.daft_batch_size:
+            daft_config["batch_size"] = args.daft_batch_size
+        if args.daft_max_workers:
+            daft_config["max_workers"] = args.daft_max_workers
+        if args.daft_max_concurrency:
+            daft_config["max_concurrency"] = args.daft_max_concurrency
+        if args.daft_use_process:
+            daft_config["use_process"] = True
+        if args.daft_gpus:
+            daft_config["gpus"] = args.daft_gpus
+
+        pipeline = pipeline.with_engine(
+            DaftEngine(
+                use_batch_udf=args.daft_threaded_batch,
+                default_daft_config=daft_config or None,
+            )
+        )
+        engine_name = "DaftEngine"
     else:
-        print("Engine: SequentialEngine (baseline)")
+        from hypernodes.engines import SequentialEngine
 
-    print(f"Dataset: {num_examples} examples")
-    print("\nOptimizations:")
-    print("  ✅ Batch encoding (97x faster)")
-    print("  ✅ @daft.cls lazy init")
-    print("  ✅ No Pydantic overhead")
-    print("  ✅ Explicit return types")
-    print("=" * 70)
+        pipeline = pipeline.with_engine(SequentialEngine())
+
+    if not args.quiet:
+        print("=" * 70)
+        print("ULTRA FAST RETRIEVAL PIPELINE")
+        print("=" * 70)
+        print(f"Engine: {engine_name}")
+        print(
+            f"Dataset: sample_{args.examples} ({args.split}) | "
+            f"Top-K: {args.top_k} | Rerank-K: {args.rerank_k}"
+        )
+        if args.engine == "daft":
+            print(
+                f"Daft threaded batch: {'ON' if args.daft_threaded_batch else 'OFF'} | "
+                f"Config: {daft_config if daft_config else 'auto'}"
+            )
+        print("Optimizations: batch encoding, @daft.cls, simple dict payloads")
+        print("=" * 70)
+        print("Running pipeline...\n")
 
     inputs = {
-        "corpus_path": f"data/sample_{num_examples}/corpus.parquet",
-        "limit": 0,
-        "examples_path": f"data/sample_{num_examples}/test.parquet",
+        "corpus_path": str(corpus_path),
+        "limit": args.limit,
+        "examples_path": str(examples_path),
         "encoder": encoder,
         "rrf": rrf,
         "ndcg_evaluator": ndcg_evaluator,
         "recall_evaluator": recall_evaluator,
         "reranker": reranker,
-        "top_k": 300,
-        "rerank_k": 300,
-        "ndcg_k": 20,
+        "top_k": args.top_k,
+        "rerank_k": args.rerank_k,
+        "ndcg_k": args.ndcg_k,
+        "reranker_batch_size": args.reranker_batch_size,
     }
 
-    print("\nRunning pipeline...\n")
-    start_time = time.time()
-    results = full_pipeline.run(output_name="evaluation_results", inputs=inputs)
-    elapsed_time = time.time() - start_time
+    start_time = time.perf_counter()
+    results = pipeline.run(output_name="evaluation_results", inputs=inputs)
+    elapsed = time.perf_counter() - start_time
 
-    print("\n" + "=" * 70)
-    print("RESULTS")
-    print("=" * 70)
     eval_results = results["evaluation_results"]
-    print(f"NDCG@{eval_results['ndcg_k']}: {eval_results['ndcg']:.4f}")
-    print("\nRecall Metrics:")
-    for metric, value in eval_results["recall_metrics"].items():
-        print(f"  {metric}: {value:.4f}")
-    print("=" * 70)
-    print(f"Total time: {elapsed_time:.2f}s")
-    print("=" * 70)
+
+    if not args.quiet:
+        print("\n" + "=" * 70)
+        print("RESULTS")
+        print("=" * 70)
+        print(f"NDCG@{eval_results['ndcg_k']}: {eval_results['ndcg']:.4f}")
+        print("\nRecall Metrics:")
+        for metric, value in eval_results["recall_metrics"].items():
+            print(f"  {metric}: {value:.4f}")
+        print("=" * 70)
+        print(f"Total time: {format_seconds(elapsed)}")
+        print("=" * 70)
+
+        # Display profiling results from telemetry
+        print_profiling_results(telemetry_callback)
+
+
+if __name__ == "__main__":
+    main()
