@@ -68,11 +68,9 @@ def count_words(cleaned_text: str) -> int:
 # Build pipeline - dependencies are automatically resolved
 pipeline = Pipeline(nodes=[clean_text, count_words])
 
-# Test with single input (two equivalent options)
-result = pipeline(passage="Hello World")
-print(result)  # {'cleaned_text': 'hello world', 'word_count': 2}
-# Or:
+# Test with single input
 result = pipeline.run(inputs={"passage": "Hello World"})
+print(result)  # {'cleaned_text': 'hello world', 'word_count': 2}
 
 # Scale to many inputs - each item cached independently
 results = pipeline.map(
@@ -93,10 +91,10 @@ pipeline = Pipeline(
 )
 
 # First run: executes all nodes
-result1 = pipeline(passage="Hello World")
+result1 = pipeline.run(inputs={"passage": "Hello World"})
 
 # Second run: instant cache hit
-result2 = pipeline(passage="Hello World")  # Cached!
+result2 = pipeline.run(inputs={"passage": "Hello World"})  # Cached!
 ```
 
 ### Nested Pipelines
@@ -113,24 +111,23 @@ main_pipeline = Pipeline(
 result = main_pipeline.run(inputs={"data_path": "corpus.txt"})
 ```
 
-### Async and Parallel Execution
+### Parallel Execution with Dask
 
 ```python
-from hypernodes import Pipeline, HypernodesEngine
+from hypernodes import Pipeline
+from hypernodes.engines import DaskEngine
 
-# Async execution for I/O-bound workloads
-async_pipeline = Pipeline(
-    nodes=[fetch_data, process_data, save_results],
-    engine=HypernodesEngine(node_executor="async"),
+# Parallel map for CPU/IO-bound workloads
+parallel_pipeline = Pipeline(
+    nodes=[process_data, transform_results],
+    engine=DaskEngine(scheduler="threads"),  # or "processes" for CPU-bound
 )
 
-# Parallel map for CPU-bound workloads (node-level parallel is disabled; use threaded for node concurrency)
-parallel_map_pipeline = Pipeline(
-    nodes=[compute_intensive_task],
-    engine=HypernodesEngine(map_executor="parallel"),
-)
+# Regular run (sequential, no overhead)
+result = parallel_pipeline.run(inputs={"data": [1, 2, 3]})
 
-result = parallel_map_pipeline.map(inputs={"data": [1, 2, 3, 4, 5]}, map_over="data")
+# Map operation (parallel via Dask Bag)
+results = parallel_pipeline.map(inputs={"data": [1, 2, 3, 4, 5]}, map_over="data")
 ```
 
 ---
@@ -230,54 +227,91 @@ results2 = pipeline.map(
 
 Engines determine **how** (execution strategy) and **where** (infrastructure) nodes execute.
 
-### HypernodesEngine
+### SequentialEngine (Default)
 
-The default engine with support for multiple execution strategies:
+The default engine for simple, predictable execution:
 
 ```python
-from hypernodes import Pipeline, HypernodesEngine
+from hypernodes import Pipeline, SequentialEngine
 
-# Sequential execution (default)
+# Sequential execution (default - no need to specify)
+pipeline = Pipeline(nodes=[...])
+
+# Or explicitly:
 pipeline = Pipeline(
     nodes=[...],
-    engine=HypernodesEngine(node_executor="sequential")
+    engine=SequentialEngine()
 )
-
-# Async execution (I/O-bound workloads, high concurrency)
-pipeline = Pipeline(
-    nodes=[...],
-    engine=HypernodesEngine(node_executor="async")
-)
-
-# Threaded execution (CPU-bound with GIL-friendly operations)
-pipeline = Pipeline(
-    nodes=[...],
-    engine=HypernodesEngine(node_executor="threaded")
-)
-
-# Parallel map (CPU-bound, multiprocessing)
-pipeline = Pipeline(nodes=[...], engine=HypernodesEngine(map_executor="parallel"))
 ```
 
-**Executor Types:**
-- `sequential`: Runs nodes one at a time (good for debugging)
-- `async`: Concurrent execution using asyncio (auto-wraps sync functions)
-- `threaded`: Thread-based parallelism (good for I/O-bound with some CPU work)
-- `parallel`: Process-based parallelism across map items using loky (CPU-bound per item)
+**Features:**
+- Simple topological execution
+- No parallelism overhead
+- Easy debugging
+- Best for development and testing
+
+### DaskEngine (Parallel Map Operations)
+
+For parallel execution using Dask Bag:
+
+```python
+from hypernodes import Pipeline
+from hypernodes.engines import DaskEngine
+
+# Auto-optimized for your workload
+engine = DaskEngine()
+pipeline = Pipeline(nodes=[...], engine=engine)
+
+# Regular run (sequential, no overhead)
+result = pipeline.run(inputs={"x": 5})
+
+# Map operation (parallel via Dask Bag)
+results = pipeline.map(
+    inputs={"x": [1, 2, 3, 4, 5]},
+    map_over="x"
+)
+
+# Custom configuration for CPU-bound workload
+engine = DaskEngine(
+    scheduler="processes",  # or "threads" (default)
+    workload_type="cpu",    # or "io", "mixed" (default)
+    num_workers=8           # defaults to CPU count
+)
+```
+
+**Features:**
+- Automatic parallelism for map operations
+- Configurable scheduler (threads, processes)
+- Auto-optimized partitioning
+- Zero overhead for non-map operations
 
 ### DaftEngine (Distributed DataFrames)
 
 For distributed DataFrame-based execution:
 
 ```python
+from hypernodes import Pipeline
 from hypernodes.engines import DaftEngine
 
-# Requires: pip install 'hypernodes[viz]' and daft
-pipeline = Pipeline(
-    nodes=[...],
-    engine=DaftEngine(collect=True)
+# Requires: pip install getdaft
+engine = DaftEngine(use_batch_udf=True)
+pipeline = Pipeline(nodes=[...], engine=engine)
+
+# All operations are lazy (builds computation graph)
+result = pipeline.run(inputs={"x": 5})
+
+# Map operations leverage Daft's distributed execution
+results = pipeline.map(
+    inputs={"x": [1, 2, 3, 4, 5]},
+    map_over="x"
 )
 ```
+
+**Features:**
+- Lazy DataFrame execution
+- Batch UDF optimization
+- Auto-tuned parallelism
+- Best for large-scale distributed workloads
 
 ---
 
@@ -368,12 +402,13 @@ Nested pipelines inherit configuration from parents but can override:
 
 ```python
 # Parent defines defaults
-from hypernodes import Pipeline, HypernodesEngine, DiskCache
+from hypernodes import Pipeline, DiskCache
+from hypernodes.engines import DaskEngine
 from hypernodes.telemetry import ProgressCallback
 
 parent = Pipeline(
     nodes=[preprocess, child_pipeline, postprocess],
-    engine=HypernodesEngine(node_executor="sequential"),
+    engine=DaskEngine(scheduler="threads"),
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()],
 )
@@ -381,13 +416,13 @@ parent = Pipeline(
 # Child inherits all configuration
 child_pipeline = Pipeline(
     nodes=[step1, step2]
-    # Inherits: HypernodesEngine, DiskCache, ProgressCallback
+    # Inherits: DaskEngine, DiskCache, ProgressCallback
 )
 
-# Grandchild overrides engine only (e.g., to parallel map)
+# Grandchild overrides engine only (e.g., to process-based parallelism)
 grandchild_pipeline = Pipeline(
     nodes=[cpu_intensive_step],
-    engine=HypernodesEngine(map_executor="parallel"),  # Override to parallel map
+    engine=DaskEngine(scheduler="processes"),  # Override for CPU-bound tasks
     # Inherits: DiskCache, ProgressCallback
 )
 ```
@@ -408,7 +443,7 @@ def my_function(input: str) -> str:
 
 def test_single_node():
     pipeline = Pipeline(nodes=[my_function])
-    result = pipeline(input="hello")
+    result = pipeline.run(inputs={"input": "hello"})
     assert result["result"] == "HELLO"
 
 def test_with_cache():
