@@ -126,19 +126,28 @@ class Node(HyperNode):
         # _code_hash is preserved through pickling
 
 
-def node(output_name: str, cache: bool = True) -> Callable[[Callable], Node]:
+def node(
+    output_name: Union[str, tuple, Callable, None] = None,
+    cache: bool = True,
+) -> Union[Node, Callable[[Callable], Node]]:
     """Decorator to create Node instances from functions.
 
     This decorator wraps a function in a Node, making it part of a pipeline.
     The decorated function's parameters define its dependencies, and the
     output_name defines what other nodes can depend on.
 
+    Can be used with or without parentheses:
+    - @node (uses function name as output_name)
+    - @node() (uses function name as output_name)
+    - @node(output_name="result") (uses specified output_name)
+
     Args:
-        output_name: Name for the output of this function
+        output_name: Name for the output of this function. If None, uses the function's name.
+                     When used as @node without parentheses, this receives the function itself.
         cache: Whether to cache this node's output (default: True)
 
     Returns:
-        A decorator function that wraps a function in a Node
+        Either a Node (if used without parentheses) or a decorator function
 
     Example:
         >>> @node(output_name="result")
@@ -148,10 +157,25 @@ def node(output_name: str, cache: bool = True) -> Callable[[Callable], Node]:
         >>> pipeline = Pipeline(nodes=[add_one])
         >>> result = pipeline.run(inputs={"x": 5})
         >>> assert result == {"result": 6}
-    """
 
+        >>> @node  # Uses function name as output_name
+        ... def double(x: int) -> int:
+        ...     return x * 2
+        ...
+        >>> pipeline = Pipeline(nodes=[double])
+        >>> result = pipeline.run(inputs={"x": 5})
+        >>> assert result == {"double": 10}
+    """
+    # Handle @node (without parentheses) - output_name will be the function
+    if callable(output_name):
+        func = output_name
+        return Node(func, output_name=func.__name__, cache=cache)
+
+    # Handle @node() or @node(output_name="...") - return a decorator
     def decorator(func: Callable) -> Node:
         """Wrap the function in a Node."""
-        return Node(func, output_name=output_name, cache=cache)
+        # Use function name if output_name not provided
+        final_output_name = output_name if output_name is not None else func.__name__
+        return Node(func, output_name=final_output_name, cache=cache)
 
     return decorator
