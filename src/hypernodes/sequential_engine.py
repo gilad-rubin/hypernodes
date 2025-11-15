@@ -222,12 +222,16 @@ class SequentialEngine:
         """Store node outputs in results dicts.
 
         Handles both regular nodes and PipelineNodes (which return dicts).
+        For PipelineNodes, only stores outputs that match node.output_name
+        to support automatic output pruning.
         """
         if hasattr(node, "pipeline"):
             # PipelineNode - result is dict of outputs
-            outputs.update(result)
-            available_values.update(result)
-            for output_name_key in result.keys():
+            # Store only the outputs that are actually in the result
+            # (The result may be pruned based on parent pipeline's requirements)
+            for output_name_key, value in result.items():
+                outputs[output_name_key] = value
+                available_values[output_name_key] = value
                 node_signatures[output_name_key] = signature
         else:
             # Regular node

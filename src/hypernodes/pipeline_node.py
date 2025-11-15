@@ -88,6 +88,9 @@ class PipelineNode(HyperNode):
     def output_name(self) -> Union[str, tuple]:
         """Get outer output names (after output mapping).
 
+        Returns all possible outputs. The actual required outputs are determined
+        at the parent pipeline level (stored in pipeline.graph.required_outputs).
+
         Returns:
             Output name(s) from outer pipeline's perspective
         """
@@ -206,10 +209,46 @@ class PipelineNode(HyperNode):
                 outer_results[outer_name].append(value)
         return outer_results
 
-    def __call__(self, **inputs):
+    def _get_required_inner_outputs(
+        self, required_outputs: Optional[List[str]] = None
+    ) -> Optional[Union[str, List[str]]]:
+        """Determine which inner outputs to request based on required_outputs parameter.
+
+        Args:
+            required_outputs: List of required outer output names, or None for all
+
+        Returns:
+            Inner output name(s) to pass to inner pipeline, or None for all outputs
+        """
+        if required_outputs is None:
+            # No pruning - request all outputs
+            return None
+
+        # Map outer required outputs back to inner output names
+        reverse_output_mapping = {
+            outer: inner for inner, outer in self.output_mapping.items()
+        }
+
+        inner_outputs = []
+        for outer_name in required_outputs:
+            # Get the inner name (reverse the output mapping)
+            inner_name = reverse_output_mapping.get(outer_name, outer_name)
+            inner_outputs.append(inner_name)
+
+        # Return as string if single output, list if multiple, None if empty
+        if len(inner_outputs) == 0:
+            return None
+        elif len(inner_outputs) == 1:
+            return inner_outputs[0]
+        else:
+            return inner_outputs
+
+    def __call__(self, required_outputs: Optional[List[str]] = None, **inputs):
         """Execute the wrapped pipeline with input/output mapping.
 
         Args:
+            required_outputs: Optional list of required outer output names.
+                            If provided, only these outputs will be computed.
             **inputs: Input parameters from outer perspective
 
         Returns:
@@ -217,16 +256,24 @@ class PipelineNode(HyperNode):
         """
         inner_inputs = self._apply_input_mapping(inputs)
 
+        # Determine which inner outputs to request based on required_outputs
+        # This enables the inner pipeline to skip unnecessary computation
+        inner_output_name = self._get_required_inner_outputs(required_outputs)
+
         if self.map_over:
             map_over_inner = self._translate_map_over_to_inner()
             results = self._pipeline.map(
                 inputs=inner_inputs,
                 map_over=map_over_inner,
                 map_mode=self.map_mode,
+                output_name=inner_output_name,
             )
             return self._collect_mapped_results(results)
         else:
-            result = self._pipeline.run(inputs=inner_inputs)
+            result = self._pipeline.run(
+                inputs=inner_inputs,
+                output_name=inner_output_name,
+            )
             return self._apply_output_mapping(result)
 
     def __repr__(self) -> str:

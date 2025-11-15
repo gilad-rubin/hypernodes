@@ -35,6 +35,8 @@ class GraphResult:
         root_args: External input parameters required by pipeline
         available_output_names: All output names the pipeline can produce
         dependencies: Mapping from each node to its direct dependencies (other nodes)
+        required_outputs: Mapping from PipelineNode to list of required output names.
+                         This stores the optimization information without mutating nodes.
     """
 
     output_to_node: Dict[str, "Node"]
@@ -42,6 +44,7 @@ class GraphResult:
     root_args: List[str]
     available_output_names: List[str]
     dependencies: Dict["Node", List["Node"]]
+    required_outputs: Dict["Node", Optional[List[str]]]
 
     def get_required_nodes(
         self, output_names: Union[str, List[str], None]
@@ -419,12 +422,16 @@ class SimpleGraphBuilder(GraphBuilder):
 
         root_args = sorted(all_params - set(output_to_node.keys()))
 
+        # 6. Compute required outputs for PipelineNodes (optimization)
+        required_outputs = self._compute_required_outputs(nodes, dependencies, output_to_node)
+
         return GraphResult(
             output_to_node=output_to_node,
             execution_order=execution_order,
             root_args=root_args,
             available_output_names=sorted(output_to_node.keys()),
             dependencies=dependencies,
+            required_outputs=required_outputs,
         )
 
     def _validate_dependencies(
@@ -494,6 +501,74 @@ class SimpleGraphBuilder(GraphBuilder):
             raise CycleError("Topological sort failed - possible cycle")
 
         return result
+
+    def _compute_required_outputs(
+        self,
+        nodes: List["Node"],
+        dependencies: Dict["Node", List["Node"]],
+        output_to_node: Dict[str, "Node"],
+    ) -> Dict["Node", Optional[List[str]]]:
+        """Compute which outputs are required for each PipelineNode.
+
+        For each PipelineNode, analyzes which of its outputs are used by downstream
+        nodes. This information is stored in the graph result (not mutating the node).
+
+        Args:
+            nodes: List of all nodes in the pipeline
+            dependencies: Dependency graph
+            output_to_node: Mapping from output names to producing nodes
+
+        Returns:
+            Mapping from PipelineNode to required output names (or None for all)
+        """
+        # Import here to avoid circular dependency
+        from .pipeline_node import PipelineNode
+
+        required_outputs: Dict["Node", Optional[List[str]]] = {}
+
+        for node in nodes:
+            # Only analyze PipelineNodes
+            if not isinstance(node, PipelineNode):
+                continue
+
+            # Get all outputs this PipelineNode produces (in outer naming)
+            node_outputs = node.output_name
+            if isinstance(node_outputs, str):
+                node_outputs = [node_outputs]
+            else:
+                node_outputs = list(node_outputs)
+
+            # Find which of these outputs are actually used
+            used_outputs = set()
+
+            # Check all other nodes to see if they depend on this node's outputs
+            for other_node in nodes:
+                if other_node == node:
+                    continue
+
+                # Check if other_node uses any of this PipelineNode's outputs
+                for param in other_node.root_args:
+                    if param in output_to_node and output_to_node[param] == node:
+                        # This param is produced by our PipelineNode
+                        # Find which output name it corresponds to
+                        if param in node_outputs:
+                            used_outputs.add(param)
+
+            # Optimization logic:
+            # - If SOME (but not all) outputs are used: store only those
+            # - If ALL outputs are used OR no outputs are used: store None (return all)
+            if used_outputs and len(used_outputs) < len(node_outputs):
+                # Only some outputs are needed - optimize!
+                required_outputs[node] = sorted(list(used_outputs))
+            else:
+                # Either all outputs are needed, or no outputs are needed
+                # In both cases, return all outputs (None = no pruning)
+                # This handles both:
+                # - Terminal nodes (no downstream dependencies)
+                # - Nodes where all outputs are used
+                required_outputs[node] = None
+
+        return required_outputs
 
     def compute_required_nodes(
         self,

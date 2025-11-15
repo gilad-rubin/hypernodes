@@ -4,7 +4,13 @@ from hypernodes import Pipeline, node
 
 
 def test_simple_nested_pipeline():
-    """Test pipeline used as a node in another pipeline."""
+    """Test pipeline used as a node in another pipeline.
+    
+    With automatic output pruning, only outputs that are used by downstream
+    nodes are returned. Here, 'doubled' is an internal detail of the inner
+    pipeline that is NOT used by the outer pipeline, so it's pruned.
+    Only 'incremented' (used by square) and 'result' are in the final output.
+    """
     
     @node(output_name="doubled")
     def double(x: int) -> int:
@@ -23,11 +29,20 @@ def test_simple_nested_pipeline():
     outer_pipeline = Pipeline(nodes=[inner_pipeline.as_node(), square])
     
     result = outer_pipeline.run(inputs={"x": 5})
-    assert result == {"doubled": 10, "incremented": 11, "result": 121}
+    # 'doubled' is NOT in result because it's only used internally by inner_pipeline
+    # Only 'incremented' (used by square) and 'result' are returned
+    assert result == {"incremented": 11, "result": 121}
+    assert "doubled" not in result  # Verify optimization worked
 
 
 def test_two_level_nesting():
-    """Test deeper nesting (3 levels total)."""
+    """Test deeper nesting (3 levels total).
+    
+    With automatic output pruning applied at each nesting level:
+    - inner_inner produces 'doubled', but only 'doubled' is used by add_one in inner
+    - inner produces 'doubled' and 'incremented', but only 'incremented' is used by square
+    - So only 'incremented' and 'result' appear in final output
+    """
     
     @node(output_name="doubled")
     def double(x: int) -> int:
@@ -48,7 +63,9 @@ def test_two_level_nesting():
     outer = Pipeline(nodes=[inner.as_node(), square])
     
     result = outer.run(inputs={"x": 5})
-    assert result == {"doubled": 10, "incremented": 11, "result": 121}
+    # 'doubled' is pruned at the outer level because square doesn't need it
+    assert result == {"incremented": 11, "result": 121}
+    assert "doubled" not in result  # Verify optimization worked
 
 
 def test_nested_pipeline_with_input_mapping():

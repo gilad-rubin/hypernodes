@@ -182,9 +182,13 @@ def _execute_pipeline_node(
         for callback in callbacks:
             callback.on_nested_pipeline_start(pipeline.id, inner_pipeline.id, ctx)
 
-        # Call the PipelineNode (it handles all mapping internally)
+        # Look up required outputs from parent pipeline's graph
+        # This is the parent-level optimization information
+        required_outputs = pipeline.graph.required_outputs.get(pipeline_node)
+
+        # Call the PipelineNode with required outputs
         # Context is already available through contextvar
-        result = pipeline_node(**inputs)
+        result = pipeline_node(required_outputs=required_outputs, **inputs)
 
         # Trigger nested pipeline end callbacks
         nested_duration = time.time() - nested_start_time

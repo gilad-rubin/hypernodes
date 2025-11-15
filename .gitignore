@@ -25,3 +25,4 @@ CLAUDE.md.bak
 *.html
 daft_grid_search_results.json
 data/*
+cache/*

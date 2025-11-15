@@ -8,7 +8,6 @@ requires-python = ">=3.12"
 dependencies = [
     "daft>=0.6.11",
     "networkx>=3.5",
-    "optimum[onnxruntime]>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +38,7 @@ examples = [
     "daft>=0.6.7",
     "diskcache>=5.6.3",
     "ipykernel>=6.31.0",
+    "model2vec>=0.7.0",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
     "pydantic>=2.12.3",
