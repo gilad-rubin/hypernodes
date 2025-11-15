@@ -26,6 +26,7 @@ Example:
 
 from .cache import DiskCache
 from .callbacks import CallbackContext, PipelineCallback
+from .dual_node import DualNode
 from .engines import SequentialEngine
 from .exceptions import (
     CycleError,
@@ -56,6 +57,7 @@ __all__ = [
     # Decorators
     "node",
     # Classes
+    "DualNode",
     "HyperNode",
     "Node",
     "Pipeline",

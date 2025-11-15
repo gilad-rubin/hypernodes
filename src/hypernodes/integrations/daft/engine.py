@@ -287,6 +287,10 @@ class DaftEngine(Engine):
 
         Returns: (transformed_df, updated_available_columns)
         """
+        # Check if this is a DualNode
+        if hasattr(node, "is_dual_node") and node.is_dual_node:
+            return self._apply_dual_node_transformation(df, node, available_columns)
+
         # Check if this is a PipelineNode with map_over
         if hasattr(node, "pipeline") and hasattr(node, "map_over") and node.map_over:
             return self._apply_mapped_pipeline_transformation(
@@ -376,14 +380,109 @@ class DaftEngine(Engine):
 
             return df, available_columns
 
-    def _infer_daft_return_type(self, node: Any) -> Optional["daft.DataType"]:
-        """Infer Daft DataType from function return type annotation.
+    def _apply_dual_node_transformation(
+        self,
+        df: "daft.DataFrame",
+        node: Any,
+        available_columns: set,
+    ) -> tuple["daft.DataFrame", set]:
+        """Apply DualNode - choose singular or batch based on context.
+
+        During .run() → uses node.singular with @daft.func
+        During .map() → uses node.batch with @daft.func.batch (optimized for Series)
+        """
+        import asyncio
+
+        # Choose implementation based on context
+        func = node.batch if self._is_map_context else node.singular
+        use_batch_udf = self._is_map_context
+
+        # Check if function is async
+        is_async = asyncio.iscoroutinefunction(func)
+
+        # Use singular function for type inference (canonical signature)
+        inferred_type = self._infer_daft_return_type_from_func(node.singular)
+
+        # Make function serializable for distributed execution
+        serializable_func = self._make_serializable_by_value(func)
+
+        # ALWAYS use explicit return_dtype to avoid inference errors
+        from daft import DataType
+
+        return_dtype = inferred_type if inferred_type is not None else DataType.python()
+
+        if use_batch_udf:
+            # Use @daft.func.batch for batch operations (Series → Series)
+            batch_kwargs = {"return_dtype": return_dtype}
+            
+            # Use engine-level config for batch size
+            if "batch_size" in self.default_daft_config:
+                batch_kwargs["batch_size"] = self.default_daft_config["batch_size"]
+            else:
+                # Auto-calculate optimal batch size
+                num_items = getattr(self, "_num_items", 100)
+                batch_kwargs["batch_size"] = self._calculate_batch_size(num_items)
+            
+            # Wrap batch function to handle constant parameters
+            # In batch UDFs, ALL parameters come as Series, but constant ones
+            # (like encoder, config) should be unwrapped to scalars
+            from daft import Series
+            
+            def batch_wrapper(*series_args: Series) -> Series:
+                """Unwrap constant parameters before calling user's batch function."""
+                unwrapped_args = []
+                
+                for series_arg in series_args:
+                    pylist = series_arg.to_pylist()
+                    
+                    # Check if this is a constant (all values same)
+                    if len(pylist) > 0:
+                        first_val = pylist[0]
+                        is_constant = all(
+                            val is first_val or val == first_val for val in pylist[1:]
+                        )
+                        
+                        if is_constant:
+                            # Constant parameter - unwrap to scalar
+                            unwrapped_args.append(first_val)
+                        else:
+                            # Varying parameter - pass as Series for user's batch function
+                            unwrapped_args.append(series_arg)
+                    else:
+                        # Empty series - pass as is
+                        unwrapped_args.append(series_arg)
+                
+                # Call user's batch function with properly unwrapped args
+                return serializable_func(*unwrapped_args)
+            
+            # Create decorated batch UDF
+            udf = daft.func.batch(**batch_kwargs)(batch_wrapper)
+        else:
+            # Use @daft.func for row-wise operations (scalar → scalar)
+            udf = daft.func(serializable_func, return_dtype=return_dtype)
+
+        # Apply UDF
+        input_cols = [daft.col(param) for param in node.root_args]
+        df = df.with_column(node.output_name, udf(*input_cols))
+
+        available_columns = available_columns.copy()
+        available_columns.add(node.output_name)
+
+        return df, available_columns
+
+    def _infer_daft_return_type_from_func(
+        self, func: Any
+    ) -> Optional["daft.DataType"]:
+        """Infer Daft DataType from any function's return type annotation.
 
         Attempts to convert Python type hints to Daft DataTypes:
         - List[T] → DataType.list(DataType.python())
         - dict → DataType.python()
         - Protocol → DataType.python()
         - Simple types (str, int, float) → Daft's type inference
+
+        Args:
+            func: Function to infer return type from
 
         Returns:
             DataType if we can infer it, None to let Daft infer automatically
@@ -394,7 +493,7 @@ class DaftEngine(Engine):
         from daft import DataType
 
         # Get return annotation
-        sig = inspect.signature(node.func)
+        sig = inspect.signature(func)
         return_annotation = sig.return_annotation
 
         if return_annotation == inspect.Signature.empty:
@@ -409,7 +508,7 @@ class DaftEngine(Engine):
                 import typing
 
                 return_annotation = eval(
-                    return_annotation, {**typing.__dict__, **node.func.__globals__}
+                    return_annotation, {**typing.__dict__, **func.__globals__}
                 )
             except Exception:
                 # If evaluation fails, fall back to Python type
@@ -443,6 +542,13 @@ class DaftEngine(Engine):
 
         # Let Daft try to infer for other cases
         return None
+
+    def _infer_daft_return_type(self, node: Any) -> Optional["daft.DataType"]:
+        """Infer Daft DataType from node's function return type annotation.
+
+        This is a wrapper around _infer_daft_return_type_from_func for backward compatibility.
+        """
+        return self._infer_daft_return_type_from_func(node.func)
 
     def _should_use_batch_udf(self, node: Any) -> bool:
         """Determine if a node should use batch UDF.

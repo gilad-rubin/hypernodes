@@ -27,14 +27,18 @@ if TYPE_CHECKING:
 def _get_node_id(node) -> str:
     """Get a consistent node ID for callbacks and logging.
 
-    Handles regular nodes, PipelineNodes, and nested pipelines.
+    Handles regular nodes, DualNodes, PipelineNodes, and nested pipelines.
 
     Args:
-        node: Node object (Node, PipelineNode, or Pipeline)
+        node: Node object (Node, DualNode, PipelineNode, or Pipeline)
 
     Returns:
         String identifier for the node
     """
+    # DualNode - use name property
+    if hasattr(node, "is_dual_node") and node.is_dual_node:
+        return node.name
+
     # PipelineNode with explicit name
     if hasattr(node, "name") and node.name:
         return node.name
@@ -235,6 +239,9 @@ def execute_single_node(
         if hasattr(node, "pipeline"):
             # PipelineNode
             signature = compute_pipeline_node_signature(node, inputs, node_signatures)
+        elif hasattr(node, "is_dual_node") and node.is_dual_node:
+            # DualNode - use node's code_hash which combines both implementations
+            signature = compute_node_signature(node, inputs, node_signatures)
         else:
             # Regular node
             signature = compute_node_signature(node, inputs, node_signatures)
@@ -272,6 +279,16 @@ def execute_single_node(
         if hasattr(node, "pipeline"):
             # PipelineNode - delegate to specialized function
             result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
+        elif hasattr(node, "is_dual_node") and node.is_dual_node:
+            # DualNode - use singular function (SequentialEngine executes one at a time)
+            result = node.singular(**inputs)
+
+            # Handle async functions if needed
+            if inspect.iscoroutine(result):
+                raise TypeError(
+                    f"Async function {node.singular.__name__} not supported in sequential execution. "
+                    "Use an async-capable executor."
+                )
         else:
             # Regular node - call directly
             result = node(**inputs)
@@ -303,6 +320,8 @@ def execute_single_node(
         # TODO: Optimize by tracking which nodes actually need signatures
         if hasattr(node, "pipeline"):
             signature = compute_pipeline_node_signature(node, inputs, node_signatures)
+        elif hasattr(node, "is_dual_node") and node.is_dual_node:
+            signature = compute_node_signature(node, inputs, node_signatures)
         else:
             signature = compute_node_signature(node, inputs, node_signatures)
 
