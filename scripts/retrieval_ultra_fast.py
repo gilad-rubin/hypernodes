@@ -22,6 +22,7 @@ import daft
 import numpy as np
 import pandas as pd
 import pytrec_eval
+import torch
 from daft import DataType, Series
 
 from hypernodes import Pipeline, node
@@ -111,7 +112,9 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str):
         from sentence_transformers import CrossEncoder
 
-        self._model = CrossEncoder(model_name)
+        self._model = CrossEncoder(
+            model_name, device="cuda" if torch.cuda.is_available() else None
+        )
         self._passage_lookup = None
 
     def rerank(
@@ -476,7 +479,7 @@ retrieve_queries_mapped = retrieve_single_query.as_node(
 )
 
 # Initialize telemetry callback for profiling
-telemetry_callback = TelemetryCallback()
+# telemetry_callback = TelemetryCallback()  # Commented out - uncomment when needed
 
 full_pipeline = Pipeline(
     nodes=[
@@ -598,106 +601,121 @@ def print_profiling_results(telemetry: TelemetryCallback) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark the Hebrew retrieval pipeline with SequentialEngine or DaftEngine."
+        description="Hebrew retrieval pipeline with SequentialEngine or DaftEngine."
     )
-    parser.add_argument(
-        "--engine",
-        choices=["sequential", "dask", "daft"],
-        default="sequential",
-        help="Execution engine to use.",
-    )
-    parser.add_argument(
+
+    # Dataset options
+    dataset_group = parser.add_argument_group("Dataset")
+    dataset_group.add_argument(
         "--examples",
         type=int,
         default=5,
-        help="Dataset size variant (matches data/sample_<N>).",
+        help="Dataset size (matches data/sample_<N>).",
     )
-    parser.add_argument(
+    dataset_group.add_argument(
         "--split",
         choices=["train", "dev", "test"],
         default="test",
-        help="Which parquet split to use for queries/labels.",
+        help="Parquet split to use.",
     )
-    parser.add_argument(
+    dataset_group.add_argument(
         "--limit",
         type=int,
         default=0,
-        help="Optional corpus head() limit (0 = all passages).",
+        help="Limit corpus size (0 = all passages).",
     )
-    parser.add_argument(
-        "--top-k",
-        type=int,
-        default=300,
-        help="Number of candidates to retrieve from each index.",
-    )
-    parser.add_argument(
-        "--rerank-k",
-        type=int,
-        default=300,
-        help="Number of fused candidates to rerank.",
-    )
-    parser.add_argument(
-        "--reranker-batch-size",
-        type=int,
-        default=128,
-        help="Batch size for CrossEncoder reranking (set <=0 to disable batching).",
-    )
-    parser.add_argument(
-        "--ndcg-k",
-        type=int,
-        default=20,
-        help="Cutoff for NDCG evaluation.",
-    )
-    parser.add_argument(
+
+    # Model options
+    model_group = parser.add_argument_group("Models")
+    model_group.add_argument(
         "--encoder-model",
         default="minishlab/potion-retrieval-32M",
-        help="Sentence encoder checkpoint.",
+        help="Encoder model checkpoint.",
     )
-    parser.add_argument(
+    model_group.add_argument(
         "--reranker-model",
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
         help="CrossEncoder checkpoint.",
     )
-    parser.add_argument(
+    model_group.add_argument(
         "--disable-cross-encoder",
         action="store_true",
-        help="Skip CrossEncoder reranking (keeps fused hits).",
+        help="Skip CrossEncoder reranking.",
     )
-    parser.add_argument(
+
+    # Retrieval options
+    retrieval_group = parser.add_argument_group("Retrieval")
+    retrieval_group.add_argument(
+        "--top-k",
+        type=int,
+        default=300,
+        help="Candidates to retrieve per index.",
+    )
+    retrieval_group.add_argument(
+        "--rerank-k",
+        type=int,
+        default=300,
+        help="Candidates to rerank.",
+    )
+    retrieval_group.add_argument(
+        "--reranker-batch-size",
+        type=int,
+        default=128,
+        help="CrossEncoder batch size (<=0 to disable batching).",
+    )
+    retrieval_group.add_argument(
+        "--ndcg-k",
+        type=int,
+        default=20,
+        help="NDCG evaluation cutoff.",
+    )
+
+    # Engine options
+    engine_group = parser.add_argument_group("Engine")
+    engine_group.add_argument(
+        "--engine",
+        choices=["sequential", "dask", "daft"],
+        default="sequential",
+        help="Execution engine.",
+    )
+    engine_group.add_argument(
         "--daft-threaded-batch",
         action="store_true",
-        help="Enable DaftEngine's threaded batch UDFs (experiments with Series batching).",
+        help="Enable DaftEngine threaded batch UDFs.",
     )
-    parser.add_argument(
+    engine_group.add_argument(
         "--daft-batch-size",
         type=int,
-        help="Override DaftEngine batch_size heuristic.",
+        help="Override DaftEngine batch_size.",
     )
-    parser.add_argument(
+    engine_group.add_argument(
         "--daft-max-workers",
         type=int,
-        help="Override DaftEngine ThreadPoolExecutor worker count.",
+        help="Override DaftEngine max_workers.",
     )
-    parser.add_argument(
+    engine_group.add_argument(
         "--daft-max-concurrency",
         type=int,
-        help="Max concurrent @daft.cls instances (passes to DaftEngine default config).",
+        help="Max concurrent @daft.cls instances.",
     )
-    parser.add_argument(
+    engine_group.add_argument(
         "--daft-use-process",
         action="store_true",
-        help="Execute Daft UDFs in separate processes.",
+        help="Use process isolation for Daft UDFs.",
     )
-    parser.add_argument(
+    engine_group.add_argument(
         "--daft-gpus",
         type=int,
-        help="Number of GPUs to request per @daft.cls instance.",
+        help="GPUs per @daft.cls instance.",
     )
+
+    # Output options
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Reduce console verbosity.",
+        help="Reduce verbosity.",
     )
+
     return parser.parse_args()
 
 
@@ -824,7 +842,7 @@ def main() -> None:
         print("=" * 70)
 
         # Display profiling results from telemetry
-        print_profiling_results(telemetry_callback)
+        # print_profiling_results(telemetry_callback)  # Commented out - enable telemetry_callback first
 
 
 if __name__ == "__main__":
