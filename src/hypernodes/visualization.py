@@ -122,6 +122,7 @@ class GraphvizStyle:
 
     Attributes:
         func_node_color: Background color for function nodes
+        dual_node_color: Background color for dual nodes (batch-optimized)
         arg_node_color: Background color for input parameter nodes
         grouped_args_node_color: Background color for grouped input nodes
         pipeline_node_color: Background color for collapsed pipeline nodes
@@ -144,6 +145,7 @@ class GraphvizStyle:
 
     # Node colors
     func_node_color: str = "#87CEEB"  # Sky blue
+    dual_node_color: str = "#FFA07A"  # Light salmon (warm but subtle)
     arg_node_color: str = "#90EE90"  # Light green
     grouped_args_node_color: str = "#90EE90"  # Light green (same as args)
     pipeline_node_color: str = "#DDA0DD"  # Plum (purple-ish for pipelines)
@@ -179,6 +181,7 @@ DESIGN_STYLES = {
     "default": GraphvizStyle(),
     "minimal": GraphvizStyle(
         func_node_color="#FFFFFF",
+        dual_node_color="#FFE4E1",  # Misty rose (very subtle salmon)
         arg_node_color="#F5F5F5",
         grouped_args_node_color="#F5F5F5",
         pipeline_node_color="#E8E8E8",
@@ -195,6 +198,7 @@ DESIGN_STYLES = {
     ),
     "vibrant": GraphvizStyle(
         func_node_color="#FFB6C1",  # Light pink
+        dual_node_color="#FF8C69",  # Salmon (vibrant but not feverish)
         arg_node_color="#98FB98",  # Pale green
         grouped_args_node_color="#FFE4B5",  # Moccasin
         pipeline_node_color="#DDA0DD",  # Plum
@@ -211,6 +215,7 @@ DESIGN_STYLES = {
     ),
     "monochrome": GraphvizStyle(
         func_node_color="#E0E0E0",  # Light gray
+        dual_node_color="#C8C8C8",  # Medium-light gray (slightly darker)
         arg_node_color="#F5F5F5",  # Very light gray
         grouped_args_node_color="#ECECEC",  # Light gray
         pipeline_node_color="#D0D0D0",  # Medium gray
@@ -227,6 +232,7 @@ DESIGN_STYLES = {
     ),
     "dark": GraphvizStyle(
         func_node_color="#3A506B",  # Dark blue-gray
+        dual_node_color="#CD5C5C",  # Indian red (muted coral for dark theme)
         arg_node_color="#5C7C99",  # Medium blue-gray
         grouped_args_node_color="#6C8CA0",  # Light blue-gray
         pipeline_node_color="#7D5BA6",  # Purple-gray
@@ -246,6 +252,7 @@ DESIGN_STYLES = {
     ),
     "professional": GraphvizStyle(
         func_node_color="#E8F4F8",  # Very light blue
+        dual_node_color="#FFE4E1",  # Misty rose (very subtle coral)
         arg_node_color="#FFF9E6",  # Very light yellow
         grouped_args_node_color="#F0F8E8",  # Very light green
         pipeline_node_color="#F0E6F8",  # Very light purple
@@ -264,6 +271,7 @@ DESIGN_STYLES = {
     ),
     "pastel": GraphvizStyle(
         func_node_color="#FFD6E8",  # Pastel pink
+        dual_node_color="#FFDAB9",  # Pastel peach (softer than yellow)
         arg_node_color="#C7E9F1",  # Pastel blue
         grouped_args_node_color="#E8F3D6",  # Pastel green
         pipeline_node_color="#E6D5F0",  # Pastel purple
@@ -497,9 +505,12 @@ def _create_node_label(
     show_types: bool = True,
 ) -> str:
     """Create HTML label for a function node."""
+    # Check if this is a DualNode
+    is_dual = hasattr(node, "is_dual_node") and node.is_dual_node
+
     # Handle PipelineNode which wraps a Pipeline
     if hasattr(node, "func"):
-        # Regular Node
+        # Regular Node or DualNode
         if hasattr(node.func, "__name__"):
             func_name = node.func.__name__
         elif isinstance(node.func, Pipeline):
@@ -516,7 +527,14 @@ def _create_node_label(
             func_name = node.name
         else:
             func_name = "pipeline"
-    
+
+    # Add visual indicator for DualNode
+    if is_dual:
+        func_name = f"{func_name} ◆"  # Diamond indicates dual mode
+
+    # Choose color based on node type
+    node_color = style.dual_node_color if is_dual else style.func_node_color
+
     output_name = node.output_name
 
     # Handle tuple output names
@@ -538,13 +556,13 @@ def _create_node_label(
         label = f'''<
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
   <TR><TD><B>{func_name_esc}</B></TD></TR>
-  <TR><TD BGCOLOR="{style.func_node_color}">{output_name_esc} : {return_type_esc}</TD></TR>
+  <TR><TD BGCOLOR="{node_color}">{output_name_esc} : {return_type_esc}</TD></TR>
 </TABLE>>'''
     else:
         label = f'''<
 <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
   <TR><TD><B>{func_name_esc}</B></TD></TR>
-  <TR><TD BGCOLOR="{style.func_node_color}">{output_name_esc}</TD></TR>
+  <TR><TD BGCOLOR="{node_color}">{output_name_esc}</TD></TR>
 </TABLE>>'''
 
     return label
@@ -590,12 +608,12 @@ def _create_grouped_inputs_label(
                 type_hint_esc = _escape_html(type_hint)
                 default_val_esc = _escape_html(default_val)
                 rows.append(
-                    f'<TR><TD ALIGN="LEFT">{param_esc} : {type_hint_esc}{default_val_esc}</TD></TR>'
+                    f"<TR><TD>{param_esc} : {type_hint_esc}{default_val_esc}</TD></TR>"
                 )
             else:
-                rows.append(f'<TR><TD ALIGN="LEFT">{param_esc}</TD></TR>')
+                rows.append(f"<TR><TD>{param_esc}</TD></TR>")
         else:
-            rows.append(f'<TR><TD ALIGN="LEFT">{param_esc}</TD></TR>')
+            rows.append(f"<TR><TD>{param_esc}</TD></TR>")
 
     rows_html = "\n  ".join(rows)
     label = f"""<
@@ -827,12 +845,18 @@ def visualize(
             else:
                 # Function node
                 label = _create_node_label(item, style_obj, show_types)
+                # Choose color based on node type
+                is_dual = hasattr(item, "is_dual_node") and item.is_dual_node
+                node_fill_color = (
+                    style_obj.dual_node_color if is_dual else style_obj.func_node_color
+                )
+
                 container.node(
                     str(id(item)),
                     label=label,
                     shape="box",
                     style="rounded,filled",
-                    fillcolor=style_obj.func_node_color,
+                    fillcolor=node_fill_color,
                     fontname=style_obj.font_name,
                     fontsize=str(style_obj.font_size),
                     penwidth=str(style_obj.node_border_width),
@@ -944,6 +968,15 @@ def visualize(
                 shape="box",
                 style="rounded,filled",
                 fillcolor=style_obj.func_node_color,
+                fontname=style_obj.font_name,
+                fontsize=str(style_obj.legend_font_size),
+            )
+            legend.node(
+                "legend_dual",
+                label="Dual Node ◆",
+                shape="box",
+                style="rounded,filled",
+                fillcolor=style_obj.dual_node_color,
                 fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )

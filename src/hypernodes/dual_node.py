@@ -10,6 +10,8 @@ This enables type-safe, scalar-first design while maintaining batch optimization
 import inspect
 from typing import Any, Callable, Optional, Tuple, Union
 
+from .hypernode import HyperNode
+
 
 class DualNode:
     """A node with dual execution modes: singular and batch.
@@ -128,11 +130,29 @@ class DualNode:
 
     @property
     def name(self) -> str:
-        """Return node name for identification."""
+        """Return node name for identification.
+        
+        Strips common suffixes (_singular, _one, _single) to get clean base name.
+        """
         # Use singular function name (canonical)
         if hasattr(self.singular, "__name__"):
-            return self.singular.__name__
+            func_name = self.singular.__name__
+            
+            # Strip common suffixes to get clean name
+            for suffix in ["_singular", "_one", "_single"]:
+                if func_name.endswith(suffix):
+                    return func_name[: -len(suffix)]
+            
+            return func_name
         return str(id(self))
+    
+    @property
+    def func(self):
+        """Expose singular function as 'func' for compatibility with visualization.
+        
+        This allows visualization tools to extract type hints from the singular function.
+        """
+        return self.singular
 
     def __repr__(self) -> str:
         """String representation."""

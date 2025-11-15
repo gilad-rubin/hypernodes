@@ -446,14 +446,19 @@ class DaftEngine(Engine):
                             # Constant parameter - unwrap to scalar
                             unwrapped_args.append(first_val)
                         else:
-                            # Varying parameter - pass as Series for user's batch function
-                            unwrapped_args.append(series_arg)
+                            # Varying parameter - pass as list (user's batch function expects lists)
+                            unwrapped_args.append(pylist)
                     else:
-                        # Empty series - pass as is
-                        unwrapped_args.append(series_arg)
+                        # Empty series - pass empty list
+                        unwrapped_args.append([])
                 
-                # Call user's batch function with properly unwrapped args
-                return serializable_func(*unwrapped_args)
+                # Call user's batch function (returns list)
+                result = serializable_func(*unwrapped_args)
+                
+                # Convert list result back to Series for Daft
+                if isinstance(result, list):
+                    return Series.from_pylist(result)
+                return result  # Already a Series
             
             # Create decorated batch UDF
             udf = daft.func.batch(**batch_kwargs)(batch_wrapper)
