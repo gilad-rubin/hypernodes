@@ -424,3 +424,35 @@ class TestStatefulEdgeCases:
         assert hasattr(restored, "__hypernode_stateful__") or hasattr(
             restored.__class__, "__hypernode_stateful__"
         )
+
+
+class TestStatefulErrorCases:
+    """Test error handling for stateful objects."""
+
+    def test_daft_engine_rejects_stateful_only_nodes(self):
+        """Test that DaftEngine raises error for nodes with only stateful params."""
+        try:
+            from hypernodes.integrations.daft import DaftEngine
+        except ImportError:
+            pytest.skip("DaftEngine not available")
+
+        @stateful
+        class Counter:
+            def __init__(self, start: int = 0):
+                self.count = start
+
+            def increment(self) -> int:
+                self.count += 1
+                return self.count
+
+        @node(output_name="count")
+        def get_count(counter: Counter) -> int:
+            """Node with ONLY stateful parameter (no dynamic inputs)."""
+            return counter.increment()
+
+        counter = Counter(start=10)
+        pipeline = Pipeline(nodes=[get_count], engine=DaftEngine())
+
+        # Should raise ValueError with clear message
+        with pytest.raises(ValueError, match="only stateful parameters"):
+            pipeline.run(inputs={"counter": counter})

@@ -249,10 +249,10 @@ class DaftEngine(Engine):
         # 1. Extracted from DataFrame columns
         # 2. Stored for later use in @daft.cls wrappers
         # 3. Node functions with stateful params get wrapped with @daft.cls
-        
+
         df_inputs = {}
         stateful_inputs = {}
-        
+
         for k, v in inputs.items():
             if self._is_stateful_object(v):
                 # Store for @daft.cls wrapping
@@ -260,17 +260,17 @@ class DaftEngine(Engine):
             else:
                 # Regular input - goes in DataFrame
                 df_inputs[k] = v
-        
+
         # Store stateful inputs for use during node transformation
         self._stateful_inputs = stateful_inputs
-        
+
         # Create initial 1-row DataFrame with non-stateful inputs only
         if df_inputs:
             df = daft.from_pydict({k: [v] for k, v in df_inputs.items()})
         else:
             # No df inputs - create placeholder DataFrame
             df = daft.from_pydict({"__placeholder__": [0]})
-        
+
         # Apply each node/pipeline as column transformations
         available_columns = set(df_inputs.keys())
         for node in pipeline.graph.execution_order:
@@ -289,14 +289,14 @@ class DaftEngine(Engine):
         # Separate stateful objects from regular inputs
         # Stateful objects (constants across all plans) should be extracted
         # and used in @daft.cls wrappers, not DataFrame columns
-        
+
         # Create N-row DataFrame: transpose list of dicts → dict of lists
         input_data = {}
         stateful_inputs = {}
-        
+
         for key in execution_plans[0].keys():
             values = [plan[key] for plan in execution_plans]
-            
+
             # Check if this is a constant stateful object
             if values and self._is_stateful_object(values[0]):
                 # Check if truly constant (same instance across all plans)
@@ -305,9 +305,9 @@ class DaftEngine(Engine):
                     # Extract as stateful
                     stateful_inputs[key] = values[0]
                     continue
-            
+
             input_data[key] = values
-        
+
         # Store stateful inputs for use during node transformation
         self._stateful_inputs = stateful_inputs
 
@@ -365,7 +365,7 @@ class DaftEngine(Engine):
         available_columns: set,
     ) -> tuple["daft.DataFrame", set]:
         """Apply a regular node as a UDF column (batch or row-wise).
-        
+
         Detects stateful parameters (StatefulWrapper objects) and wraps the
         node function with @daft.cls to capture them.
         """
@@ -375,7 +375,7 @@ class DaftEngine(Engine):
         # Stateful params are in self._stateful_inputs (set during _build_dataframe)
         node_stateful_params = {}
         dynamic_params = []
-        
+
         for param in node.root_args:
             if param in self._stateful_inputs:
                 # This is a stateful parameter
@@ -390,13 +390,21 @@ class DaftEngine(Engine):
                     f"not found in available columns {available_columns} "
                     f"or stateful inputs {list(self._stateful_inputs.keys())}"
                 )
-        
+
         # If we have stateful parameters, wrap with @daft.cls
         if node_stateful_params:
+            # Check if there are ANY dynamic params
+            if not dynamic_params:
+                raise ValueError(
+                    f"Node '{node.output_name}' has only stateful parameters {list(node_stateful_params.keys())}. "
+                    f"DaftEngine requires at least one dynamic parameter (from DataFrame) for parallel processing. "
+                    f"Either use SequentialEngine, or add a dynamic input parameter to the node."
+                )
+
             return self._apply_node_with_stateful_params(
                 df, node, dynamic_params, node_stateful_params, available_columns
             )
-        
+
         # No stateful params - use existing logic
         # Check if function is async - Daft handles async concurrency natively!
         is_async = asyncio.iscoroutinefunction(node.func)
@@ -494,7 +502,7 @@ class DaftEngine(Engine):
         if use_batch_udf:
             # Use @daft.func.batch for batch operations (Series → Series)
             batch_kwargs = {"return_dtype": return_dtype}
-            
+
             # Use engine-level config for batch size
             if "batch_size" in self.default_daft_config:
                 batch_kwargs["batch_size"] = self.default_daft_config["batch_size"]
@@ -502,26 +510,26 @@ class DaftEngine(Engine):
                 # Auto-calculate optimal batch size
                 num_items = getattr(self, "_num_items", 100)
                 batch_kwargs["batch_size"] = self._calculate_batch_size(num_items)
-            
+
             # Wrap batch function to handle constant parameters
             # In batch UDFs, ALL parameters come as Series, but constant ones
             # (like encoder, config) should be unwrapped to scalars
             from daft import Series
-            
+
             def batch_wrapper(*series_args: Series) -> Series:
                 """Unwrap constant parameters before calling user's batch function."""
                 unwrapped_args = []
-                
+
                 for series_arg in series_args:
                     pylist = series_arg.to_pylist()
-                    
+
                     # Check if this is a constant (all values same)
                     if len(pylist) > 0:
                         first_val = pylist[0]
                         is_constant = all(
                             val is first_val or val == first_val for val in pylist[1:]
                         )
-                        
+
                         if is_constant:
                             # Constant parameter - unwrap to scalar
                             unwrapped_args.append(first_val)
@@ -531,15 +539,15 @@ class DaftEngine(Engine):
                     else:
                         # Empty series - pass empty list
                         unwrapped_args.append([])
-                
+
                 # Call user's batch function (returns list)
                 result = serializable_func(*unwrapped_args)
-                
+
                 # Convert list result back to Series for Daft
                 if isinstance(result, list):
                     return Series.from_pylist(result)
                 return result  # Already a Series
-            
+
             # Create decorated batch UDF
             udf = daft.func.batch(**batch_kwargs)(batch_wrapper)
         else:
@@ -555,9 +563,7 @@ class DaftEngine(Engine):
 
         return df, available_columns
 
-    def _infer_daft_return_type_from_func(
-        self, func: Any
-    ) -> Optional["daft.DataType"]:
+    def _infer_daft_return_type_from_func(self, func: Any) -> Optional["daft.DataType"]:
         """Infer Daft DataType from any function's return type annotation.
 
         Attempts to convert Python type hints to Daft DataTypes:
@@ -809,35 +815,35 @@ class DaftEngine(Engine):
         available_columns: set,
     ) -> tuple["daft.DataFrame", set]:
         """Apply node with stateful parameters using @daft.cls wrapper.
-        
+
         Creates a @daft.cls wrapper that:
         1. __init__: Reconstructs stateful objects from original class + init args
         2. __call__ or async method: Calls node function with both stateful and dynamic params
-        
+
         Args:
             df: DataFrame
             node: Node to apply
             dynamic_params: Parameters from DataFrame columns
             stateful_params: Parameters that are stateful objects
             available_columns: Available columns
-        
+
         Returns:
             (transformed_df, updated_available_columns)
         """
         import asyncio
-        
+
         # Check if function is async
         is_async = asyncio.iscoroutinefunction(node.func)
-        
+
         # Infer return type
         inferred_type = self._infer_daft_return_type(node)
         from daft import DataType
-        
+
         return_dtype = inferred_type if inferred_type is not None else DataType.python()
-        
+
         # Make node function serializable
         serializable_func = self._make_serializable_by_value(node.func)
-        
+
         # Extract original classes and init args from StatefulWrapper objects
         stateful_reconstructors = {}
         for param_name, wrapper in stateful_params.items():
@@ -846,7 +852,7 @@ class DaftEngine(Engine):
                 "args": wrapper._init_args,
                 "kwargs": wrapper._init_kwargs,
             }
-        
+
         # Get engine-level config for @daft.cls
         config = self.default_daft_config
         cls_kwargs = {}
@@ -856,10 +862,10 @@ class DaftEngine(Engine):
             cls_kwargs["use_process"] = config["use_process"]
         if "gpus" in config:
             cls_kwargs["gpus"] = config["gpus"]
-        
+
         # Build @daft.cls wrapper (different for async vs sync)
         all_params = node.root_args
-        
+
         if is_async:
             # Async version
             @daft.cls(**cls_kwargs)
@@ -873,20 +879,22 @@ class DaftEngine(Engine):
                         init_args = recon["args"]
                         init_kwargs = recon["kwargs"]
                         # Create instance
-                        self._stateful_objects[param_name] = original_class(*init_args, **init_kwargs)
-                
+                        self._stateful_objects[param_name] = original_class(
+                            *init_args, **init_kwargs
+                        )
+
                 @daft.method(return_dtype=return_dtype)
                 async def __call__(self, *args):
                     # Combine stateful and dynamic parameters
                     arg_iter = iter(args)
                     kwargs = {}
-                    
+
                     for param in all_params:
                         if param in self._stateful_objects:
                             kwargs[param] = self._stateful_objects[param]
                         else:
                             kwargs[param] = next(arg_iter)
-                    
+
                     # Call the async node function
                     return await serializable_func(**kwargs)
         else:
@@ -902,39 +910,36 @@ class DaftEngine(Engine):
                         init_args = recon["args"]
                         init_kwargs = recon["kwargs"]
                         # Create instance
-                        self._stateful_objects[param_name] = original_class(*init_args, **init_kwargs)
-                
+                        self._stateful_objects[param_name] = original_class(
+                            *init_args, **init_kwargs
+                        )
+
                 @daft.method(return_dtype=return_dtype)
                 def __call__(self, *args):
                     # Combine stateful and dynamic parameters
                     arg_iter = iter(args)
                     kwargs = {}
-                    
+
                     for param in all_params:
                         if param in self._stateful_objects:
                             kwargs[param] = self._stateful_objects[param]
                         else:
                             kwargs[param] = next(arg_iter)
-                    
+
                     # Call the node function
                     return serializable_func(**kwargs)
-        
+
         # Create wrapper instance
         wrapper = StatefulNodeWrapper()
-        
+
         # Apply wrapper UDF to DataFrame
-        if dynamic_params:
-            input_cols = [daft.col(param) for param in dynamic_params]
-            df = df.with_column(node.output_name, wrapper(*input_cols))
-        else:
-            # No dynamic params - call with no arguments
-            # Need to create a dummy column to trigger execution
-            import daft as daft_mod
-            df = df.with_column(node.output_name, daft_mod.lit(None).apply(lambda _: wrapper()))
-        
+        # Note: dynamic_params is always non-empty here (we error out in the caller if not)
+        input_cols = [daft.col(param) for param in dynamic_params]
+        df = df.with_column(node.output_name, wrapper(*input_cols))
+
         available_columns = available_columns.copy()
         available_columns.add(node.output_name)
-        
+
         return df, available_columns
 
     def _apply_simple_pipeline_transformation(
