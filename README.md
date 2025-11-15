@@ -97,6 +97,36 @@ result1 = pipeline.run(inputs={"passage": "Hello World"})
 result2 = pipeline.run(inputs={"passage": "Hello World"})  # Cached!
 ```
 
+### With Stateful Objects (Models, DB Connections)
+
+```python
+from hypernodes import stateful, node, Pipeline
+
+# Mark expensive-to-initialize classes as stateful
+@stateful
+class ExpensiveModel:
+    def __init__(self, model_path: str):
+        self.model = load_model(model_path)  # Lazy init - only on first use
+    
+    def predict(self, text: str) -> str:
+        return self.model(text)
+
+@node(output_name="prediction")
+def predict(text: str, model: ExpensiveModel) -> str:
+    return model.predict(text)
+
+# Create model (doesn't load yet - lazy!)
+model = ExpensiveModel("./model.pkl")
+
+pipeline = Pipeline(nodes=[predict])
+
+# Model loads on first item, reused for all 1000 items
+results = pipeline.map(
+    inputs={"text": texts_1000, "model": model},
+    map_over="text"
+)
+```
+
 ### Nested Pipelines
 
 ```python

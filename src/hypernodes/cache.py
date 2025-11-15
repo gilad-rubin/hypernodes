@@ -98,6 +98,10 @@ def hash_value(value: Any, depth: int = 0, max_depth: int = 10) -> str:
     Handles primitive types, dicts, lists, dataclasses, and custom objects.
     Automatically serializes public attributes (excluding private ones starting with '_').
 
+    For stateful objects (marked with @stateful), uses __cache_key__()
+    if available, otherwise falls back to class name (warning: this may
+    cause cache misses if initialization params differ).
+
     Args:
         value: Value to hash
         depth: Current recursion depth (internal use)
@@ -112,6 +116,9 @@ def hash_value(value: Any, depth: int = 0, max_depth: int = 10) -> str:
         return hashlib.sha256(repr(value).encode()).hexdigest()
 
     # Check for custom cache key (highest priority)
+    # StatefulWrapper always has __cache_key__(), so this handles both:
+    # 1. Stateful objects (via wrapper's __cache_key__)
+    # 2. Custom objects with their own __cache_key__()
     if hasattr(value, "__cache_key__"):
         return hashlib.sha256(value.__cache_key__().encode()).hexdigest()
 

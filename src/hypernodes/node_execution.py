@@ -6,15 +6,18 @@ and PipelineNodes) with full support for:
 - Cache get/put operations
 - Callback lifecycle events
 - Error handling
+- Async function auto-detection and execution
 
 Key principle: Single Responsibility - this module only knows how to execute
 one node at a time. It doesn't know about orchestration, parallelism, or graph
 traversal.
 """
 
+import asyncio
 import inspect
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple, TypeVar
 
 from .cache import compute_signature, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
@@ -22,6 +25,43 @@ from .callbacks import CallbackContext, PipelineCallback
 if TYPE_CHECKING:
     from .node import Node
     from .pipeline import Pipeline
+
+T = TypeVar("T")
+
+# Shared thread pool for running async in Jupyter/nested event loop contexts
+_ASYNC_EXECUTOR: Optional[ThreadPoolExecutor] = None
+
+
+def _get_async_executor() -> ThreadPoolExecutor:
+    """Lazily create a shared thread pool for running coroutines in Jupyter."""
+    global _ASYNC_EXECUTOR
+    if _ASYNC_EXECUTOR is None:
+        _ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hypernodes-async")
+    return _ASYNC_EXECUTOR
+
+
+def _run_coroutine_sync(coro: Awaitable[T]) -> T:
+    """Run a coroutine to completion, handling Jupyter/nested event loops.
+
+    Automatically detects if we're in a running event loop (e.g., Jupyter)
+    and offloads to a background thread if needed.
+
+    Args:
+        coro: Coroutine to execute
+
+    Returns:
+        Result of the coroutine
+    """
+    try:
+        # Check if there's a running event loop (Jupyter, async framework, etc.)
+        asyncio.get_running_loop()
+        # Running loop detected - offload to background thread
+        executor = _get_async_executor()
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
+    except RuntimeError:
+        # No running loop - safe to use asyncio.run() directly
+        return asyncio.run(coro)
 
 
 def _get_node_id(node) -> str:
@@ -287,22 +327,16 @@ def execute_single_node(
             # DualNode - use singular function (SequentialEngine executes one at a time)
             result = node.singular(**inputs)
 
-            # Handle async functions if needed
+            # Handle async functions - auto-detect and run with asyncio
             if inspect.iscoroutine(result):
-                raise TypeError(
-                    f"Async function {node.singular.__name__} not supported in sequential execution. "
-                    "Use an async-capable executor."
-                )
+                result = _run_coroutine_sync(result)
         else:
             # Regular node - call directly
             result = node(**inputs)
 
-            # Handle async functions if needed
+            # Handle async functions - auto-detect and run with asyncio
             if inspect.iscoroutine(result):
-                raise TypeError(
-                    f"Async function {node.func.__name__} not supported in sequential execution. "
-                    "Use an async-capable executor."
-                )
+                result = _run_coroutine_sync(result)
 
         # Trigger node end callbacks
         node_duration = time.time() - node_start_time

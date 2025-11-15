@@ -129,6 +129,9 @@ class SequentialEngine:
     ) -> List[Dict[str, Any]]:
         """Execute pipeline for each item sequentially.
 
+        Stateful objects (marked with @stateful) are cached and reused
+        across all items in the map operation.
+
         Args:
             pipeline: Pipeline to execute
             inputs: Input values (lists for map_over params, scalars for fixed params)
@@ -150,6 +153,14 @@ class SequentialEngine:
             ctx.push_pipeline(pipeline.id)
 
         try:
+            # Detect and cache stateful objects
+            # These will be reused for all items in the map operation
+            stateful_cache = {}
+            for param_name, param_value in inputs.items():
+                if self._is_stateful_object(param_value):
+                    # Cache it - will be reused for all items
+                    stateful_cache[param_name] = param_value
+
             # Normalize map_over to list
             map_over_list = [map_over] if isinstance(map_over, str) else map_over
 
@@ -188,8 +199,11 @@ class SequentialEngine:
                 for callback in callbacks:
                     callback.on_map_item_start(idx, ctx)
 
-                # Run pipeline for this item
-                result = self.run(pipeline, item_inputs, output_name, _ctx=ctx)
+                # Inject cached stateful objects into item inputs
+                merged_inputs = {**item_inputs, **stateful_cache}
+
+                # Run pipeline for this item (with stateful objects)
+                result = self.run(pipeline, merged_inputs, output_name, _ctx=ctx)
                 results.append(result)
 
                 item_duration = time.time() - item_start_time
@@ -246,3 +260,21 @@ class SequentialEngine:
                 outputs[node.output_name] = result
                 available_values[node.output_name] = result
                 node_signatures[node.output_name] = signature
+
+    def _is_stateful_object(self, obj: Any) -> bool:
+        """Check if object is marked as stateful.
+
+        Stateful objects are marked with @stateful decorator, which sets
+        the __hypernode_stateful__ attribute.
+
+        Args:
+            obj: Object to check
+
+        Returns:
+            True if object is stateful, False otherwise
+        """
+        return (
+            hasattr(obj, "__class__")
+            and hasattr(obj.__class__, "__hypernode_stateful__")
+            and obj.__class__.__hypernode_stateful__ is True
+        )
