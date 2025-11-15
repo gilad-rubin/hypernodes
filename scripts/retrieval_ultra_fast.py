@@ -25,6 +25,7 @@ import pytrec_eval
 from daft import DataType, Series
 
 from hypernodes import Pipeline, node
+from hypernodes.telemetry import TelemetryCallback
 
 
 def stateful(cls):
@@ -474,8 +475,6 @@ retrieve_queries_mapped = retrieve_single_query.as_node(
     name="retrieve_queries_mapped",
 )
 
-from hypernodes.telemetry import ProgressCallback, TelemetryCallback
-
 # Initialize telemetry callback for profiling
 telemetry_callback = TelemetryCallback()
 
@@ -495,7 +494,7 @@ full_pipeline = Pipeline(
         compute_recall,
         combine_evaluation_results,
     ],
-    callbacks=[ProgressCallback(), telemetry_callback],
+    # callbacks=[ProgressCallback(), telemetry_callback],
     name="ultra_fast_retrieval",
 )
 
@@ -603,7 +602,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--engine",
-        choices=["sequential", "daft"],
+        choices=["sequential", "dask", "daft"],
         default="sequential",
         help="Execution engine to use.",
     )
@@ -757,6 +756,17 @@ def main() -> None:
             )
         )
         engine_name = "DaftEngine"
+    elif args.engine == "dask":
+        try:
+            from hypernodes.engines import DaskEngine
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise SystemExit(
+                "DaskEngine requires the optional 'dask' dependency. "
+                "Install with: pip install 'hypernodes[dask]'"
+            ) from exc
+
+        pipeline = pipeline.with_engine(DaskEngine())
+        engine_name = "DaskEngine"
     else:
         from hypernodes.engines import SequentialEngine
 

@@ -41,16 +41,16 @@ class DaftEngine(Engine):
     @staticmethod
     def _make_serializable_by_value(func):
         """Force cloudpickle to serialize function by value instead of by reference.
-        
+
         By setting __module__ = "__main__", cloudpickle will serialize the entire
         function bytecode instead of just storing an import path. This allows:
         - Nodes defined inside functions (Modal pattern)
         - Script files that aren't proper packages
         - Functions with closure captures
-        
+
         Args:
             func: Function to make serializable
-            
+
         Returns:
             Same function with modified __module__ and __qualname__
         """
@@ -60,7 +60,7 @@ class DaftEngine(Engine):
         except (AttributeError, TypeError):
             pass
         return func
-    
+
     def __init__(
         self,
         use_batch_udf: bool = True,
@@ -86,60 +86,61 @@ class DaftEngine(Engine):
         self._is_map_context = False  # Track if we're in map operation
         self._map_over_params = set()  # Track which params are mapped over
         self._stateful_wrappers = {}  # Cache for stateful UDF wrappers
-        
+
         # Cache for auto-calculated values
         self._cpu_count = None
-    
+
     def _get_cpu_count(self) -> int:
         """Get CPU count (cached)."""
         if self._cpu_count is None:
             import multiprocessing
+
             self._cpu_count = multiprocessing.cpu_count()
         return self._cpu_count
-    
+
     def _calculate_max_workers(self, num_items: int) -> int:
         """Calculate optimal max_workers for ThreadPoolExecutor.
-        
+
         Based on grid search findings:
         - For I/O-bound tasks, ThreadPoolExecutor can benefit from 8-16x CPU cores
         - Optimal value depends on scale:
           - Small (<50): 8x cores
-          - Medium (50-200): 16x cores  
+          - Medium (50-200): 16x cores
           - Large (>200): 16x cores
-        
+
         Args:
             num_items: Number of items to process
-        
+
         Returns:
             Optimal number of workers
         """
         cpu_count = self._get_cpu_count()
-        
+
         # Heuristic based on grid search results
         if num_items < 50:
             multiplier = 8  # 8x cores for small batches
         else:
             multiplier = 16  # 16x cores for medium/large batches (best performance)
-        
+
         return multiplier * cpu_count
-    
+
     def _calculate_batch_size(self, num_items: int) -> int:
         """Calculate optimal batch_size for batch UDFs.
-        
+
         Based on grid search findings:
         - Optimal batch size is 1024 for most cases
         - For small datasets, use 64 as minimum effective batch
-        
+
         Args:
             num_items: Number of items to process
-        
+
         Returns:
             Optimal batch size
         """
         # Grid search showed 1024 is optimal, with 64 as minimum effective batch
         optimal_batch_size = 1024
         min_effective_batch = 64
-        
+
         # Scale-based heuristic
         if num_items < 100:
             return min_effective_batch  # Use 64 for small batches
@@ -312,36 +313,37 @@ class DaftEngine(Engine):
     ) -> tuple["daft.DataFrame", set]:
         """Apply a regular node as a UDF column (batch or row-wise)."""
         import asyncio
-        
+
         # Check if function is async - Daft handles async concurrency natively!
         is_async = asyncio.iscoroutinefunction(node.func)
-        
+
         if is_async:
             # Async functions: Use row-wise @daft.func (Daft provides concurrency)
             # This gives us 37x speedup for I/O-bound tasks!
             # Use smart type inference to handle complex types
             inferred_type = self._infer_daft_return_type(node)
-            
+
             # Make function serializable for distributed execution
             serializable_func = self._make_serializable_by_value(node.func)
-            
+
             # ALWAYS use explicit return_dtype to avoid inference errors
             from daft import DataType
+
             if inferred_type is not None:
                 # Use our inferred type
                 udf = daft.func(serializable_func, return_dtype=inferred_type)
             else:
                 # Fallback to Python type (handles all complex types)
                 udf = daft.func(serializable_func, return_dtype=DataType.python())
-            
+
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
-            
+
             available_columns = available_columns.copy()
             available_columns.add(node.output_name)
-            
+
             return df, available_columns
-        
+
         # Determine if we should use batch UDF for sync functions
         use_batch = self._should_use_batch_udf(node)
 
@@ -352,19 +354,20 @@ class DaftEngine(Engine):
             # Use row-wise UDF (required for list/dict types, or single-row execution)
             # Use smart type inference to handle complex types
             inferred_type = self._infer_daft_return_type(node)
-            
+
             # Make function serializable for distributed execution
             serializable_func = self._make_serializable_by_value(node.func)
-            
+
             # ALWAYS use explicit return_dtype to avoid inference errors
             from daft import DataType
+
             if inferred_type is not None:
                 # Use our inferred type
                 udf = daft.func(serializable_func, return_dtype=inferred_type)
             else:
                 # Fallback to Python type (handles all complex types)
                 udf = daft.func(serializable_func, return_dtype=DataType.python())
-            
+
             input_cols = [daft.col(param) for param in node.root_args]
             df = df.with_column(node.output_name, udf(*input_cols))
 
@@ -375,55 +378,59 @@ class DaftEngine(Engine):
 
     def _infer_daft_return_type(self, node: Any) -> Optional["daft.DataType"]:
         """Infer Daft DataType from function return type annotation.
-        
+
         Attempts to convert Python type hints to Daft DataTypes:
         - List[T] → DataType.list(DataType.python())
         - dict → DataType.python()
         - Protocol → DataType.python()
         - Simple types (str, int, float) → Daft's type inference
-        
+
         Returns:
             DataType if we can infer it, None to let Daft infer automatically
         """
         import inspect
-        from typing import get_origin, get_args
+        from typing import get_origin
+
         from daft import DataType
-        
+
         # Get return annotation
         sig = inspect.signature(node.func)
         return_annotation = sig.return_annotation
-        
+
         if return_annotation == inspect.Signature.empty:
             # No annotation - let Daft try to infer
             return None
-        
+
         # Check if it's a stringified annotation (forward reference)
         # This happens when using "from __future__ import annotations" (PEP 563)
         if isinstance(return_annotation, str):
             # Try to evaluate it to get the actual type
             try:
                 import typing
-                return_annotation = eval(return_annotation, {**typing.__dict__, **node.func.__globals__})
+
+                return_annotation = eval(
+                    return_annotation, {**typing.__dict__, **node.func.__globals__}
+                )
             except Exception:
                 # If evaluation fails, fall back to Python type
                 return DataType.python()
-        
+
         # Check if it's a generic type (List, Dict, etc.)
         origin = get_origin(return_annotation)
-        
+
         if origin is list:
             # List[T] - use Daft's list type with Python element type
             # This allows explode/list_agg to work while supporting arbitrary element types
             return DataType.list(DataType.python())
-        
+
         if origin is dict:
             # dict - use Python type
             return DataType.python()
-        
+
         # Check if it's a Protocol (has __protocol__ attribute)
         if hasattr(return_annotation, "__protocol__"):
             return DataType.python()
-        
+
         # For other complex types (Pydantic models, custom classes), fall back to Python
         # Check if it's a class (not a built-in type)
         if inspect.isclass(return_annotation):
@@ -433,10 +440,10 @@ class DaftEngine(Engine):
             else:
                 # Custom class - use Python type
                 return DataType.python()
-        
+
         # Let Daft try to infer for other cases
         return None
-    
+
     def _should_use_batch_udf(self, node: Any) -> bool:
         """Determine if a node should use batch UDF.
 
@@ -502,14 +509,16 @@ class DaftEngine(Engine):
             batch_kwargs["batch_size"] = self.default_daft_config["batch_size"]
         else:
             # Auto-calculate optimal batch size
-            num_items = getattr(self, "_num_items", 100)  # Default if not in map context
+            num_items = getattr(
+                self, "_num_items", 100
+            )  # Default if not in map context
             batch_kwargs["batch_size"] = self._calculate_batch_size(num_items)
 
         # Wrap the user's function to handle batching with parallel execution
         @daft.func.batch(**batch_kwargs)
         def batch_udf(*series_args: Series) -> Series:
             import concurrent.futures
-            
+
             # Convert Series to Python types
             # For mapped params: keep as list
             # For constant params: extract scalar value
@@ -546,7 +555,7 @@ class DaftEngine(Engine):
                 # Parallel execution using ThreadPoolExecutor
                 # This gives us ~10x speedup for I/O-bound tasks!
                 n_items = len(python_args[first_list_idx])
-                
+
                 def process_item(idx: int):
                     """Process a single item from the batch."""
                     call_args = []
@@ -556,7 +565,7 @@ class DaftEngine(Engine):
                         else:
                             call_args.append(arg)
                     return node_func(*call_args)
-                
+
                 # Use ThreadPoolExecutor for parallel execution
                 # Get max_workers from config or auto-calculate
                 if "max_workers" in self.default_daft_config:
@@ -564,8 +573,10 @@ class DaftEngine(Engine):
                 else:
                     # Auto-calculate optimal max_workers based on grid search findings
                     max_workers = self._calculate_max_workers(n_items)
-                
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=max_workers
+                ) as executor:
                     results = list(executor.map(process_item, range(n_items)))
 
             # Return as Series with Python objects
@@ -765,6 +776,10 @@ class DaftEngine(Engine):
         # Use Daft's built-in monotonically increasing id to avoid eager materialization
         df = df._add_monotonically_increasing_id(row_id_col)
 
+        # Preserve the original list column before exploding (so it's available for other nodes)
+        original_list_col = f"__original_{map_over_col}__"
+        df = df.with_column(original_list_col, daft.col(map_over_col))
+
         # Step 2: Explode list column into multiple rows
         df = df.explode(daft.col(map_over_col))
 
@@ -832,18 +847,36 @@ class DaftEngine(Engine):
 
         # Also preserve any non-output columns (take first value)
         for col in df.column_names:
-            if col not in final_output_names and col != row_id_col:
+            if (
+                col not in final_output_names
+                and col != row_id_col
+                and col != original_list_col
+            ):
                 agg_exprs.append(daft.col(col).any_value().alias(col))
+
+        # Preserve the original list column (take first value since it's the same for all rows in the group)
+        agg_exprs.append(
+            daft.col(original_list_col).any_value().alias(original_list_col)
+        )
 
         df = df_grouped.agg(*agg_exprs)
 
-        # Remove row_id column (cleanup)
-        select_exprs = [df[col] for col in df.column_names if col != row_id_col]
+        # Restore the original list column to its original name
+        df = df.with_column(map_over_col, daft.col(original_list_col))
+
+        # Remove temporary columns (cleanup)
+        select_exprs = [
+            df[col]
+            for col in df.column_names
+            if col != row_id_col and col != original_list_col
+        ]
         df = df.select(*select_exprs)
 
         # Update available columns
         available_columns = available_columns.copy()
         available_columns.update(final_output_names)
+        # The original map_over column is now available again
+        available_columns.add(map_over_col)
 
         return df, available_columns
 
