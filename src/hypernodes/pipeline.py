@@ -1,6 +1,6 @@
 """Pipeline class for managing and executing DAGs of nodes."""
 
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Type, TypedDict, Union
 
 from .cache import Cache
 from .callbacks import PipelineCallback
@@ -293,6 +293,118 @@ class Pipeline:
         """
         self.name = name
         return self
+
+    def get_input_type(self) -> Type[TypedDict]:
+        """Generate a TypedDict for pipeline inputs with IDE autocomplete.
+
+        Returns:
+            TypedDict class with fields matching root_args and their types
+
+        Example:
+            >>> InputType = pipeline.get_input_type()
+            >>> inputs: InputType = {"x": 5, "y": 10}
+            >>> result = pipeline.run(inputs=inputs)
+            >>> # IDE provides autocomplete for "x" and "y" keys!
+        """
+        from .typed_interface import create_input_type
+
+        return create_input_type(self)
+
+    def get_output_type(self) -> Type[TypedDict]:
+        """Generate a TypedDict for pipeline outputs with IDE autocomplete.
+
+        Returns:
+            TypedDict class with fields matching available outputs and their types
+
+        Example:
+            >>> OutputType = pipeline.get_output_type()
+            >>> result = pipeline.run(inputs={"x": 5})
+            >>> typed_result: OutputType = result
+            >>> print(typed_result["result"])  # IDE autocompletes "result"!
+        """
+        from .typed_interface import create_output_type
+
+        return create_output_type(self)
+
+    def get_input_constructor(self):
+        """Create a constructor function for inputs with IDE autocomplete.
+
+        This provides a better alternative to TypedDict for input construction,
+        as TypedDict has limited IDE support for dict literals.
+
+        Returns:
+            A function that accepts keyword arguments and returns an input dict
+
+        Example:
+            >>> make_input = pipeline.get_input_constructor()
+            >>> inputs = make_input(x=5, y=10)  # ✅ IDE autocompletes x and y!
+            >>> result = pipeline.run(inputs=inputs)
+        """
+        from .typed_interface import create_input_constructor
+
+        return create_input_constructor(self)
+
+    def with_inputs(self, **inputs: Any):
+        """Create a typed runner with scalar inputs for single execution.
+
+        This method enforces scalar types only (no lists). For map execution,
+        use with_map_inputs() instead.
+
+        Returns:
+            TypedRunner instance for single execution
+
+        Raises:
+            TypeError: If any inputs are lists
+
+        Example:
+            >>> # Single execution
+            >>> result = pipeline.with_inputs(x=5, y=10).run()
+            >>>
+            >>> # With output selection
+            >>> result = pipeline.with_inputs(x=5).with_output_name("output1").run()
+            >>>
+            >>> # This raises TypeError:
+            >>> pipeline.with_inputs(x=[1,2,3])  # ❌ Lists not allowed
+        """
+        from .typed_runner import TypedRunner
+
+        return TypedRunner(self, is_map_mode=False, **inputs)
+
+    def with_map_inputs(self, **inputs: Any):
+        """Create a typed runner with inputs for map execution.
+
+        This method accepts both scalar values (for broadcasting) and lists
+        (for mapping). You must call .map() to specify which parameters
+        to iterate over.
+
+        Returns:
+            TypedRunner instance for map execution
+
+        Example:
+            >>> # Map over x (list), broadcast y (scalar)
+            >>> results = pipeline.with_map_inputs(x=[1,2,3], y=10).map(map_over="x")
+            >>>
+            >>> # Map over multiple parameters (zip mode)
+            >>> results = pipeline.with_map_inputs(
+            ...     x=[1,2,3],
+            ...     y=[10,20,30]
+            ... ).map(map_over=["x", "y"])
+            >>>
+            >>> # Product mode
+            >>> results = pipeline.with_map_inputs(
+            ...     x=[1,2],
+            ...     y=[10,20]
+            ... ).map(map_over=["x", "y"], map_mode="product")
+            >>>
+            >>> # With output selection
+            >>> results = pipeline.with_map_inputs(
+            ...     x=[1,2,3],
+            ...     y=10
+            ... ).with_output_name("output1").map(map_over="x")
+        """
+        from .typed_runner import TypedRunner
+
+        return TypedRunner(self, is_map_mode=True, **inputs)
 
     def __repr__(self) -> str:
         """Return string representation of the Pipeline."""

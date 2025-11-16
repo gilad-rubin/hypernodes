@@ -7,6 +7,8 @@ HyperNodes is a hierarchical, modular pipeline system with intelligent caching f
 ## Quick Navigation
 
 - **[Getting Started](getting-started/README.md)** - Install and run your first pipeline
+  - [Fluent API](getting-started/fluent-api.md) - Clean typed interface (Recommended!)
+  - [Typed Interfaces](getting-started/typed-interfaces.md) - Advanced type generation
 - **[In-Depth](in-depth/README.md)** - Core concepts, caching, visualization, and telemetry
 - **[Advanced](advanced/README.md)** - Execution engines, async patterns, and distributed execution
 - **[Philosophy](philosophy/README.md)** - Design principles and architecture decisions

@@ -266,6 +266,7 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 ### Core (`src/hypernodes/`)
 - `node.py`: Node class and `@node` decorator
 - `pipeline.py`: Pipeline class with run/map/as_node methods
+- `typed_interface.py`: TypedDict generation for IDE autocomplete
 - `sequential_engine.py`: Default execution engine
 - `node_execution.py`: Single node execution logic (caching + callbacks)
 - `graph_builder.py`: DAG construction from node list
@@ -320,6 +321,26 @@ pipeline = Pipeline(
 @node(output_name=("mean", "std"))
 def stats(data: list) -> tuple:
     return sum(data)/len(data), calculate_std(data)
+```
+
+### Typed Interfaces (IDE Autocomplete)
+```python
+from hypernodes import Pipeline, node
+
+@node(output_name="result")
+def process(x: int, y: str) -> float:
+    return float(x) * len(y)
+
+pipeline = Pipeline(nodes=[process], name="MyPipeline")
+
+# Generate TypedDict interfaces
+InputType = pipeline.get_input_type()
+OutputType = pipeline.get_output_type()
+
+# ✅ IDE autocomplete works!
+inputs: InputType = {"x": 5, "y": "hello"}
+result: OutputType = pipeline.run(inputs=inputs)
+print(result["result"])  # IDE autocompletes key names
 ```
 
 ---

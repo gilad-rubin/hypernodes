@@ -6,6 +6,7 @@
 - prefer to search online and in documentations before acting
 - tests go to tests folder. scripts go to scripts folder
 - when you're finished with a task - you can write a summary, but just one is enough. no need for multiple summaries and markdowns.
+- update .ruler/2-code-structure.md if you've changed something in the code structure :)
 
 ## Coding Principles
 - When designing and implementing features - always prefer using SOLID principles.

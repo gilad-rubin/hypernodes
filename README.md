@@ -79,6 +79,26 @@ results = pipeline.map(
 )
 ```
 
+### With Fluent API (Recommended!)
+
+```python
+# ✅ Single execution with IDE autocomplete
+result = pipeline.with_inputs(passage="Hello World").run()
+# IDE autocompletes parameter names!
+
+# ✅ Map execution
+results = pipeline.with_map_inputs(
+    passage=["Hello", "World", "Foo"]
+).map(map_over="passage")
+# Each passage processed independently with caching
+
+# ✅ Product mode for all combinations
+results = pipeline.with_map_inputs(
+    passage=["Hello", "World"],
+    suffix=["!", "?"]
+).map(map_over=["passage", "suffix"], map_mode="product")
+```
+
 ### With Caching
 
 ```python

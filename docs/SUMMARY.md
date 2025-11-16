@@ -6,6 +6,8 @@
 
 * [🖥️ Installation](getting-started/installation.md)
 * [🚀 Quick Start](getting-started/quick-start.md)
+* [✨ Fluent API](getting-started/fluent-api.md)
+* [⌨️ Typed Interfaces](getting-started/typed-interfaces.md)
 
 ## In Depth
 
