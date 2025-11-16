@@ -1,10 +1,25 @@
 [project]
 name = "hypernodes"
 version = "0.1.0"
-description = "Hierarchical, Modular Pipeline System"
-readme = "README.md"
+description = "A hierarchical, modular pipeline system with intelligent caching for ML/AI workflows"
+authors = [
+    {name = "Gilad Rubin", email = "me@giladrubin.com"}
+]
 license = {text = "MIT"}
+readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["pipeline", "caching", "ml", "ai", "workflow", "dag", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = []
 
 [project.optional-dependencies]
@@ -60,17 +75,38 @@ examples = [
     "rank-bm25>=0.2.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/gilad-rubin/hypernodes"
+Repository = "https://github.com/gilad-rubin/hypernodes"
+Issues = "https://github.com/gilad-rubin/hypernodes/issues"
+
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
 ]
 
 [build-system]
-requires = ["hatchling>=1.25.0"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hypernodes"]
+
+[tool.hatch.build.targets.wheel.force-include]
+
+# Exclude old/deprecated code from distribution
+[tool.hatch.build]
+exclude = [
+    "src/hypernodes/old/",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = [
