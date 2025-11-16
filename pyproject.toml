@@ -5,25 +5,21 @@ description = "Hierarchical, Modular Pipeline System"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
-dependencies = [
-    "daft>=0.6.11",
-    "networkx>=3.5",
-]
+dependencies = []
 
 [project.optional-dependencies]
-viz = [
-    "graphviz>=0.20",
-    "rich>=13.0.0",
-    "ipykernel<7",
-    "ipywidgets>=8.1.7",
-    "tqdm>=4.67.1",
-    "plotly>=6.3.1",
-    "nbformat>=5.10.4",
+daft = [
+    "daft>=0.6.11",
 ]
 
-modal = [
-    "modal>=0.64.0",
-    "cloudpickle>=3.0.0",
+viz = [
+    "graphviz>=0.20",
+]
+
+notebook = [
+    "ipykernel<7",
+    "ipywidgets>=8.1.7",
+    "nbformat>=5.10.4",
 ]
 
 telemetry = [
@@ -31,6 +27,23 @@ telemetry = [
     "tqdm>=4.67.1",
     "rich>=13.0.0",
     "plotly>=5.18.0",
+]
+
+all = [
+    "daft>=0.6.11",
+    "graphviz>=0.20",
+    "ipykernel<7",
+    "ipywidgets>=8.1.7",
+    "nbformat>=5.10.4",
+    "tqdm>=4.67.1",
+    "rich>=13.0.0",
+    "plotly>=5.18.0",
+    "logfire>=2.0.0",
+]
+
+modal = [
+    "modal>=0.64.0",
+    "cloudpickle>=3.0.0",
 ]
 
 examples = [
