@@ -5,7 +5,12 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set, Union, get_type_hints
 
-import graphviz
+try:
+    import graphviz
+
+    GRAPHVIZ_AVAILABLE = True
+except ImportError:
+    GRAPHVIZ_AVAILABLE = False
 
 from .node import Node
 from .pipeline import Pipeline, PipelineNode
@@ -695,7 +700,7 @@ def visualize(
     show_types: bool = True,
     style: Union[str, GraphvizStyle] = "default",
     return_type: Literal["auto", "graphviz", "html"] = "auto",
-) -> Union[graphviz.Digraph, Any]:
+) -> Any:
     """Visualize a pipeline using Graphviz.
 
     Args:
@@ -713,6 +718,11 @@ def visualize(
     Returns:
         graphviz.Digraph object (or HTML in Jupyter if return_type="html")
     """
+    if not GRAPHVIZ_AVAILABLE:
+        raise ImportError(
+            "Graphviz is not installed. Install it with: uv add hypernodes[viz]"
+        )
+
     # Resolve style
     if isinstance(style, str):
         if style not in DESIGN_STYLES:

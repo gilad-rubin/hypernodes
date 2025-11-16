@@ -268,11 +268,11 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `pipeline.py`: Pipeline class with run/map/as_node methods
 - `sequential_engine.py`: Default execution engine
 - `node_execution.py`: Single node execution logic (caching + callbacks)
-- `graph_builder.py`: DAG construction from node list
+- `graph_builder.py`: DAG construction from node list (SimpleGraphBuilder implementation)
 - `map_planner.py`: Map operation planning (zip vs product)
 - `cache.py`: Caching system with signature computation
 - `callbacks.py`: Callback protocol + context
-- `visualization.py`: Graphviz rendering
+- `visualization.py`: Graphviz rendering (optional, requires graphviz package)
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine for distributed execution

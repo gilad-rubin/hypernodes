@@ -883,10 +883,6 @@ wheels = [
 name = "hypernodes"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
-    { name = "daft" },
-    { name = "networkx" },
-]
 
 [package.optional-dependencies]
 examples = [
@@ -931,7 +927,6 @@ dev = [
 requires-dist = [
     { name = "cloudpickle", marker = "extra == 'modal'", specifier = ">=3.0.0" },
     { name = "colbert-ai", marker = "extra == 'examples'", specifier = ">=0.2.22" },
-    { name = "daft", specifier = ">=0.6.11" },
     { name = "daft", marker = "extra == 'examples'", specifier = ">=0.6.7" },
     { name = "diskcache", marker = "extra == 'examples'", specifier = ">=5.6.3" },
     { name = "graphviz", marker = "extra == 'viz'", specifier = ">=0.20" },
@@ -942,7 +937,6 @@ requires-dist = [
     { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64.0" },
     { name = "model2vec", marker = "extra == 'examples'", specifier = ">=0.7.0" },
     { name = "nbformat", marker = "extra == 'viz'", specifier = ">=5.10.4" },
-    { name = "networkx", specifier = ">=3.5" },
     { name = "numpy", marker = "extra == 'examples'", specifier = ">=2.3.4" },
     { name = "pandas", marker = "extra == 'examples'", specifier = ">=2.3.3" },
     { name = "plotly", marker = "extra == 'telemetry'", specifier = ">=5.18.0" },
