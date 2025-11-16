@@ -61,15 +61,23 @@ class SequentialEngine:
             ctx.push_pipeline(pipeline.id)
 
         try:
+            # Determine which nodes to execute based on output_name
+            if output_name is not None:
+                execution_nodes = pipeline.graph.get_required_nodes(output_name)
+                if execution_nodes is None:
+                    # All nodes needed (fallback)
+                    execution_nodes = pipeline.graph.execution_order
+            else:
+                # No output_name specified - execute all nodes
+                execution_nodes = pipeline.graph.execution_order
+
             # Set pipeline metadata for callbacks (e.g., progress bars)
             ctx.set_pipeline_metadata(
                 pipeline.id,
                 {
-                    "total_nodes": len(pipeline.graph.execution_order),
+                    "total_nodes": len(execution_nodes),
                     "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [
-                        _get_node_id(node) for node in pipeline.graph.execution_order
-                    ],
+                    "node_ids": [_get_node_id(node) for node in execution_nodes],
                 },
             )
 
@@ -83,7 +91,7 @@ class SequentialEngine:
             outputs = {}
             node_signatures = {}
 
-            for node in pipeline.graph.execution_order:
+            for node in execution_nodes:
                 node_id = _get_node_id(node)
 
                 # Gather inputs for this node

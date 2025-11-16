@@ -62,17 +62,35 @@ class Pipeline:
                 f"Available outputs: {sorted(available)}"
             )
 
-    def _validate_inputs(self, inputs: Dict[str, Any]) -> None:
+    def _validate_inputs(
+        self, inputs: Dict[str, Any], output_name: Union[str, List[str], None] = None
+    ) -> None:
         """Validate that provided inputs satisfy pipeline's root_args.
+
+        When output_name is specified, only validates inputs needed for those specific outputs.
 
         Args:
             inputs: Input dictionary to validate
+            output_name: If specified, only validate inputs needed for these outputs
 
         Raises:
             ValueError: If required inputs are missing
         """
         provided = set(inputs.keys())
-        required = set(self.graph.root_args)
+
+        # Compute required inputs based on output_name
+        if output_name is not None:
+            # Get only the nodes needed for requested outputs
+            required_nodes = self.graph.get_required_nodes(output_name)
+            if required_nodes is None:
+                # All nodes needed (shouldn't happen since output_name is not None)
+                required = set(self.graph.root_args)
+            else:
+                # Compute root args needed for these specific nodes
+                required = self._compute_root_args_for_nodes(required_nodes)
+        else:
+            # No output_name specified - need all root args
+            required = set(self.graph.root_args)
 
         missing = required - provided
         if missing:
@@ -81,14 +99,39 @@ class Pipeline:
                 f"Required inputs: {sorted(required)}"
             )
 
+    def _compute_root_args_for_nodes(self, nodes: List[HyperNode]) -> set:
+        """Compute root arguments needed for a specific set of nodes.
+
+        Args:
+            nodes: List of nodes to compute root args for
+
+        Returns:
+            Set of parameter names that are external inputs for these nodes
+        """
+        # Collect all parameters needed by these nodes
+        all_params = set()
+        for node in nodes:
+            all_params.update(node.root_args)
+
+        # Subtract outputs produced by nodes in this set
+        outputs_from_these_nodes = set()
+        for node in nodes:
+            if isinstance(node.output_name, tuple):
+                outputs_from_these_nodes.update(node.output_name)
+            else:
+                outputs_from_these_nodes.add(node.output_name)
+
+        # Root args are params that aren't produced by any node in the set
+        return all_params - outputs_from_these_nodes
+
     def run(
         self,
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        self._validate_inputs(inputs)
         self._validate_output_names(output_name)
+        self._validate_inputs(inputs, output_name=output_name)
         return self.engine.run(self, inputs, output_name=output_name, **kwargs)
 
     def map(
@@ -99,8 +142,8 @@ class Pipeline:
         output_name: Union[str, List[str], None] = None,
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
-        self._validate_inputs(inputs)
         self._validate_output_names(output_name)
+        self._validate_inputs(inputs, output_name=output_name)
 
         if isinstance(map_over, str):
             map_over = [map_over]
