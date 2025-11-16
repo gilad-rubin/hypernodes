@@ -391,6 +391,9 @@ def _collect_visualization_data(
     all_root_args: Set[str] = set(graph_result.root_args)
     output_to_node = dict(graph_result.output_to_node)
 
+    # Track expanded PipelineNodes to handle their dependencies later
+    expanded_pipeline_nodes: Dict[Node, VisualizationGraph] = {}
+
     # Process each node in the pipeline
     for node in graph_result.execution_order:
         # Check if this is a PipelineNode (nested pipeline)
@@ -418,6 +421,9 @@ def _collect_visualization_data(
 
                 # Add root args from nested pipeline
                 all_root_args.update(nested_viz.root_args)
+
+                # Track this expanded node for later dependency resolution
+                expanded_pipeline_nodes[node] = nested_viz
             else:
                 # Collapsed: treat as single node
                 nodes_to_display.add(node)
@@ -437,7 +443,24 @@ def _collect_visualization_data(
 
             # Add edges for dependencies (node -> node)
             for dep_node in graph_result.dependencies.get(node, []):
-                edges.append((dep_node, node))
+                # Check if dep_node is an expanded PipelineNode
+                if dep_node in expanded_pipeline_nodes:
+                    # The dependency is on an expanded pipeline
+                    # Find which output(s) this node uses from that pipeline
+                    # and create edges from the inner nodes that produce them
+                    nested_viz = expanded_pipeline_nodes[dep_node]
+                    
+                    # Get the parameters this node needs
+                    for param in node.root_args:
+                        # Check if this param is produced by the expanded pipeline
+                        if param in output_to_node:
+                            inner_producer = output_to_node[param]
+                            # Only add edge if the producer is from the nested pipeline
+                            if inner_producer in nested_viz.nodes:
+                                edges.append((inner_producer, node))
+                else:
+                    # Regular dependency
+                    edges.append((dep_node, node))
 
             # Add edges for root args (string -> node)
             for param in node.root_args:
@@ -752,11 +775,20 @@ def visualize(
                 if should_expand:
                     # Expanded nested pipeline
                     if not flatten:
+                        # Determine cluster label with priority:
+                        # 1. PipelineNode.name (from as_node(name=...))
+                        # 2. Pipeline.name (from Pipeline(name=...))
+                        # 3. Fallback to "pipeline"
+                        if isinstance(item, PipelineNode) and item.name:
+                            cluster_label = item.name
+                        else:
+                            cluster_label = _pipeline_display_name(inner_pipeline)
+                        
                         with container.subgraph(
                             name=f"cluster_{id(inner_pipeline)}"
                         ) as sub:
                             sub.attr(
-                                label=_pipeline_display_name(inner_pipeline),
+                                label=cluster_label,
                                 fontname=style_obj.font_name,
                                 fontsize=str(style_obj.font_size),
                                 color=style_obj.cluster_border_color,
