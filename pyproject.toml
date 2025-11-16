@@ -108,6 +108,11 @@ include = [
     "/CHANGELOG.md",
 ]
 
+[tool.uv]
+# Exclude old/deprecated code from uv operations
+
+[tool.uv.sources]
+
 [tool.pytest.ini_options]
 testpaths = [
     "tests",

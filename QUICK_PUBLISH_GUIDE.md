@@ -1,137 +1,235 @@
-# Quick Start: Publishing HyperNodes to PyPI
+# Quick Start: Publishing HyperNodes to PyPI with uv
 
-## Prerequisites Setup
+## One-Time Setup
+
 ```bash
-# Install publishing tools
-pip install build twine
+# 1. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Get PyPI API token from https://pypi.org/manage/account/token/
-# Get TestPyPI token from https://test.pypi.org/manage/account/token/
+# 2. Get your PyPI API token from:
+#    https://pypi.org/manage/account/token/
+
+# 3. Set token as environment variable
+export UV_PUBLISH_TOKEN="pypi-YOUR_TOKEN_HERE"
+
+# Add to your shell profile to make it permanent:
+echo 'export UV_PUBLISH_TOKEN="pypi-YOUR_TOKEN_HERE"' >> ~/.bashrc  # or ~/.zshrc
 ```
 
 ## Publishing Workflow
 
-### Step 1: Build the Package
-```bash
-cd /workspace
-python3 -m build
-```
-
-### Step 2: Verify Build
-```bash
-# Check package with twine
-python3 -m twine check dist/*
-
-# Should output:
-# Checking dist/hypernodes-0.1.0-py3-none-any.whl: PASSED
-# Checking dist/hypernodes-0.1.0.tar.gz: PASSED
-```
-
-### Step 3: Test on TestPyPI (RECOMMENDED)
-```bash
-# Upload to TestPyPI
-python3 -m twine upload --repository testpypi dist/*
-
-# Test install from TestPyPI
-pip install --index-url https://test.pypi.org/simple/ hypernodes
-
-# Verify it works
-python3 -c "from hypernodes import Pipeline, node; print('Success!')"
-```
-
-### Step 4: Publish to PyPI
-```bash
-# Upload to production PyPI
-python3 -m twine upload dist/*
-
-# Verify on PyPI
-# Visit: https://pypi.org/project/hypernodes/
-
-# Test install
-pip install hypernodes
-```
-
-## Configuration File (~/.pypirc)
-
-Create `~/.pypirc` with your API tokens:
-
-```ini
-[distutils]
-index-servers =
-    pypi
-    testpypi
-
-[pypi]
-username = __token__
-password = pypi-YOUR_PYPI_TOKEN_HERE
-
-[testpypi]
-username = __token__
-password = pypi-YOUR_TESTPYPI_TOKEN_HERE
-```
-
-**Important:** Set proper permissions:
-```bash
-chmod 600 ~/.pypirc
-```
-
-## Future Releases
-
-For each new version:
+### The Simple Version (3 commands!)
 
 ```bash
-# 1. Update version in pyproject.toml
-# 2. Update CHANGELOG.md
-# 3. Commit changes
+# 1. Build the package
+uv build
+
+# 2. Test on TestPyPI (optional but recommended)
+uv publish --publish-url https://test.pypi.org/legacy/ --token pypi-TESTPYPI_TOKEN
+
+# 3. Publish to PyPI
+uv publish
+```
+
+Done! 🎉
+
+---
+
+## Detailed Workflow
+
+### For New Releases
+
+```bash
+# Step 1: Update version
+# Edit pyproject.toml and change: version = "0.2.0"
+
+# Step 2: Update changelog
+# Add changes to CHANGELOG.md
+
+# Step 3: Commit and tag
 git add pyproject.toml CHANGELOG.md
 git commit -m "Release v0.2.0"
-
-# 4. Tag the release
 git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin v0.2.0
+git push origin main --tags
 
-# 5. Clean and rebuild
-rm -rf dist/
-python3 -m build
+# Step 4: Build
+cd /workspace
+uv build --clear
 
-# 6. Upload to PyPI
-python3 -m twine upload dist/*
+# Step 5: Publish
+uv publish
 ```
+
+---
+
+## Testing Locally
+
+### Quick Test
+
+```bash
+# Build
+uv build
+
+# Create test environment and install
+uv venv test-env
+source test-env/bin/activate
+uv pip install dist/hypernodes-*.whl
+
+# Test it works
+python -c "from hypernodes import Pipeline, node; print('✓ Works!')"
+
+# Cleanup
+deactivate
+rm -rf test-env
+```
+
+### Test on TestPyPI
+
+```bash
+# Set TestPyPI token
+export UV_PUBLISH_TOKEN="pypi-YOUR_TESTPYPI_TOKEN"
+export UV_PUBLISH_URL="https://test.pypi.org/legacy/"
+
+# Publish to test
+uv publish
+
+# Install from test
+uv pip install --index-url https://test.pypi.org/simple/ hypernodes
+```
+
+---
+
+## Command Reference
+
+### Building
+
+```bash
+uv build                # Build wheel + sdist
+uv build --wheel        # Build only wheel
+uv build --sdist        # Build only sdist
+uv build --clear        # Clear dist/ first
+```
+
+### Publishing
+
+```bash
+# To PyPI (production)
+uv publish --token pypi-TOKEN
+
+# To TestPyPI
+uv publish \
+  --publish-url https://test.pypi.org/legacy/ \
+  --token pypi-TESTPYPI_TOKEN
+
+# Dry run (no upload)
+uv publish --dry-run
+
+# With environment variable
+export UV_PUBLISH_TOKEN="pypi-TOKEN"
+uv publish
+```
+
+### Installation (for users)
+
+```bash
+# Basic install
+uv pip install hypernodes
+
+# With optional dependencies
+uv pip install "hypernodes[all]"          # Everything
+uv pip install "hypernodes[viz,telemetry]"  # Specific extras
+```
+
+---
+
+## Environment Variables
+
+```bash
+# Publishing
+export UV_PUBLISH_TOKEN="pypi-YOUR_TOKEN"           # Auth token
+export UV_PUBLISH_URL="https://pypi.org/legacy/"    # Upload URL (optional, default is PyPI)
+export UV_PUBLISH_USERNAME="__token__"              # Username (optional, defaults to __token__)
+
+# For TestPyPI
+export UV_PUBLISH_TOKEN="pypi-YOUR_TESTPYPI_TOKEN"
+export UV_PUBLISH_URL="https://test.pypi.org/legacy/"
+```
+
+---
 
 ## Troubleshooting
 
-**Problem:** "File already exists on PyPI"
-**Solution:** You can't overwrite. Increment version in pyproject.toml
+### Build Issues
 
-**Problem:** Import fails after install
-**Solution:** Check optional dependencies. Install with extras:
 ```bash
-pip install hypernodes[all]  # or [daft], [viz], [telemetry], etc.
+# Clean everything and rebuild
+rm -rf dist/ build/ *.egg-info/
+uv build --clear
 ```
 
-**Problem:** Build fails
-**Solution:** 
+### Token Issues
+
 ```bash
-# Clean build artifacts
-rm -rf build/ dist/ *.egg-info/
-# Rebuild
-python3 -m build
+# Make sure token starts with "pypi-"
+echo $UV_PUBLISH_TOKEN
+
+# Test with dry run
+uv publish --dry-run --token pypi-YOUR_TOKEN
 ```
+
+### Version Already Exists
+
+You can't overwrite. Increment version in `pyproject.toml`:
+
+```toml
+[project]
+version = "0.1.1"  # Bump this
+```
+
+---
+
+## Comparing to Old Workflow
+
+### ❌ Old way (multiple tools):
+```bash
+pip install build twine
+python -m build
+python -m twine check dist/*
+python -m twine upload dist/*
+```
+
+### ✅ New way (uv):
+```bash
+uv build
+uv publish
+```
+
+**That's it!** Simpler, faster, better. 🚀
+
+---
 
 ## Package Information
 
 - **Name:** hypernodes
 - **Current Version:** 0.1.0
-- **License:** MIT
-- **Python:** >=3.12
 - **Repository:** https://github.com/gilad-rubin/hypernodes
+- **PyPI:** https://pypi.org/project/hypernodes/
 
-## Getting Help
+## Quick Links
 
+- **Get PyPI token:** https://pypi.org/manage/account/token/
+- **Get TestPyPI token:** https://test.pypi.org/manage/account/token/
+- **uv docs:** https://docs.astral.sh/uv/
 - **Issues:** https://github.com/gilad-rubin/hypernodes/issues
-- **PyPI Help:** https://pypi.org/help/
-- **Packaging Guide:** https://packaging.python.org/
 
 ---
 
-**Ready to publish?** Run: `python3 -m twine upload dist/*`
+## The Absolute Minimum
+
+Already have `uv` and a token?
+
+```bash
+uv build && uv publish --token pypi-YOUR_TOKEN
+```
+
+Done! 🎯
