@@ -885,6 +885,20 @@ version = "0.1.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
+all = [
+    { name = "daft" },
+    { name = "graphviz" },
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
+    { name = "logfire" },
+    { name = "nbformat" },
+    { name = "plotly" },
+    { name = "rich" },
+    { name = "tqdm" },
+]
+daft = [
+    { name = "daft" },
+]
 examples = [
     { name = "colbert-ai" },
     { name = "daft" },
@@ -902,6 +916,11 @@ modal = [
     { name = "cloudpickle" },
     { name = "modal" },
 ]
+notebook = [
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
+    { name = "nbformat" },
+]
 telemetry = [
     { name = "logfire" },
     { name = "plotly" },
@@ -910,12 +929,6 @@ telemetry = [
 ]
 viz = [
     { name = "graphviz" },
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
-    { name = "nbformat" },
-    { name = "plotly" },
-    { name = "rich" },
-    { name = "tqdm" },
 ]
 
 [package.dev-dependencies]
@@ -927,30 +940,37 @@ dev = [
 requires-dist = [
     { name = "cloudpickle", marker = "extra == 'modal'", specifier = ">=3.0.0" },
     { name = "colbert-ai", marker = "extra == 'examples'", specifier = ">=0.2.22" },
+    { name = "daft", marker = "extra == 'all'", specifier = ">=0.6.11" },
+    { name = "daft", marker = "extra == 'daft'", specifier = ">=0.6.11" },
     { name = "daft", marker = "extra == 'examples'", specifier = ">=0.6.7" },
     { name = "diskcache", marker = "extra == 'examples'", specifier = ">=5.6.3" },
+    { name = "graphviz", marker = "extra == 'all'", specifier = ">=0.20" },
     { name = "graphviz", marker = "extra == 'viz'", specifier = ">=0.20" },
+    { name = "ipykernel", marker = "extra == 'all'", specifier = "<7" },
     { name = "ipykernel", marker = "extra == 'examples'", specifier = ">=6.31.0" },
-    { name = "ipykernel", marker = "extra == 'viz'", specifier = "<7" },
-    { name = "ipywidgets", marker = "extra == 'viz'", specifier = ">=8.1.7" },
+    { name = "ipykernel", marker = "extra == 'notebook'", specifier = "<7" },
+    { name = "ipywidgets", marker = "extra == 'all'", specifier = ">=8.1.7" },
+    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.1.7" },
+    { name = "logfire", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "logfire", marker = "extra == 'telemetry'", specifier = ">=2.0.0" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=0.64.0" },
     { name = "model2vec", marker = "extra == 'examples'", specifier = ">=0.7.0" },
-    { name = "nbformat", marker = "extra == 'viz'", specifier = ">=5.10.4" },
+    { name = "nbformat", marker = "extra == 'all'", specifier = ">=5.10.4" },
+    { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.10.4" },
     { name = "numpy", marker = "extra == 'examples'", specifier = ">=2.3.4" },
     { name = "pandas", marker = "extra == 'examples'", specifier = ">=2.3.3" },
+    { name = "plotly", marker = "extra == 'all'", specifier = ">=5.18.0" },
     { name = "plotly", marker = "extra == 'telemetry'", specifier = ">=5.18.0" },
-    { name = "plotly", marker = "extra == 'viz'", specifier = ">=6.3.1" },
     { name = "pydantic", marker = "extra == 'examples'", specifier = ">=2.12.3" },
     { name = "pylate", marker = "extra == 'examples'", specifier = ">=1.0.0" },
     { name = "pytrec-eval", marker = "extra == 'examples'", specifier = ">=0.5" },
     { name = "rank-bm25", marker = "extra == 'examples'", specifier = ">=0.2.2" },
+    { name = "rich", marker = "extra == 'all'", specifier = ">=13.0.0" },
     { name = "rich", marker = "extra == 'telemetry'", specifier = ">=13.0.0" },
-    { name = "rich", marker = "extra == 'viz'", specifier = ">=13.0.0" },
+    { name = "tqdm", marker = "extra == 'all'", specifier = ">=4.67.1" },
     { name = "tqdm", marker = "extra == 'telemetry'", specifier = ">=4.67.1" },
-    { name = "tqdm", marker = "extra == 'viz'", specifier = ">=4.67.1" },
 ]
-provides-extras = ["viz", "modal", "telemetry", "examples"]
+provides-extras = ["daft", "viz", "notebook", "telemetry", "all", "modal", "examples"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.2" }]

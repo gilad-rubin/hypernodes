@@ -252,3 +252,35 @@ class PipelineCallback:
             ctx: Callback context
         """
         pass
+
+
+class CallbackDispatcher:
+    """Dispatches events to a list of callbacks."""
+    
+    def __init__(self, callbacks: List[Any]):
+        self.callbacks = callbacks or []
+
+    def notify_pipeline_start(self, pipeline_id: str, inputs: Dict[str, Any], ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_pipeline_start(pipeline_id, inputs, ctx)
+
+    def notify_pipeline_end(self, pipeline_id: str, outputs: Dict[str, Any], duration: float, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_pipeline_end(pipeline_id, outputs, duration, ctx)
+
+    def notify_map_start(self, total_items: int, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_map_start(total_items, ctx)
+
+    def notify_map_end(self, duration: float, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_map_end(duration, ctx)
+
+    def notify_map_item_start(self, idx: int, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_map_item_start(idx, ctx)
+
+    def notify_map_item_end(self, idx: int, duration: float, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_map_item_end(idx, duration, ctx)
+
