@@ -5,7 +5,9 @@ description = "Hierarchical, Modular Pipeline System"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "nest-asyncio>=1.6.0",
+]
 
 [project.optional-dependencies]
 daft = [
@@ -63,6 +65,7 @@ examples = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [build-system]
@@ -76,6 +79,7 @@ packages = ["src/hypernodes"]
 testpaths = [
     "tests",
 ]
+asyncio_mode = "auto"
 # Ignore old tests that may be broken or deprecated
 norecursedirs = [
     "old",

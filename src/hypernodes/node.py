@@ -51,6 +51,25 @@ class Node(HyperNode):
 
         # Preserve function metadata
         functools.update_wrapper(self, func)
+        
+        # Specifically handle async functions - wrap __call__ if needed?
+        # No, we want Node to be transparent. 
+        # But we need to mark Node instance as async if the function is async
+        # so that inspect.iscoroutinefunction(node) works?
+        # No, Node is not a coroutine function itself, its __call__ invokes one.
+        # But we want engines to detect async-ness.
+        
+        # Mark this instance as async-like if the wrapped function is async
+        # This helps engines detect async nodes without digging too deep
+        if inspect.iscoroutinefunction(func) or (hasattr(func, "__code__") and (func.__code__.co_flags & 0x80)):
+             self._is_async = True
+        else:
+             self._is_async = False
+
+    @property
+    def is_async(self) -> bool:
+        return self._is_async
+
 
     @property
     def output_name(self) -> Union[str, tuple]:
