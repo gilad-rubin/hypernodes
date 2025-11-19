@@ -1,16 +1,23 @@
-# Nested Pipelines
+---
+title: Nested Pipelines
+description: 'Hierarchical composition of pipelines.'
+---
 
 Wrap a pipeline as a node with interface adaptation and mapping:
 
 ```python
 inner = Pipeline(nodes=[clean_text, encode_text])
+
+# Adapt interface: map over corpus, rename inputs/outputs
 adapted = inner.as_node(
   input_mapping={"corpus": "passage"},
   output_mapping={"embedding": "encoded_corpus"},
   map_over="corpus",
 )
+
 outer = Pipeline(nodes=[adapted, build_index])
 result = outer.run(inputs={"corpus": ["Hello", "World"]})
 ```
 
 Configuration (engine, cache, callbacks) is inherited unless overridden.
+

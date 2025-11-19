@@ -1,0 +1,48 @@
+---
+title: Integrations
+description: 'Extend HyperNodes with third-party tools.'
+---
+
+HyperNodes is designed to play well with others. It integrates with best-in-class tools for execution, data processing, and observability.
+
+## Execution Engines
+
+### Daft
+[Daft](https://www.getdaft.io/) is the primary integration for distributed data processing. The `DaftEngine` converts HyperNodes pipelines into Daft DataFrames for high-performance, lazy execution.
+
+<Card title="Daft Engine" icon="bolt" href="../advanced/daft-engine">
+  Distributed execution with query optimization and lazy evaluation.
+</Card>
+
+### Dask
+[Dask](https://www.dask.org/) provides parallel execution for map operations. The `DaskEngine` uses Dask Bags to parallelize processing across cores or clusters.
+
+```python
+from hypernodes.engines import DaskEngine
+
+# Run map operations in parallel
+pipeline.run(inputs={...}, engine=DaskEngine())
+```
+
+## Observability
+
+### Logfire
+[Logfire](https://pypi.org/project/logfire/) provides zero-config distributed tracing. HyperNodes automatically emits spans and events when Logfire is installed and configured.
+
+```python
+import logfire
+from hypernodes import Pipeline
+
+logfire.configure()
+
+# Traces are automatically sent to Logfire
+pipeline.run(inputs={...})
+```
+
+## Future Integrations
+
+We are actively working on integrations for:
+- **Ray**: For distributed task execution
+- **Modal**: For serverless cloud execution
+- **Pydantic AI**: For agentic workflows
+

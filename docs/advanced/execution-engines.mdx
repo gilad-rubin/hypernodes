@@ -1,0 +1,125 @@
+```
+---
+title: Execution Engines
+description: 'Optimize pipeline performance with different execution strategies.'
+---
+
+HyperNodes supports multiple execution strategies to optimize pipeline performance based on your workload characteristics.
+
+## Overview
+
+HyperNodes provides three main engines:
+
+1. **SeqEngine** (Default): Simple, sequential execution. Best for debugging and simple pipelines.
+2. **DaskEngine**: Parallel execution for `map` operations using [Dask](https://www.dask.org/). Best for CPU-bound or mixed workloads.
+3. **DaftEngine**: Distributed execution using [Daft](https://www.getdaft.io/). Best for large datasets and high-performance data processing.
+
+## SeqEngine (Default)
+
+The `SeqEngine` executes nodes one by one in topological order. It is the default engine used when you create a `Pipeline` without specifying an engine.
+
+```python
+from hypernodes import Pipeline
+# or explicitly: from hypernodes.engines import SeqEngine
+
+# Uses SeqEngine by default
+pipeline = Pipeline(nodes=[...])
+```
+
+**Behavior:**
+- **Run**: Executes nodes sequentially.
+- **Map**: Iterates over items sequentially.
+- **Async**: Automatically runs `async` functions synchronously (waits for them to complete).
+
+**Best for:**
+- Development and debugging
+- Simple pipelines
+- Small batches where overhead of parallelism outweighs benefits
+
+## DaskEngine (Parallel Map)
+
+The `DaskEngine` uses Dask Bag to parallelize `map` operations. It maintains sequential execution for single `run` calls to avoid overhead.
+
+```python
+from hypernodes.engines import DaskEngine
+
+# Auto-optimized for your environment
+engine = DaskEngine()
+
+pipeline = Pipeline(nodes=[...], engine=engine)
+```
+
+### Configuration
+
+You can tune the `DaskEngine` for your specific workload:
+
+```python
+engine = DaskEngine(
+    scheduler="threads",      # "threads" (default), "processes", or "synchronous"
+    num_workers=4,            # Number of workers (default: CPU count)
+    workload_type="mixed"     # "io", "cpu", or "mixed" (affects partition sizing)
+)
+```
+
+**Behavior:**
+- **Run**: Executes sequentially (same as SeqEngine).
+- **Map**: Distributes items across workers using Dask Bag.
+- **Async**: Runs async functions synchronously within each worker.
+
+**Best for:**
+- **CPU-bound workloads**: Use `scheduler="processes"` to bypass the GIL.
+- **I/O-bound workloads**: Use `scheduler="threads"` for lower overhead.
+- **Batch processing**: Speed up processing of many items.
+
+### Example: Parallel CPU Processing
+
+```python
+from hypernodes import Pipeline, node
+from hypernodes.engines import DaskEngine
+import time
+
+@node(output_name="result")
+def cpu_heavy(x: int) -> int:
+    # Simulate CPU work
+    time.sleep(0.1)
+    return x * x
+
+# Use processes for CPU-bound work
+engine = DaskEngine(scheduler="processes")
+pipeline = Pipeline(nodes=[cpu_heavy], engine=engine)
+
+# Process 100 items in parallel
+results = pipeline.map(inputs={"x": range(100)}, map_over="x")
+```
+
+## DaftEngine (Distributed DataFrames)
+
+The `DaftEngine` converts your pipeline into a Daft DataFrame query, enabling vectorized and distributed execution.
+
+```python
+from hypernodes.engines import DaftEngine
+
+engine = DaftEngine()
+pipeline = Pipeline(nodes=[...], engine=engine)
+```
+
+See [Daft Engine](/advanced/daft-engine) for full details.
+
+## Choosing the Right Engine
+
+| Engine | Best For | Parallelism | Overhead |
+|--------|----------|-------------|----------|
+| **SeqEngine** | Debugging, small data | None | Very Low |
+| **DaskEngine** | Batch processing, CPU/IO tasks | Map-level (Items) | Low/Medium |
+| **DaftEngine** | Large datasets, DataFrames | Vectorized/Distributed | Medium |
+
+## Async Support
+
+All engines support `async def` nodes. HyperNodes automatically detects coroutines and runs them:
+
+- **SeqEngine**: Runs synchronously (waits for result).
+- **DaskEngine**: Runs synchronously inside each worker.
+- **DaftEngine**: Currently treats async functions as sync (support planned).
+
+See [Async Auto-Wrapping](/advanced/async-autowrap) for details.
+```

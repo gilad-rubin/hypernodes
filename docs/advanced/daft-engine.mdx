@@ -1,4 +1,7 @@
-# DaftEngine - Automatic Conversion to Daft
+---
+title: Daft Engine
+description: 'Distributed execution with Daft DataFrames.'
+---
 
 The `DaftEngine` automatically converts HyperNodes pipelines into [Daft](https://www.getdaft.io/) DataFrames, providing lazy evaluation, automatic optimization, and high-performance execution.
 
@@ -134,13 +137,14 @@ result = pipeline.run(inputs={"x": 5}, output_name=["step1", "final"])
 
 ```python
 DaftEngine(
-    collect=True,      # Auto-collect results (default: True)
-    show_plan=False    # Print execution plan (default: False)
+    use_batch_udf=True,       # Use vectorized UDFs where possible (default: True)
+    default_daft_config=None  # Optional Daft config dict
 )
 ```
 
-- **collect**: If `True`, automatically materializes the DataFrame. Set to `False` to get a lazy DataFrame for further processing.
-- **show_plan**: If `True`, prints Daft's optimized execution plan before running.
+- **use_batch_udf**: If `True`, attempts to use Daft's batch UDFs for better performance.
+- **default_daft_config**: Dictionary of configuration options passed to Daft.
+
 
 ## Performance Considerations
 
@@ -179,55 +183,35 @@ DaftEngine(
 | Distributed | Custom executors | Native support |
 | Best for | Development, debugging | Production, performance |
 
-## Translation Patterns
+## Deep Dive
 
-### Simple Transformations
+Explore advanced DaftEngine topics:
 
-**HyperNodes:**
-```python
-@node(output_name="result")
-def transform(x: int) -> int:
-    return x * 2
-
-pipeline = Pipeline(nodes=[transform])
-result = pipeline.run(inputs={"x": 5})
-```
-
-**Daft (internal):**
-```python
-@daft.func
-def transform(x: int) -> int:
-    return x * 2
-
-df = daft.from_pydict({"x": [5]})
-df = df.with_column("result", transform(df["x"]))
-```
-
-### Map Operations
-
-**HyperNodes:**
-```python
-pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
-```
-
-**Daft (internal):**
-```python
-df = daft.from_pydict({"x": [1, 2, 3]})
-df = df.with_column("result", transform(df["x"]))
-```
+<CardGroup cols={2}>
+  <Card title="Complex Types" icon="code" href="./daft-engine-complex-types">
+    How DaftEngine handles Pydantic models and nested structures.
+  </Card>
+  <Card title="Type Inference" icon="wand-magic-sparkles" href="./automatic-type-inference-for-daft">
+    Automatic type inference for Python objects.
+  </Card>
+  <Card title="Map Over Support" icon="layer-group" href="./daft-engine-map-over-support">
+    Distributed batch processing with `.map_over`.
+  </Card>
+  <Card title="Stateful Objects" icon="database" href="./stateful-objects">
+    Managing expensive resources with Daft.
+  </Card>
+</CardGroup>
 
 ## Limitations
 
 ### Current Limitations
 
-1. **Callbacks**: Callback context is not used (progress bars, tracing)
+1. **Callbacks**: Callback context is not fully integrated (progress bars, tracing)
 2. **Caching**: Uses Daft's caching, not HyperNodes' node-level cache
-3. **Stateful Classes**: Not yet supported (planned for future)
-4. **Custom Executors**: Uses Daft's execution engine
+3. **Custom Executors**: Uses Daft's execution engine
 
 ### Planned Features
 
-- [ ] Support for `@daft.cls` for stateful processing
 - [ ] Support for `@daft.func.batch` for vectorized operations
 - [ ] Generator functions with `Iterator[T]` type hints
 - [ ] Async functions for I/O-bound operations
@@ -267,9 +251,9 @@ def process(x: int) -> list[str]:  # Explicit return type
 - Use `show_plan=True` to inspect optimization
 - Consider using `@daft.func.batch` for vectorized operations (future)
 
-## References
+## See Also
 
 - [Daft Documentation](https://www.getdaft.io/)
 - [Daft UDF Guide](https://www.getdaft.io/projects/docs/en/stable/user_guide/udf.html)
-- [HyperNodes Documentation](../../README.md)
-- [Translation Guide](../../notebooks/DAFT_TRANSLATION_GUIDE.md)
+- [HyperNodes Documentation](../introduction)
+

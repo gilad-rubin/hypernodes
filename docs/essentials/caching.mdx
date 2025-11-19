@@ -1,0 +1,225 @@
+---
+title: Caching
+description: 'Intelligent, content-addressed caching.'
+---
+
+HyperNodes treats caching as a first-class citizen. Results are indexed by **what was computed**, not **when** or **where**.
+
+## Quick Start
+
+```python
+from hypernodes import Pipeline, node, SequentialEngine, DiskCache
+
+@node(output_name="cleaned")
+def clean(text: str) -> str:
+    return text.strip().lower()
+
+@node(output_name="tokens")
+def tokenize(cleaned: str) -> list:
+    return cleaned.split()
+
+# Enable caching at engine level
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean, tokenize], engine=engine)
+
+# First run: executes all nodes
+pipeline(text="Hello World")
+
+# Second run: instant cache hit!
+pipeline(text="Hello World")
+
+# Different input: cache miss, executes
+pipeline(text="Goodbye")
+```
+
+## How It Works
+
+### Computation Signatures
+
+Every node execution has a unique **signature**:
+
+```
+signature = hash(
+    code_hash     # Function source code + closures
+    + inputs_hash # Direct input values
+    + deps_hash   # Signatures of upstream nodes (recursive!)
+    + env_hash    # Environment (library versions, config)
+)
+```
+
+**Key guarantee**: If the signature is the same, the output is guaranteed to be identical.
+
+### Example: Signature Computation
+
+```python
+@node(output_name="a")
+def make_a(x: int) -> int:
+    return x + 1
+
+@node(output_name="b")
+def make_b(a: int) -> int:
+    return a * 2
+```
+
+For `make_b`:
+- **code_hash**: Hash of `make_b` function source
+- **inputs_hash**: Hash of the value of `a` (direct input to make_b)
+- **deps_hash**: Signature of `make_a` (which produced `a`)
+- **env_hash**: Environment configuration
+
+If you change `make_a`'s code, `make_b`'s signature changes too (via `deps_hash`), so it re-executes even though `make_b`'s code didn't change!
+
+## Per-Item Caching with `.map()`
+
+When you map over multiple items, **each item is cached independently**:
+
+```python
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean, tokenize], engine=engine)
+
+# First run: process 100 items
+results1 = pipeline.map(
+    inputs={"text": texts_100},  # 100 texts
+    map_over="text"
+)
+
+# Add 50 new items
+results2 = pipeline.map(
+    inputs={"text": texts_150},  # 150 texts (100 old + 50 new)
+    map_over="text"
+)
+# ✅ First 100 items: CACHED (instant)
+# ❌ 50 new items: EXECUTE
+```
+
+This enables **"Development-First Caching"** - iterate on new examples without re-running old ones.
+
+## Fine-Grained Invalidation
+
+The cache automatically invalidates when anything changes:
+
+### Code Changes
+
+```python
+@node(output_name="processed")
+def process(text: str) -> str:
+    return text.upper()  # Version 1
+
+# First run
+pipeline(text="hello")  # EXECUTE -> 'HELLO'
+
+# Change the function
+@node(output_name="processed")
+def process(text: str) -> str:
+    return text.upper() + "!"  # Version 2 (added !)
+
+# Run again - cache invalidated automatically!
+pipeline(text="hello")  # EXECUTE -> 'HELLO!'
+```
+
+### Input Changes
+
+```python
+pipeline(text="hello")   # EXECUTE
+pipeline(text="hello")   # CACHED
+pipeline(text="goodbye") # EXECUTE (different input)
+```
+
+### Upstream Changes
+
+If an upstream node changes, all downstream nodes automatically invalidate because their `deps_hash` changes.
+
+## Selective Caching
+
+Control caching at the node level:
+
+### Disable Caching
+
+```python
+@node(output_name="timestamp", cache=False)
+def get_timestamp() -> str:
+    """Always execute - never cache"""
+    import datetime
+    return datetime.datetime.now().isoformat()
+
+@node(output_name="data")
+def fetch_data() -> dict:
+    """This WILL be cached"""
+    import requests
+    return requests.get("https://api.example.com/data").json()
+```
+
+## DiskCache Configuration
+
+```python
+from hypernodes import DiskCache
+
+# Basic usage
+cache = DiskCache(path=".cache")
+
+# Custom path
+cache = DiskCache(path="/tmp/my_pipeline_cache")
+
+# Disable expiry (cache forever)
+cache = DiskCache(path=".cache", expire=None)
+```
+
+**Storage format**: DiskCache uses pickle. Cached files are stored in `.cache/node_signatures/`.
+
+## Advanced: Custom Cache Keys
+
+For objects that aren't easily hashable, implement `__cache_key__()`:
+
+```python
+class CustomModel:
+    def __init__(self, weights):
+        self.weights = weights
+
+    def __cache_key__(self):
+        """Custom cache key for this object"""
+        import hashlib
+        # Hash only the weights, ignore other attributes
+        return hashlib.md5(str(self.weights).encode()).hexdigest()
+```
+
+## Debugging Cache Behavior
+
+Use `ProgressCallback` to see cache hits:
+
+```python
+from hypernodes.telemetry import ProgressCallback
+
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
+# Progress bar will show: "✓" for cache hit, "..." for execution
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Stateful Objects" icon="database" href="../advanced/stateful-objects">
+    Caching for database connections and models.
+  </Card>
+  <Card title="Reproducibility" icon="rotate" href="../reproducibility/overview">
+    How hashing ensures reproducibility.
+  </Card>
+  <Card title="Do" icon="check" color="green">
+    - Enable caching during development
+    - Use per-item caching for incremental batch processing
+    - Disable caching for non-deterministic nodes
+  </Card>
+  <Card title="Don't" icon="xmark" color="red">
+    - Cache nodes with side effects (DB writes, emails)
+    - Assume cache is distributed (it's local)
+    - Forget to clear cache on breaking changes
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Core Concepts](/essentials/core-concepts) - Node and pipeline basics
+- [Execution Engines](/advanced/execution-engines) - Parallel execution with caching
+- [Callbacks](/essentials/callbacks) - Monitor cache hits and misses
+

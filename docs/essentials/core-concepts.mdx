@@ -1,4 +1,7 @@
-# Core Concepts
+---
+title: Core Concepts
+description: 'Understand the building blocks of HyperNodes.'
+---
 
 HyperNodes is built on three core concepts that compose hierarchically:
 
@@ -222,10 +225,21 @@ def process(data: str, timestamp: str) -> dict:
     return {"data": data, "timestamp": timestamp}
 ```
 
-See [Caching](caching.md) for details.
+See [Caching](./caching) for details.
 
 ## See Also
 
-- [Caching](caching.md) - Intelligent caching system
-- [Nested Pipelines](nested-pipelines.md) - Hierarchical composition patterns
-- [Execution Engines](../advanced/execution-engines.md) - Parallel and async execution
+<CardGroup cols={2}>
+  <Card title="Execution Engines" icon="server" href="../advanced/execution-engines">
+    Learn about Sequential, Dask, and Daft engines.
+  </Card>
+  <Card title="Caching" icon="database" href="./caching">
+    Understand how HyperNodes caches results.
+  </Card>
+  <Card title="Nested Pipelines" icon="layer-group" href="./nested-pipelines">
+    Build complex workflows with composition.
+  </Card>
+  <Card title="Visualization" icon="eye" href="./pipeline-visualization">
+    Visualize your pipeline structure.
+  </Card>
+</CardGroup>

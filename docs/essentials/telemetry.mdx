@@ -1,0 +1,67 @@
+---
+title: Telemetry
+description: 'Monitor pipeline execution with progress bars and tracing.'
+---
+
+HyperNodes provides built-in telemetry for monitoring pipeline execution, including progress bars, distributed tracing, and performance analysis.
+
+## Progress Bars
+
+The `ProgressCallback` uses `tqdm` to display a progress bar in the terminal or Jupyter notebook.
+
+```python
+from hypernodes.telemetry import ProgressCallback
+
+engine = SequentialEngine(callbacks=[ProgressCallback()])
+pipeline.run(inputs={...}, engine=engine)
+```
+
+## Distributed Tracing (Logfire)
+
+HyperNodes integrates seamlessly with [Logfire](https://pypi.org/project/logfire/) for zero-config distributed tracing.
+
+### Setup
+
+1. Install Logfire: `pip install logfire`
+2. Configure it in your code:
+
+```python
+import logfire
+from hypernodes import Pipeline
+
+logfire.configure()
+
+# That's it! Traces are automatically emitted.
+pipeline.run(inputs={...})
+```
+
+The `TelemetryCallback` is automatically added if Logfire is detected, but you can also add it explicitly:
+
+```python
+from hypernodes.telemetry import TelemetryCallback
+
+engine = SequentialEngine(callbacks=[TelemetryCallback()])
+```
+
+## Waterfall Charts
+
+Analyze execution performance with waterfall charts. This is especially useful for visualizing parallel execution and bottlenecks.
+
+```python
+# 1. Run pipeline with TelemetryCallback
+engine = SequentialEngine(callbacks=[TelemetryCallback()])
+pipeline.run(inputs={...}, engine=engine)
+
+# 2. Generate chart
+telemetry = engine.callbacks[-1]  # Get the callback instance
+fig = telemetry.get_waterfall_chart()
+
+# 3. Display (in notebook) or save
+fig.show()
+# fig.write_html("waterfall.html")
+```
+
+## Custom Telemetry
+
+You can implement your own telemetry by subclassing `PipelineCallback` and hooking into lifecycle events. See [Callbacks](/essentials/callbacks) for details.
+

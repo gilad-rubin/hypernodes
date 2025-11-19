@@ -1,0 +1,54 @@
+---
+title: Reproducibility
+description: 'Ensuring deterministic execution with content-addressed hashing.'
+---
+
+Reproducibility is at the heart of HyperNodes. We believe that if you run the same code on the same data, you should get the same result—every time.
+
+## The Signature System
+
+HyperNodes assigns a unique **signature** to every computation. This signature is a SHA-256 hash derived from four components:
+
+1. **Code Hash**: The source code of the function (including closure variables).
+2. **Input Hash**: The hash of the input arguments.
+3. **Dependency Hash**: The signatures of upstream nodes.
+4. **Environment Hash**: (Optional) Salt for versioning or environment isolation.
+
+```python
+signature = hash(code + inputs + dependencies + environment)
+```
+
+## How Caching Works
+
+When a node is about to execute:
+
+1. The engine computes its signature.
+2. It checks the `Cache` (e.g., `DiskCache`) for this signature.
+3. **Hit**: If found, the cached result is returned immediately.
+4. **Miss**: The node executes, and the result is stored in the cache under the signature.
+
+## Ensuring Determinism
+
+To get the most out of HyperNodes' reproducibility:
+
+### 1. Pure Functions
+Write nodes as pure functions where possible. Avoid side effects or relying on global state that isn't captured in the function's closure.
+
+### 2. Version Control
+Commit your pipeline code. Since the code hash is part of the signature, changing the code invalidates the cache—exactly what you want.
+
+### 3. Stable Environments
+Use `pip freeze` or lock files (like `uv.lock`) to ensure your dependencies are consistent across runs.
+
+## Deep Dive: Hashing Strategy
+
+HyperNodes uses a robust hashing strategy for Python objects:
+
+- **Primitives**: String representation.
+- **Collections**: Recursive hashing of elements (lists, dicts).
+- **Dataclasses**: Recursive hashing of fields.
+- **Custom Objects**: Hashing of public attributes (`__dict__`) or `__cache_key__` if implemented.
+- **Pickle Fallback**: If all else fails, we hash the pickled bytes.
+
+This ensures that even complex objects can be part of a reproducible pipeline.
+

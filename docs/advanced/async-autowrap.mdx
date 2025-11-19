@@ -1,0 +1,58 @@
+---
+title: Async Compatibility
+description: 'How HyperNodes handles async functions.'
+---
+
+HyperNodes provides seamless compatibility for `async def` functions, allowing you to use asynchronous code within your pipelines without managing event loops manually.
+
+## Overview
+
+HyperNodes automatically detects `async def` functions (coroutines) and executes them appropriately based on the engine:
+
+- **SeqEngine**: Runs the coroutine synchronously (waits for completion).
+- **DaskEngine**: Runs the coroutine synchronously within each worker.
+
+This means you can write `async` code (e.g., for libraries that require it) and use it in standard HyperNodes pipelines.
+
+## How It Works
+
+When the engine encounters an `async def` node:
+
+1. It detects that the function returns a coroutine.
+2. It automatically wraps the execution in a synchronous runner.
+3. If an event loop is already running (e.g., in Jupyter), it offloads execution to a background thread to avoid blocking the loop.
+4. If no event loop is running, it uses `asyncio.run()`.
+
+## Example
+
+```python
+import asyncio
+from hypernodes import Pipeline, node
+
+@node(output_name="data")
+async def fetch_data(url: str) -> dict:
+    """Async function using await"""
+    # Simulate async I/O
+    await asyncio.sleep(0.1)
+    return {"url": url, "status": "ok"}
+
+@node(output_name="processed")
+def process(data: dict) -> str:
+    """Regular sync function"""
+    return f"Processed {data['url']}"
+
+pipeline = Pipeline(nodes=[fetch_data, process])
+
+# Runs seamlessly!
+# fetch_data is run synchronously by the engine
+result = pipeline.run(inputs={"url": "http://example.com"})
+```
+
+## Jupyter Notebook Support
+
+HyperNodes is designed to work out-of-the-box in Jupyter notebooks. It detects the running event loop and handles async execution safely, preventing "RuntimeError: This event loop is already running" errors.
+
+## Limitations
+
+- **No Concurrent Execution in SeqEngine**: `SeqEngine` runs nodes sequentially. Using `async def` does *not* enable concurrent execution of multiple nodes in `SeqEngine`.
+- **DaskEngine Concurrency**: `DaskEngine` achieves parallelism via multiple workers (threads/processes), not via `asyncio` concurrency within a single worker.

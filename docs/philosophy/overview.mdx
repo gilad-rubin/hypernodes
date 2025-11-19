@@ -1,0 +1,37 @@
+---
+title: Philosophy
+description: 'Core principles behind HyperNodes.'
+---
+
+HyperNodes is built on a set of core principles designed to make building complex data pipelines simple, reliable, and scalable.
+
+## 1. Simple by Default
+
+You shouldn't need a PhD in distributed systems to write a data pipeline. HyperNodes uses standard Python functions and decorators. No YAML, no DSLs, no complex configuration files.
+
+```python
+@node
+def process(x):
+    return x + 1
+```
+
+## 2. Cache-First
+
+Re-running expensive computations is a waste of time and money. HyperNodes caches everything by default using content-addressed signatures. If the code hasn't changed and the inputs are the same, the result is retrieved from cache.
+
+## 3. Test Locally, Scale Globally
+
+Write your pipeline on your laptop using the `SeqEngine`. Debug with standard tools. When you're ready, switch to `DaftEngine` or `DaskEngine` to scale out—without changing a single line of your pipeline code.
+
+## 4. Composition over Configuration
+
+Pipelines are just nodes. You can nest pipelines inside other pipelines, map them over data, or reuse them across projects. This hierarchical composition allows you to build complex systems from simple, testable building blocks.
+
+## 5. Observable by Design
+
+You can't fix what you can't see. HyperNodes treats observability as a first-class citizen, emitting structured logs, traces, and metrics for every execution. Integrations with tools like Logfire work out of the box.
+
+## 6. Reproducibility
+
+Data pipelines should be deterministic. By hashing code, inputs, and dependencies, HyperNodes ensures that you can always reproduce a result or understand why it changed.
+

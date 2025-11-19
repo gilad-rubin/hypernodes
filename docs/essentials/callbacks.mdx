@@ -1,0 +1,64 @@
+```
+---
+title: Callbacks
+description: 'Hook into the pipeline lifecycle for custom behavior.'
+---
+
+Callbacks allow you to execute custom code at specific points in the pipeline lifecycle. They are useful for logging, monitoring, progress tracking, and debugging.
+
+## Usage
+
+Pass a list of callbacks to the `SequentialEngine`:
+
+```python
+from hypernodes import Pipeline, SequentialEngine
+from hypernodes.callbacks import PipelineCallback
+
+class MyCallback(PipelineCallback):
+    def on_pipeline_start(self, ctx):
+        print(f"Pipeline started: {ctx.pipeline_name}")
+
+engine = SequentialEngine(callbacks=[MyCallback()])
+pipeline = Pipeline(nodes=[...], engine=engine)
+pipeline.run(inputs={...})
+```
+
+## Lifecycle Hooks
+
+The `PipelineCallback` class defines the following hooks:
+
+### Pipeline Hooks
+- `on_pipeline_start(ctx)`: Called before pipeline execution begins.
+- `on_pipeline_end(ctx)`: Called after pipeline execution finishes (success or failure).
+
+### Node Hooks
+- `on_node_start(ctx)`: Called before a node executes.
+- `on_node_end(ctx)`: Called after a node finishes execution.
+- `on_node_cached(ctx)`: Called when a node's result is retrieved from cache.
+- `on_node_error(ctx)`: Called when a node raises an exception.
+
+### Map Hooks
+- `on_map_start(ctx)`: Called before a map operation begins.
+- `on_map_end(ctx)`: Called after a map operation finishes.
+
+## The Context Object
+
+All hooks receive a `CallbackContext` object containing:
+
+- `pipeline_name`: Name of the pipeline.
+- `node_name`: Name of the current node (if applicable).
+- `inputs`: Input dictionary.
+- `output`: Output dictionary (for `_end` hooks).
+- `error`: Exception object (for `on_node_error`).
+- `execution_time`: Duration of execution (for `_end` hooks).
+
+## Built-in Callbacks
+
+HyperNodes comes with several built-in callbacks:
+
+- **`ProgressCallback`**: Displays a progress bar (tqdm).
+- **`TelemetryCallback`**: Emits traces and metrics (Logfire/OpenTelemetry).
+- **`GraphCallback`**: Updates visualization during execution.
+
+See [Telemetry](./telemetry) for more details.
+```

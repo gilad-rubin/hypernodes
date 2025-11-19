@@ -1,0 +1,57 @@
+---
+title: Introduction
+description: 'Build once, cache intelligently, run anywhere.'
+---
+
+<img
+  className="block dark:hidden"
+  src="/assets/light_background_logo.png"
+  alt="Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/assets/dark_background_logo.png"
+  alt="Hero Dark"
+/>
+
+HyperNodes is a hierarchical, modular pipeline system with intelligent caching designed for ML/AI development workflows. It treats caching as a first-class citizen, enabling developers to iterate rapidly without re-running expensive computations.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Test with One, Scale to Many" icon="flask">
+    Build and test your pipeline with a single input, then run it over thousands of inputs without changing a line of code.
+  </Card>
+  <Card title="Development-First Caching" icon="floppy-disk">
+    HyperNodes automatically caches at node and example granularity. Only re-run what changed.
+  </Card>
+  <Card title="Hierarchical Modularity" icon="layer-group">
+    Functions are nodes. Pipelines are nodes. Build complex workflows from simple, reusable pieces.
+  </Card>
+  <Card title="Flexible Execution" icon="bolt">
+    Run sequentially for debugging, async for I/O, or distributed with [Daft](https://www.getdaft.io/).
+  </Card>
+  <Card title="First-Class Daft Support" icon="rocket">
+    Deep integration with Daft for distributed, lazy, and batched execution.
+  </Card>
+  <Card title="Observable by Default" icon="chart-simple">
+    Built-in progress bars, logs, and metrics. Every execution is tracked.
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<CardGroup cols={2}>
+  <Card title="Install HyperNodes" icon="download" href="./get-started/installation">
+    Get up and running in seconds.
+  </Card>
+  <Card title="Quick Start" icon="bolt" href="./get-started/quickstart">
+    Build your first pipeline in 5 minutes.
+  </Card>
+  <Card title="Core Concepts" icon="book" href="./essentials/core-concepts">
+    Learn about Nodes, Pipelines, and Engines.
+  </Card>
+  <Card title="Daft Engine" icon="server" href="./advanced/daft-engine">
+    Scale to distributed execution with Daft.
+  </Card>
+</CardGroup>

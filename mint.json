@@ -1,0 +1,64 @@
+{
+    "name": "HyperNodes",
+    "logo": {
+        "light": "/assets/light_background_logo.png",
+        "dark": "/assets/dark_background_logo.png"
+    },
+    "colors": {
+        "primary": "#DDA0DD",
+        "light": "#DDA0DD",
+        "dark": "#DDA0DD"
+    },
+    "navigation": [
+        {
+            "group": "Get Started",
+            "pages": [
+                "docs/introduction",
+                "docs/get-started/installation",
+                "docs/get-started/quickstart"
+            ]
+        },
+        {
+            "group": "Essentials",
+            "pages": [
+                "docs/essentials/core-concepts",
+                "docs/essentials/caching",
+                "docs/essentials/pipeline-visualization",
+                "docs/essentials/telemetry",
+                "docs/essentials/nested-pipelines",
+                "docs/essentials/callbacks"
+            ]
+        },
+        {
+            "group": "Advanced",
+            "pages": [
+                "docs/advanced/execution-engines",
+                "docs/advanced/daft-engine",
+                "docs/advanced/daft-engine-complex-types",
+                "docs/advanced/automatic-type-inference-for-daft",
+                "docs/advanced/daft-engine-map-over-support",
+                "docs/advanced/dual-node",
+                "docs/advanced/stateful-objects",
+                "docs/advanced/async-autowrap"
+            ]
+        },
+        {
+            "group": "Integrations",
+            "pages": [
+                "docs/integrations/overview"
+            ]
+        },
+        {
+            "group": "Philosophy",
+            "pages": [
+                "docs/philosophy/overview"
+            ]
+        },
+        {
+            "group": "Reproducibility",
+            "pages": [
+                "docs/reproducibility/overview"
+            ]
+        }
+    ]
+}

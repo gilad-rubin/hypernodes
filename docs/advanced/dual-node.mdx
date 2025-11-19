@@ -1,4 +1,7 @@
-# DualNode: Batch-Optimized Execution
+---
+title: Dual Node
+description: 'Optimize batch processing with dual execution paths.'
+---
 
 ## Overview
 
@@ -266,16 +269,9 @@ def encode_batch(texts: Series, encoder: Encoder) -> Series:
     return encoder.encode_batch(texts)
 ```
 
-## Examples
-
-See:
-- `notebooks/batch_api.ipynb` - Interactive examples
-- `scripts/dual_node_example.py` - Stateless and stateful examples
-- `scripts/dual_node_daft_test.py` - Integration tests with DaftEngine
-
 ## See Also
 
 - [Daft UDF Documentation](https://www.getdaft.io/projects/docs/en/latest/user_guide/udf.html)
-- [DaftEngine Guide](./daft-engine.md)
-- [Execution Engines](./execution-engines.md)
+- [DaftEngine Guide](/advanced/daft-engine)
+- [Execution Engines](/advanced/execution-engines)
 

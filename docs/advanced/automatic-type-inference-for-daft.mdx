@@ -1,0 +1,68 @@
+---
+title: Daft Type Inference
+description: 'Automatic type inference for Python objects in Daft.'
+---
+
+The Daft engine automatically converts HyperNodes pipelines to Daft without code changes, using smart type inference to handle complex Python objects.
+
+## Overview
+
+DaftEngine uses three key mechanisms to support arbitrary Python code:
+
+1. **Smart Type Inference**: Automatically maps Python types to Daft DataTypes
+2. **Serialization Support**: Handles functions defined in scripts/closures (via cloudpickle)
+3. **PEP 563 Support**: Resolves stringified annotations (`from __future__ import annotations`)
+
+## How It Works
+
+### 1. Smart Type Inference
+
+The engine inspects function return type annotations to determine the best Daft storage strategy:
+
+| Python Type Hint | Daft DataType | Reason |
+|-----------------|---------------|---------|
+| `List[T]` | `DataType.list(DataType.python())` | Enables explode/list_agg while supporting arbitrary elements |
+| `dict`, `dict[K, V]` | `DataType.python()` | Stored as opaque Python objects |
+| `Protocol`, Custom Class | `DataType.python()` | Preserves object identity and methods |
+| `str`, `int`, `float` | `None` (Daft infers) | Uses native Daft types for performance |
+| No annotation | `None` (Daft infers) | Default behavior |
+
+### 2. PEP 563 Support
+
+The engine correctly handles stringified annotations (common in modern Python):
+
+```python
+from __future__ import annotations
+from typing import List
+
+@node(output_name="docs")
+def create_docs(count: int) -> List[Document]:  # "List[Document]" string
+    return [Document(text=f"doc {i}") for i in range(count)]
+```
+
+The engine evaluates `List[Document]` at runtime to correctly infer `DataType.list(...)`.
+
+### 3. Distributed Execution
+
+To support distributed execution (e.g., on Ray or remote clusters), the engine forces **by-value serialization** of functions. This ensures that closures and script-defined functions work correctly on remote workers.
+
+## Benefits
+
+- **Zero Code Changes**: Existing pipelines work as-is
+- **Complex Types**: Full support for Pydantic, nested lists, and custom objects
+- **Distributed Ready**: Functions serialize correctly for remote execution
+
+## When to Use Manual Types
+
+While automatic inference works for most cases, you might want to manually specify Daft types for:
+
+- **Performance**: Native Daft structs are faster than Python objects
+- **Storage**: If you need to write to Parquet/Arrow formats with specific schemas
+- **Large Scale**: For >10GB datasets where memory overhead of Python objects matters
+
+See [Complex Types](./daft-engine-complex-types) for more details.
+
+
+
+
+

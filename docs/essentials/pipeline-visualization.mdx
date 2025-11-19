@@ -1,0 +1,70 @@
+---
+title: Visualization
+description: 'Visualize your pipelines with Graphviz.'
+---
+
+HyperNodes provides powerful visualization tools to help you understand, debug, and document your pipelines.
+
+## Basic Usage
+
+The `.visualize()` method renders the pipeline graph using Graphviz. In Jupyter notebooks, it displays the graph directly.
+
+```python
+# Display in notebook
+pipeline.visualize()
+
+# Save to file
+pipeline.visualize(filename="pipeline.svg")
+```
+
+## Customization Options
+
+You can customize the appearance of the graph using various arguments:
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `orient` | Orientation (`"TB"` for Top-Bottom, `"LR"` for Left-Right) | `"TB"` |
+| `depth` | Maximum depth to expand nested pipelines | `1` |
+| `flatten` | If `True`, expands all nested pipelines into a single graph | `False` |
+| `show_types` | Show type hints in node labels | `False` |
+| `show_legend` | Display a legend explaining node colors | `False` |
+
+### Example: Professional Style
+
+```python
+pipeline.visualize(
+    orient="LR",
+    style="professional",
+    show_types=True,
+    show_legend=True
+)
+```
+
+## Styles
+
+HyperNodes includes several built-in styles:
+
+- **`default`**: Clean, modern look.
+- **`professional`**: High-contrast, suitable for documentation.
+- **`technical`**: Detailed, blueprint-like appearance.
+- **`minimal`**: Simplified, good for high-level overviews.
+
+To list available styles:
+
+```python
+from hypernodes.visualization import DESIGN_STYLES
+print(DESIGN_STYLES.keys())
+```
+
+## Interactive Visualization
+
+For complex pipelines, you can use the interactive ReactFlow-based visualizer (experimental):
+
+```python
+from hypernodes.visualization import serve_interactive
+
+serve_interactive(pipeline)
+```
+
+This starts a local server where you can explore the pipeline graph interactively.
+
