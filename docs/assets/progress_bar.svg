@@ -1,0 +1,36 @@
+<svg width="700" height="120" viewBox="0 0 700 120" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .bg { fill: #0F111A; }
+    .text { font-family: 'Menlo', 'Monaco', 'Courier New', monospace; font-size: 14px; fill: #A6ACCD; }
+    .white { fill: #FFFFFF; }
+    .blue { fill: #82AAFF; }
+    .green { fill: #C3E88D; }
+    .purple { fill: #C792EA; }
+    .dim { fill: #444; }
+    .bar-bg { fill: #292D3E; }
+    .bar-fill { fill: #F07178; } /* Rich default red/pinkish */
+    .bar-pulse { fill: #FFCB6B; }
+  </style>
+  
+  <rect width="100%" height="100%" class="bg" rx="6" />
+  
+  <!-- Header -->
+  <text x="20" y="30" class="text"><tspan class="purple" font-weight="bold">HyperNodes</tspan> Pipeline Execution</text>
+  
+  <!-- Main Pipeline Bar -->
+  <text x="20" y="60" class="text">hebrew_retrieval</text>
+  <rect x="160" y="50" width="300" height="12" class="bar-bg" rx="2" />
+  <rect x="160" y="50" width="240" height="12" class="bar-fill" rx="2" /> <!-- 80% -->
+  <text x="470" y="60" class="text purple">80%</text>
+  <text x="510" y="60" class="text dim">00:12&lt;00:03</text>
+  
+  <!-- Sub-task Bar -->
+  <text x="40" y="85" class="text">└─ retrieve_queries</text>
+  <rect x="160" y="75" width="300" height="12" class="bar-bg" rx="2" />
+  <rect x="160" y="75" width="120" height="12" class="bar-pulse" rx="2" /> <!-- 40% -->
+  <text x="470" y="85" class="text blue">40%</text>
+  <text x="510" y="85" class="text dim">00:05&lt;00:07</text>
+
+  <!-- Footer -->
+  <text x="20" y="108" class="text green">✓ Cached: build_vector_index, build_bm25_index</text>
+</svg>

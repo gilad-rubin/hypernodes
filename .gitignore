@@ -66,7 +66,6 @@ venv.bak/
 # Project specific
 mlruns/*
 .*cache*
-*.svg
 *.html
 daft_grid_search_results.json
 data/*
@@ -87,3 +86,5 @@ AGENTS.md.bak
 CLAUDE.md
 CLAUDE.md.bak
 # END Ruler Generated Files
+outputs/*
+guides/*

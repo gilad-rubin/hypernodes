@@ -249,7 +249,23 @@ pipeline = Pipeline(
 )
 
 # --- Generate Pipeline SVGs ---
-# Overview
+
+# Simple intro example for introduction page
+@node(output_name="cleaned_text")
+def clean_text_intro(passage: str) -> str:
+    return passage.strip().lower()
+
+@node(output_name="word_count")
+def count_words_intro(cleaned_text: str) -> int:
+    return len(cleaned_text.split())
+
+simple_pipeline = Pipeline(
+    nodes=[clean_text_intro, count_words_intro],
+    name="text_processor"
+)
+simple_pipeline.visualize(filename=os.path.join(ASSETS_DIR, "pipeline_simple.svg"))
+
+# Full retrieval pipeline overview
 pipeline.visualize(filename=os.path.join(ASSETS_DIR, "pipeline_overview.svg"))
 
 # Nested Views

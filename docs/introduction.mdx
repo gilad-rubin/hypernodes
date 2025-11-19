@@ -53,6 +53,31 @@ To use the distributed engine features:
 pip install "hypernodes[daft]"
 ```
 
+## Quick Example
+
+Define nodes and build a pipeline in just a few lines:
+
+```python
+from hypernodes import node, Pipeline
+
+@node(output_name="cleaned_text")
+def clean_text(passage: str) -> str:
+    return passage.strip().lower()
+
+@node(output_name="word_count")
+def count_words(cleaned_text: str) -> int:
+    return len(cleaned_text.split())
+
+# Build and run
+pipeline = Pipeline(nodes=[clean_text, count_words])
+result = pipeline.run(inputs={"passage": "  Hello World  "})
+# {'cleaned_text': 'hello world', 'word_count': 2}
+```
+
+![Simple Pipeline](/docs/assets/pipeline_simple.svg)
+
+HyperNodes automatically resolves dependencies by matching parameter names to output names. The visualization shows how data flows through your pipeline.
+
 ## Documentation Guide
 
 <CardGroup cols={2}>

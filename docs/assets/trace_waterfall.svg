@@ -1,0 +1,70 @@
+<svg width="800" height="250" viewBox="0 0 800 250" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .bg { fill: #1e1e1e; }
+    .text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 12px; fill: #ccc; }
+    .title { font-size: 14px; font-weight: bold; fill: #fff; }
+    .axis { stroke: #444; stroke-width: 1; stroke-dasharray: 4; }
+    .span-rect { rx: 3; stroke: rgba(0,0,0,0.2); stroke-width: 1; }
+    .span-label { font-size: 11px; fill: #fff; pointer-events: none; }
+    
+    /* Colors */
+    .c-pipeline { fill: #3B82F6; } /* Blue */
+    .c-setup { fill: #8B5CF6; } /* Purple */
+    .c-encode { fill: #EC4899; } /* Pink */
+    .c-index { fill: #10B981; } /* Green */
+    .c-retrieve { fill: #F59E0B; } /* Amber */
+    .c-eval { fill: #6366F1; } /* Indigo */
+  </style>
+  
+  <rect width="100%" height="100%" class="bg" rx="6" />
+  
+  <!-- Header -->
+  <text x="20" y="25" class="title">Trace: hebrew_retrieval (Total Duration: 12.4s)</text>
+  
+  <!-- Time Axis -->
+  <line x1="150" y1="40" x2="150" y2="230" class="axis" />
+  <text x="155" y="245" class="text">2s</text>
+  <line x1="300" y1="40" x2="300" y2="230" class="axis" />
+  <text x="305" y="245" class="text">5s</text>
+  <line x1="450" y1="40" x2="450" y2="230" class="axis" />
+  <text x="455" y="245" class="text">8s</text>
+  <line x1="600" y1="40" x2="600" y2="230" class="axis" />
+  <text x="605" y="245" class="text">11s</text>
+
+  <!-- Spans -->
+  <!-- 1. Root Pipeline -->
+  <rect x="20" y="50" width="760" height="20" class="span-rect c-pipeline" />
+  <text x="25" y="64" class="span-label">hebrew_retrieval</text>
+
+  <!-- 2. Setup (Load & Create) -->
+  <rect x="20" y="75" width="80" height="18" class="span-rect c-setup" />
+  <text x="25" y="88" class="span-label">setup</text>
+
+  <!-- 3. Encode Passages (Parallel) -->
+  <rect x="110" y="75" width="120" height="18" class="span-rect c-encode" />
+  <text x="115" y="88" class="span-label">encode_passages (map)</text>
+
+  <!-- 4. Build Indexes (Cached) -->
+  <rect x="240" y="75" width="10" height="18" class="span-rect c-index" opacity="0.5" />
+  <text x="255" y="88" class="text" fill="#10B981">build_index (cached)</text>
+
+  <!-- 5. Encode Queries -->
+  <rect x="260" y="75" width="40" height="18" class="span-rect c-encode" />
+  <text x="265" y="88" class="span-label">encode_queries</text>
+
+  <!-- 6. Retrieve (Longest) -->
+  <rect x="310" y="75" width="400" height="18" class="span-rect c-retrieve" />
+  <text x="315" y="88" class="span-label">retrieve_queries_mapped</text>
+  
+    <!-- 6.1 Retrieve Detail (Nested) -->
+    <rect x="310" y="98" width="380" height="16" class="span-rect c-retrieve" opacity="0.8" />
+    <text x="315" y="110" class="span-label">retrieve_vector</text>
+    
+    <rect x="330" y="118" width="340" height="16" class="span-rect c-retrieve" opacity="0.8" />
+    <text x="335" y="130" class="span-label">rerank_crossencoder</text>
+
+  <!-- 7. Evaluate -->
+  <rect x="720" y="75" width="60" height="18" class="span-rect c-eval" />
+  <text x="725" y="88" class="span-label">evaluate</text>
+
+</svg>
