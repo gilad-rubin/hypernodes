@@ -4,6 +4,7 @@
         "light": "/assets/light_background_logo.png",
         "dark": "/assets/dark_background_logo.png"
     },
+    "favicon": "/assets/light_background_logo.png",
     "colors": {
         "primary": "#DDA0DD",
         "light": "#DDA0DD",
