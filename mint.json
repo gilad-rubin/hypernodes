@@ -14,67 +14,130 @@
         {
             "group": "Get Started",
             "pages": [
-                "docs/introduction",
-                "docs/get-started/installation",
-                "docs/get-started/quickstart"
+                {
+                    "icon": "house",
+                    "page": "docs/introduction"
+                },
+                {
+                    "icon": "download",
+                    "page": "docs/get-started/installation"
+                },
+                {
+                    "icon": "play",
+                    "page": "docs/get-started/quickstart"
+                }
             ]
         },
         {
             "group": "Core Concepts",
             "pages": [
-                "docs/core/nodes",
-                "docs/core/pipelines",
-                "docs/core/caching"
+                {
+                    "icon": "cube",
+                    "page": "docs/core/nodes"
+                },
+                {
+                    "icon": "sitemap",
+                    "page": "docs/core/pipelines"
+                },
+                {
+                    "icon": "database",
+                    "page": "docs/core/caching"
+                }
             ]
         },
         {
             "group": "Scaling",
             "pages": [
-                "docs/scaling/map-operations",
-                "docs/scaling/stateful-objects"
+                {
+                    "icon": "layer-group",
+                    "page": "docs/scaling/map-operations"
+                },
+                {
+                    "icon": "memory",
+                    "page": "docs/scaling/stateful-objects"
+                }
             ]
         },
         {
             "group": "Composition",
             "pages": [
-                "docs/composition/nested-pipelines",
-                "docs/composition/dual-nodes"
+                {
+                    "icon": "folder-tree",
+                    "page": "docs/composition/nested-pipelines"
+                },
+                {
+                    "icon": "bolt",
+                    "page": "docs/composition/dual-nodes"
+                }
             ]
         },
         {
             "group": "Execution Engines",
             "pages": [
-                "docs/engines/overview",
-                "docs/engines/sequential",
-                "docs/engines/daft",
-                "docs/engines/dask"
+                {
+                    "icon": "server",
+                    "page": "docs/engines/overview"
+                },
+                {
+                    "icon": "laptop",
+                    "page": "docs/engines/sequential"
+                },
+                {
+                    "icon": "rocket",
+                    "page": "docs/engines/daft"
+                },
+                {
+                    "icon": "network-wired",
+                    "page": "docs/engines/dask"
+                }
             ]
         },
         {
             "group": "Observability",
             "pages": [
-                "docs/observability/visualization",
-                "docs/observability/progress",
-                "docs/observability/callbacks",
-                "docs/observability/tracing"
+                {
+                    "icon": "eye",
+                    "page": "docs/observability/visualization"
+                },
+                {
+                    "icon": "bars-progress",
+                    "page": "docs/observability/progress"
+                },
+                {
+                    "icon": "code",
+                    "page": "docs/observability/callbacks"
+                },
+                {
+                    "icon": "chart-line",
+                    "page": "docs/observability/tracing"
+                }
             ]
         },
         {
             "group": "Integrations",
             "pages": [
-                "docs/integrations/overview"
+                {
+                    "icon": "plug",
+                    "page": "docs/integrations/overview"
+                }
             ]
         },
         {
             "group": "Philosophy",
             "pages": [
-                "docs/philosophy/overview"
+                {
+                    "icon": "lightbulb",
+                    "page": "docs/philosophy/overview"
+                }
             ]
         },
         {
             "group": "Reproducibility",
             "pages": [
-                "docs/reproducibility/overview"
+                {
+                    "icon": "repeat",
+                    "page": "docs/reproducibility/overview"
+                }
             ]
         }
     ]

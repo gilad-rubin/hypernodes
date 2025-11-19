@@ -37,7 +37,12 @@ pipeline.visualize(orient="LR")  # Left-to-Right (default is Top-Bottom)
 Control how deep to expand nested pipelines.
 
 - `depth=1`: Show top-level nodes and collapsed sub-pipelines.
+
+![Collapsed Pipeline](/docs/assets/pipeline_nested_collapsed.svg)
+
 - `depth=None`: Fully expand all nested pipelines.
+
+![Expanded Pipeline](/docs/assets/pipeline_nested_expanded.svg)
 
 ```python
 pipeline.visualize(depth=None)

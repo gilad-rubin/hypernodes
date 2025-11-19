@@ -3,14 +3,38 @@ title: Installation
 description: 'Get up and running with HyperNodes.'
 ---
 
+<Steps>
+  <Step title="Install the package">
+    <CodeGroup>
+      ```bash uv
+      uv add hypernodes
+      ```
 
-    ```bash Modal
-    pip install "hypernodes[modal]"
-    ```
+      ```bash pip
+      pip install hypernodes
+      ```
+    </CodeGroup>
+  </Step>
 
-    ```bash Telemetry
-    pip install "hypernodes[telemetry]"
-    ```
+  <Step title="Optional Dependencies">
+    <CodeGroup>
+      ```bash Daft (Recommended)
+      uv add "hypernodes[daft]"
+      # or
+      pip install "hypernodes[daft]"
+      ```
+
+      ```bash Modal
+      uv add "hypernodes[modal]"
+      # or
+      pip install "hypernodes[modal]"
+      ```
+
+      ```bash Telemetry
+      uv add "hypernodes[telemetry]"
+      # or
+      pip install "hypernodes[telemetry]"
+      ```
     </CodeGroup>
   </Step>
 </Steps>

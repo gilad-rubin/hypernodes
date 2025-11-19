@@ -16,21 +16,36 @@ description: 'Build once, cache intelligently, run anywhere.'
 
 HyperNodes is a **hierarchical, modular pipeline system** designed for ML/AI development. It solves the "re-run problem" by treating caching as a first-class citizen.
 
+![Pipeline Overview](/docs/assets/pipeline_overview.svg)
+
 ## Why HyperNodes?
 
+<CardGroup cols={2}>
+  <Card title="Smart Caching" icon="database">
+    Only re-run what changed. HyperNodes hashes your code and data to skip redundant computation.
   </Card>
   <Card title="Hierarchical Modularity" icon="sitemap">
     Functions are nodes. Pipelines are nodes. Nest pipelines infinitely to compose complex systems from simple, testable blocks.
+  </Card>
+  <Card title="Flexible Execution" icon="server">
+    Debug locally with standard Python. Scale to the cloud with Daft or Dask without changing your code.
+  </Card>
+  <Card title="Observability" icon="chart-line">
+    Built-in progress bars, visualization, and OpenTelemetry tracing.
   </Card>
 </CardGroup>
 
 ## Installation
 
-```bash
-pip install hypernodes
-# or with uv
-uv add hypernodes
-```
+<CodeGroup>
+  ```bash uv
+  uv add hypernodes
+  ```
+
+  ```bash pip
+  pip install hypernodes
+  ```
+</CodeGroup>
 
 To use the distributed engine features:
 
