@@ -6,9 +6,9 @@
     },
     "favicon": "/assets/light_background_logo.png",
     "colors": {
-        "primary": "#DDA0DD",
-        "light": "#DDA0DD",
-        "dark": "#DDA0DD"
+        "primary": "#38B5FC",
+        "light": "#38B5FC",
+        "dark": "#38B5FC"
     },
     "navigation": [
         {
