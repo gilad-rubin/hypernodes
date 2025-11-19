@@ -62,7 +62,7 @@ Pluggable execution strategies. All implement the `Engine` protocol.
 
 #### DaftEngine - High-Performance Distributed Execution
 
-DaftEngine transforms pipelines into lazy DataFrame operations using `@daft.func` UDFs:
+The `DaftEngine` (`src/hypernodes/integrations/daft/engine.py`) is a facade that delegates execution to specialized operations (`src/hypernodes/integrations/daft/operations.py`). It transforms pipelines into lazy DataFrame operations using [Daft](https://www.getdaft.io/).
 
 ```python
 from hypernodes.engines import DaftEngine
@@ -72,6 +72,15 @@ engine = DaftEngine(use_batch_udf=True, cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[...], engine=engine)
 results = pipeline.map(inputs={"x": [1,2,3]}, map_over="x")
 ```
+
+**Architecture:**
+- **Engine (`engine.py`)**: Orchestrates execution, manages caching, and creates operations.
+- **Operations (`operations.py`)**: Modular execution strategies:
+  - `FunctionNodeOperation`: Standard scalar nodes (sync/async).
+  - `BatchNodeOperation`: Optimized batch UDFs.
+  - `PipelineNodeOperation`: Nested pipelines (handles `explode`/`implode` for map_over).
+  - `DualNodeOperation`: Switches between singular and batch implementations.
+- **CodeGen (`codegen.py`)**: Tracks imports and UDF definitions to generate standalone Daft scripts.
 
 **Key features:**
 - **Lazy execution**: Builds computation graph, executes on `.collect()`
@@ -285,7 +294,9 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `visualization.py`: Graphviz rendering (optional, requires graphviz package)
 
 ### Integrations (`src/hypernodes/integrations/`)
-- `daft/engine.py`: DaftEngine for distributed execution
+- `daft/engine.py`: DaftEngine facade
+- `daft/operations.py`: Modular Daft operations (Node, Batch, Pipeline)
+- `daft/codegen.py`: Code generation context
 - `dask/engine.py`: DaskEngine for parallel maps
 
 ### Telemetry (`src/hypernodes/telemetry/`)

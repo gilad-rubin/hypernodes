@@ -31,7 +31,15 @@ Functions are nodes. Pipelines are made out of nodes, and Pipelines are nodes th
 
 **⚡ Flexible Execution**
 
-Run pipelines with different execution strategies: sequential for debugging, async for I/O-bound workloads, threaded for mixed workloads, or parallel for CPU-intensive tasks. Choose the right executor for your use case.
+Run pipelines with different execution strategies: sequential for debugging, async for I/O-bound workloads, or **distributed parallel execution with [Daft](https://www.getdaft.io/)** for high-performance data processing.
+
+**🚀 First-Class Daft Support**
+
+HyperNodes integrates deeply with [Daft](https://www.getdaft.io/), a distributed query engine for Python.
+- **Lazy Execution**: Builds optimal computation graphs before running.
+- **Auto-Batching**: Automatically batches Python functions for vectorization.
+- **Distributed**: Scales from your laptop to a cluster without code changes.
+- **Stateful**: Efficiently handles heavy resources like ML models and DB connections.
 
 **📊 Observable by Default**
 
@@ -141,23 +149,25 @@ main_pipeline = Pipeline(
 result = main_pipeline.run(inputs={"data_path": "corpus.txt"})
 ```
 
-### Parallel Execution with Dask
+### High-Performance Execution with Daft
 
 ```python
 from hypernodes import Pipeline
-from hypernodes.engines import DaskEngine
+from hypernodes.engines import DaftEngine
 
-# Parallel map for CPU/IO-bound workloads
-parallel_pipeline = Pipeline(
-    nodes=[process_data, transform_results],
-    engine=DaskEngine(scheduler="threads"),  # or "processes" for CPU-bound
+# Distributed execution using Daft
+# Requires: pip install getdaft
+pipeline = Pipeline(
+    nodes=[clean_text, count_words],
+    engine=DaftEngine()
 )
 
-# Regular run (sequential, no overhead)
-result = parallel_pipeline.run(inputs={"data": [1, 2, 3]})
-
-# Map operation (parallel via Dask Bag)
-results = parallel_pipeline.map(inputs={"data": [1, 2, 3, 4, 5]}, map_over="data")
+# Auto-batches and executes in parallel
+# Each item is cached independently
+results = pipeline.map(
+    inputs={"passage": ["Hello", "World"] * 1000},
+    map_over="passage"
+)
 ```
 
 ---
@@ -257,6 +267,41 @@ results2 = pipeline.map(
 
 Engines determine **how** (execution strategy) and **where** (infrastructure) nodes execute.
 
+### DaftEngine (Distributed DataFrames) - 🚀 Recommended
+
+For high-performance distributed execution using [Daft](https://www.getdaft.io/):
+
+```python
+from hypernodes import Pipeline
+from hypernodes.engines import DaftEngine
+
+# Requires: pip install getdaft
+# Auto-optimizes batch sizes and parallelism
+engine = DaftEngine(use_batch_udf=True)
+
+pipeline = Pipeline(
+    nodes=[...], 
+    engine=engine
+)
+
+# All operations are lazy (builds computation graph)
+result = pipeline.run(inputs={"x": 5})
+
+# Map operations leverage Daft's distributed execution
+# Automatically batches data and runs in parallel
+results = pipeline.map(
+    inputs={"x": [1, 2, 3, 4, 5]},
+    map_over="x"
+)
+```
+
+**Key Features:**
+- **Lazy DataFrame execution**: Optimizes query plan before execution
+- **Smart Batching**: Auto-calculates optimal batch sizes (64-1024) for vectorization
+- **Resource Management**: Efficiently handles GPU resources and memory
+- **Per-Item Caching**: Even in batch mode, individual items are cached and reused
+- **Seamless Scaling**: Works on your laptop or a Ray/K8s cluster
+
 ### SequentialEngine (Default)
 
 The default engine for simple, predictable execution:
@@ -266,12 +311,6 @@ from hypernodes import Pipeline, SequentialEngine
 
 # Sequential execution (default - no need to specify)
 pipeline = Pipeline(nodes=[...])
-
-# Or explicitly:
-pipeline = Pipeline(
-    nodes=[...],
-    engine=SequentialEngine()
-)
 ```
 
 **Features:**
@@ -288,60 +327,21 @@ For parallel execution using Dask Bag:
 from hypernodes import Pipeline
 from hypernodes.engines import DaskEngine
 
-# Auto-optimized for your workload
-engine = DaskEngine()
+# Configure for threads (I/O bound) or processes (CPU bound)
+engine = DaskEngine(scheduler="threads")
+
 pipeline = Pipeline(nodes=[...], engine=engine)
 
-# Regular run (sequential, no overhead)
-result = pipeline.run(inputs={"x": 5})
-
-# Map operation (parallel via Dask Bag)
+# Parallel map execution
 results = pipeline.map(
     inputs={"x": [1, 2, 3, 4, 5]},
     map_over="x"
-)
-
-# Custom configuration for CPU-bound workload
-engine = DaskEngine(
-    scheduler="processes",  # or "threads" (default)
-    workload_type="cpu",    # or "io", "mixed" (default)
-    num_workers=8           # defaults to CPU count
 )
 ```
 
 **Features:**
 - Automatic parallelism for map operations
 - Configurable scheduler (threads, processes)
-- Auto-optimized partitioning
-- Zero overhead for non-map operations
-
-### DaftEngine (Distributed DataFrames)
-
-For distributed DataFrame-based execution:
-
-```python
-from hypernodes import Pipeline
-from hypernodes.engines import DaftEngine
-
-# Requires: pip install getdaft
-engine = DaftEngine(use_batch_udf=True)
-pipeline = Pipeline(nodes=[...], engine=engine)
-
-# All operations are lazy (builds computation graph)
-result = pipeline.run(inputs={"x": 5})
-
-# Map operations leverage Daft's distributed execution
-results = pipeline.map(
-    inputs={"x": [1, 2, 3, 4, 5]},
-    map_over="x"
-)
-```
-
-**Features:**
-- Lazy DataFrame execution
-- Batch UDF optimization
-- Auto-tuned parallelism
-- Best for large-scale distributed workloads
 
 ---
 

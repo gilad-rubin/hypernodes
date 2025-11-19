@@ -44,7 +44,9 @@ class DaftEngine(Engine):
         cache: Optional[Any] = None,
     ):
         if not DAFT_AVAILABLE:
-            raise ImportError("daft is required. pip install getdaft")
+            raise ImportError(
+                "daft is required. uv add hypernodes[daft] or pip install hypernodes[daft]"
+            )
 
         self.use_batch_udf = use_batch_udf
         self.default_daft_config = default_daft_config or {}
