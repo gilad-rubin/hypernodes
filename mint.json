@@ -20,34 +20,43 @@
             ]
         },
         {
-            "group": "Essentials",
+            "group": "Core Concepts",
             "pages": [
-                "docs/essentials/nodes",
-                "docs/essentials/pipelines",
-                "docs/essentials/execution"
-            ]
-        },
-        {
-            "group": "Data Processing",
-            "pages": [
-                "docs/data-processing/mapping",
-                "docs/data-processing/nesting",
-                "docs/data-processing/caching"
+                "docs/core/nodes",
+                "docs/core/pipelines",
+                "docs/core/caching"
             ]
         },
         {
             "group": "Scaling",
             "pages": [
-                "docs/scaling/engines",
-                "docs/scaling/daft-engine",
-                "docs/scaling/stateful"
+                "docs/scaling/map-operations",
+                "docs/scaling/stateful-objects"
+            ]
+        },
+        {
+            "group": "Composition",
+            "pages": [
+                "docs/composition/nested-pipelines",
+                "docs/composition/dual-nodes"
+            ]
+        },
+        {
+            "group": "Execution Engines",
+            "pages": [
+                "docs/engines/overview",
+                "docs/engines/sequential",
+                "docs/engines/daft",
+                "docs/engines/dask"
             ]
         },
         {
             "group": "Observability",
             "pages": [
                 "docs/observability/visualization",
-                "docs/observability/telemetry"
+                "docs/observability/progress",
+                "docs/observability/callbacks",
+                "docs/observability/tracing"
             ]
         },
         {

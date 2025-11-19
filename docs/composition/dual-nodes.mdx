@@ -1,0 +1,67 @@
+---
+title: Dual Nodes
+description: Optimize execution with singular and batch implementations.
+---
+
+For maximum performance with **primitive types** (int, float, str), you can provide two implementations for a single node:
+
+1. **Singular**: Simple Python logic for debugging and single-item processing.
+2. **Batch**: Vectorized logic using PyArrow compute functions for high-performance batch processing.
+
+The `DualNode` class allows you to package both implementations into a single node.
+
+## Creating a DualNode
+
+```python
+from hypernodes import DualNode
+import pyarrow as pa
+import pyarrow.compute as pc
+
+def double_one(x: int) -> int:
+    return x * 2
+
+def double_batch(x: pa.Array) -> pa.Array:
+    # MUST accept pa.Array inputs (strict contract)
+    # Can return pa.Array, list, or numpy.ndarray (relaxed contract)
+    return pc.multiply(x, 2)
+
+node = DualNode(
+    output_name="doubled",
+    singular=double_one,
+    batch=double_batch
+)
+```
+
+## The Contract
+
+### Input (Strict)
+- **Mapped parameters** (vary across items): Must accept `pyarrow.Array`.
+- **Constant parameters** (same for all items): Receive scalar values.
+
+### Output (Relaxed)
+- Can return `pyarrow.Array`, `list`, or `numpy.ndarray`.
+
+## When to Use
+
+- ✅ **Primitive types** with vectorized operations (`pc.multiply`, `pc.add`, etc.)
+- ❌ **Complex types** (dataclasses, custom objects) - use regular `@node` instead.
+- 💡 Only use DualNode when you have **true vectorization**, not just batching.
+
+## Example with Constant Parameters
+
+```python
+def process_one(text: str, multiplier: int) -> int:
+    return len(text) * multiplier
+
+def process_batch(text: pa.Array, multiplier: int) -> pa.Array:
+    # text: pa.Array (varies)
+    # multiplier: int (constant - passed as scalar!)
+    lengths = pc.utf8_length(text)
+    return pc.multiply(lengths, multiplier)
+
+node = DualNode(
+    output_name="result",
+    singular=process_one,
+    batch=process_batch
+)
+```

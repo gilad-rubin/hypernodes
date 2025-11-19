@@ -5,7 +5,7 @@ description: 'Viewing your pipeline graph.'
 
 Understanding complex DAGs can be difficult. HyperNodes provides built-in visualization tools to help you see the structure of your pipeline.
 
-## `.visualize()`
+## The `.visualize()` Method
 
 You can generate a Graphviz diagram of any pipeline using the `.visualize()` method.
 
@@ -22,7 +22,7 @@ pipeline.visualize()
 pipeline.visualize(filename="my_pipeline.svg")
 ```
 
-## Controlling Detail
+## Customization
 
 ### Orientation
 
@@ -34,7 +34,7 @@ pipeline.visualize(orient="LR")  # Left-to-Right (default is Top-Bottom)
 
 ### Nesting Depth
 
-By default, HyperNodes collapses nested pipelines to keep the graph readable. You can control this with `depth`.
+Control how deep to expand nested pipelines.
 
 - `depth=1`: Show top-level nodes and collapsed sub-pipelines.
 - `depth=None`: Fully expand all nested pipelines.
@@ -43,7 +43,7 @@ By default, HyperNodes collapses nested pipelines to keep the graph readable. Yo
 pipeline.visualize(depth=None)
 ```
 
-### Styling
+### Styles
 
 HyperNodes comes with visual styles.
 
@@ -53,7 +53,7 @@ pipeline.visualize(style="modern")
 
 ## Legend
 
-For complex graphs, you can enable a legend to explain the different node shapes and colors (e.g., Pipeline Inputs vs Computed Nodes).
+Enable a legend to explain node shapes and colors.
 
 ```python
 pipeline.visualize(show_legend=True)

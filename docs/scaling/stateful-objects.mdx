@@ -1,0 +1,91 @@
+---
+title: Stateful Objects
+description: 'Managing heavy resources like models.'
+---
+
+In ML pipelines, you often need to manage "heavy" resources that should be initialized once and reused across many items, such as:
+- Machine Learning Models
+- Database Connections
+- API Clients
+
+HyperNodes handles this via **Stateful Parameters**.
+
+## The `@stateful` Decorator
+
+Mark a class as `@stateful` to enable lazy initialization and efficient serialization.
+
+```python
+from hypernodes import stateful
+
+@stateful
+class TextModel:
+    def __init__(self, path):
+        print("Loading model...")
+        self.model = load_heavy_model(path)
+        
+    def predict(self, text):
+        return self.model(text)
+```
+
+### How it Works
+
+1.  **Lazy Initialization**: When you create an instance (`model = TextModel(...)`), the `__init__` method is **NOT** called immediately.
+2.  **Serialization**: HyperNodes pickles only the initialization arguments, not the heavy object itself.
+3.  **On-Demand Loading**: The object is initialized only when a method is called or an attribute is accessed on the worker node.
+
+## Usage in Pipelines
+
+Pass the stateful object as a regular input.
+
+```python
+@node
+def classify(text: str, model: TextModel) -> str:
+    return model.predict(text)
+
+# Create ONE instance (lazy)
+my_model = TextModel("path/to/weights")
+
+# Map over 1000 texts
+results = pipeline.map(
+    inputs={
+        "text": ["hello", "world", ...], 
+        "model": my_model  # Passed as a handle
+    },
+    map_over="text"
+)
+```
+
+## Engine Behavior
+
+- **SequentialEngine**: The object is initialized once and reused in memory.
+- **DaftEngine**: The object is initialized **once per worker process** and reused for the entire batch/partition. This is crucial for high-performance distributed inference.
+
+## Caching
+
+Stateful objects integrate with HyperNodes' caching system. By default, the cache key is derived from the `__init__` arguments.
+
+You can customize this by implementing `__cache_key__`:
+
+```python
+@stateful
+class APIClient:
+    def __init__(self, url, api_key):
+        self.url = url
+        self.api_key = api_key
+        
+    def __cache_key__(self):
+        # Exclude api_key from cache hash!
+        return self.url
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Execution Engines" icon="server" href="../engines/overview">
+    See how engines handle state.
+  </Card>
+  <Card title="Dual Nodes" icon="bolt" href="../composition/dual-nodes">
+    Combine stateful objects with batching.
+  </Card>
+</CardGroup>
+

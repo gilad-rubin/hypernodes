@@ -1,0 +1,80 @@
+---
+title: Pipelines
+description: 'Managing execution graphs.'
+---
+
+A `Pipeline` manages a collection of Nodes and executes them as a Directed Acyclic Graph (DAG).
+
+## Creating a Pipeline
+
+You pass a list of nodes to the pipeline constructor. HyperNodes automatically resolves dependencies based on input/output names.
+
+```python
+from hypernodes import Pipeline, node
+
+@node
+def step1(x): return x + 1
+
+@node
+def step2(step1): return step1 * 2
+
+# Order doesn't matter!
+pipeline = Pipeline(nodes=[step2, step1])
+```
+
+## Execution
+
+### Run (Single Input)
+
+Execute the pipeline with a single set of inputs.
+
+```python
+result = pipeline.run(inputs={"x": 10})
+# {'step1': 11, 'step2': 22}
+```
+
+### Map (Batch Processing)
+
+Run the pipeline over a list of inputs.
+
+```python
+results = pipeline.map(
+    inputs={"x": [1, 2, 3]},
+    map_over="x"
+)
+```
+
+## Configuration
+
+HyperNodes supports a fluent API for configuration.
+
+```python
+from hypernodes import Pipeline, DiskCache, SeqEngine
+
+pipeline = (
+    Pipeline(nodes=[step1, step2])
+    .with_name("my_pipeline")
+    .with_engine(
+        SeqEngine(cache=DiskCache(".cache"))
+    )
+)
+```
+
+## Graph Resolution
+
+When created, the pipeline validates:
+1.  **Dependencies**: Matches node arguments to upstream outputs.
+2.  **Cycles**: Ensures the graph is acyclic.
+3.  **Missing Inputs**: Identifies inputs that must be provided at runtime.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Caching" icon="database" href="./caching">
+    Learn how caching works.
+  </Card>
+  <Card title="Map Operations" icon="layer-group" href="../scaling/map-operations">
+    Scale your pipeline.
+  </Card>
+</CardGroup>
+

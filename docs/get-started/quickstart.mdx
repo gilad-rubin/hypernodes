@@ -3,87 +3,80 @@ title: Quick Start
 description: 'Build your first pipeline in 5 minutes.'
 ---
 
-## Basic Pipeline
+Let's build a simple text processing pipeline to understand the core workflow.
 
-Create a simple pipeline that cleans text and counts words.
+## 1. Define Nodes
 
-<Steps>
-  <Step title="Define Nodes">
-    Functions become nodes with the `@node` decorator.
-
-    ```python
-    from hypernodes import Pipeline, node
-
-    @node(output_name="cleaned_text")
-    def clean_text(passage: str) -> str:
-        return passage.strip().lower()
-
-    @node(output_name="word_count")
-    def count_words(cleaned_text: str) -> int:
-        return len(cleaned_text.split())
-    ```
-  </Step>
-  <Step title="Build Pipeline">
-    Dependencies are automatically resolved based on parameter names.
-
-    ```python
-    pipeline = Pipeline(nodes=[clean_text, count_words])
-    ```
-  </Step>
-  <Step title="Run">
-    Execute with a single input.
-
-    ```python
-    result = pipeline(passage="  Hello World  ")
-    print(result)
-    # {'cleaned_text': 'hello world', 'word_count': 2}
-    ```
-  </Step>
-</Steps>
-
-## Scale with `.map()`
-
-Process multiple inputs without changing your pipeline code.
+Nodes are just Python functions decorated with `@node`. They declare their inputs and outputs.
 
 ```python
+from hypernodes import node
+
+@node(output_name="cleaned_text")
+def clean_text(passage: str) -> str:
+    return passage.strip().lower()
+
+@node(output_name="word_count")
+def count_words(cleaned_text: str) -> int:
+    # Note: 'cleaned_text' matches the output of the previous node
+    return len(cleaned_text.split())
+```
+
+## 2. Build & Run Pipeline
+
+Create a pipeline and run it with a single input.
+
+```python
+from hypernodes import Pipeline
+
+# Dependencies are automatically resolved!
+pipeline = Pipeline(nodes=[clean_text, count_words])
+
+# Run with a single input
+result = pipeline.run(inputs={"passage": "  Hello HyperNodes  "})
+print(result)
+# Output: {'cleaned_text': 'hello hypernodes', 'word_count': 2}
+```
+
+## 3. Add Caching
+
+This is where HyperNodes shines. Add a `DiskCache` to persist results.
+
+```python
+from hypernodes import SeqEngine, DiskCache
+
+# Configure engine with caching
+engine = SeqEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
+
+# First run: Executes nodes
+pipeline.run(inputs={"passage": "Hello World"})
+
+# Second run: INSTANT cache hit!
+pipeline.run(inputs={"passage": "Hello World"})
+```
+
+## 4. Scale with `.map()`
+
+Process thousands of items without changing your node logic.
+
+```python
+# Process multiple items
 results = pipeline.map(
-    inputs={"passage": ["  Hello  ", "  World  "]},
+    inputs={"passage": ["Item 1", "Item 2", "Item 3"]},
     map_over="passage"
 )
 ```
 
-## Enable Caching
-
-Add `DiskCache` to avoid re-running expensive computations.
-
-```python
-from hypernodes import SequentialEngine, DiskCache
-
-engine = SequentialEngine(cache=DiskCache(path=".cache"))
-pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
-
-# First run: executes
-pipeline(passage="Hello World")
-
-# Second run: instant cache hit!
-pipeline(passage="Hello World")
-```
+Each item is cached independently. If you add one new item to the list, **only that new item is processed**.
 
 ## Next Steps
 
-Now that you've built your first pipeline, explore these topics:
-
 <CardGroup cols={2}>
-  <Card title="Core Concepts" icon="book" href="/docs/essentials/nodes">
+  <Card title="Core Concepts" icon="book" href="../core/nodes">
     Deep dive into Nodes and Pipelines.
   </Card>
-  <Card title="Caching" icon="database" href="/docs/data-processing/caching">
-    Learn how caching works.
-  </Card>
-  <Card title="Execution Engines" icon="server" href="/docs/scaling/engines">
-    Scale with Daft and Dask.
-  </Card>
-  <Card title="Visualization" icon="eye" href="/docs/observability/visualization">
-    Visualize your pipelines.
+  <Card title="Execution Engines" icon="server" href="../engines/overview">
+    Learn about Daft and Dask engines.
   </Card>
 </CardGroup>

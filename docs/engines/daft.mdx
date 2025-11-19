@@ -1,0 +1,96 @@
+---
+title: Daft Engine
+description: 'Distributed execution with Daft.'
+---
+
+**DaftEngine** leverages [Daft](https://www.getdaft.io/) to execute your pipelines as distributed query plans. It is the recommended engine for production workloads.
+
+## Why DaftEngine?
+
+1.  **Vectorization**: Automatically batches your Python functions. Instead of calling your function 1000 times, it calls it 10 times with 100 items.
+2.  **IO Optimization**: Daft is built in Rust and optimized for high-throughput IO.
+3.  **Lazy Execution**: Builds a query plan before execution, enabling query optimization.
+
+## Configuration
+
+Requires the `daft` extra:
+
+```bash
+pip install "hypernodes[daft]"
+```
+
+```python
+from hypernodes.engines import DaftEngine
+
+engine = DaftEngine(
+    use_batch_udf=True,       # Enable auto-batching (Default: True)
+    default_daft_config={
+        "max_workers": 8      # Control concurrency
+    }
+)
+```
+
+## Optimizations
+
+### 1. Auto-Batching (Batch UDFs)
+
+HyperNodes inspects your type hints. If a node takes `int` and returns `int`, DaftEngine wraps it to accept `List[int]` and return `List[int]`, feeding it batches of data.
+
+**Explicit Batch Hints**:
+For maximum control (e.g. using NumPy), you can explicitly hint that a function handles batches:
+
+```python
+import numpy as np
+
+@node(output_name="normalized", batch=True)
+def normalize_batch(values: np.ndarray, mean: float, std: float) -> np.ndarray:
+    """Process entire batch with NumPy vectorization."""
+    return (values - mean) / std
+```
+
+### 2. Native Daft Operations (Fastest)
+
+Avoid Python entirely by using Daft's native expression API.
+
+```python
+@node(output_name="cleaned", daft_native=True)
+def clean_text(text: str) -> str:
+    """
+    Engine interprets this as: df["text"].str.strip().str.lower()
+    """
+    return text.strip().lower()
+```
+
+### 3. DualNode Strategy
+
+The `DualNode` provides the best of both worlds: simple Python logic for debugging and vectorized PyArrow logic for execution.
+
+```python
+from hypernodes import DualNode
+import pyarrow.compute as pc
+
+node = DualNode(
+    output_name="doubled",
+    singular=lambda x: x * 2,
+    batch=lambda x: pc.multiply(x, 2) # Zero-copy Arrow arrays!
+)
+```
+
+### 4. Stateful UDFs
+
+DaftEngine treats `@stateful` objects as **Stateful UDFs**.
+- Initialized **once per worker process**.
+- Reused for all batches processed by that worker.
+- Eliminates serialization overhead for heavy models.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stateful Objects" icon="memory" href="../scaling/stateful-objects">
+    Learn more about state management.
+  </Card>
+  <Card title="Map Operations" icon="layer-group" href="../scaling/map-operations">
+    Scale your pipeline.
+  </Card>
+</CardGroup>
+

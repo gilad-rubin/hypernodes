@@ -1,0 +1,98 @@
+---
+title: Map Operations
+description: 'Parallel processing over lists.'
+---
+
+One of HyperNodes' core design principles is **"Test with One, Scale to Many"**.
+
+You design your pipeline to handle a single item. When it comes time to process a dataset, you use `.map()`.
+
+## The `map()` Method
+
+The `map()` method executes the pipeline over a collection of inputs.
+
+```python
+@node
+def square(x: int) -> int:
+    return x * x
+
+pipeline = Pipeline(nodes=[square])
+
+# Input is a LIST of values
+results = pipeline.map(
+    inputs={"x": [1, 2, 3, 4]}, 
+    map_over="x"
+)
+# results = [{'square': 1}, {'square': 4}, ...]
+```
+
+### `map_over`
+
+The `map_over` argument specifies which input parameters should be iterated over.
+
+- **Single Argument**: `map_over="x"` iterates over the list provided for `x`.
+- **Multiple Arguments**: `map_over=["x", "y"]` iterates over both `x` and `y`.
+
+## Mapping Modes
+
+### Zip Mode (Default)
+
+Iterates over inputs in parallel, like Python's `zip()`.
+
+```python
+# x=[1, 2], y=[10, 20]
+# Pairs: (1, 10), (2, 20)
+results = pipeline.map(
+    inputs={"x": [1, 2], "y": [10, 20]},
+    map_over=["x", "y"],
+    map_mode="zip"
+)
+```
+
+### Product Mode (Grid Search)
+
+Creates a Cartesian product of all inputs. Useful for hyperparameter tuning.
+
+```python
+# Executes 2 * 2 = 4 combinations
+results = pipeline.map(
+    inputs={
+        "param_a": [1, 2], 
+        "param_b": [10, 20]
+    },
+    map_over=["param_a", "param_b"],
+    map_mode="product",
+)
+```
+
+## Fixed Inputs
+
+Arguments *not* included in `map_over` are treated as constants and passed to every execution.
+
+```python
+results = pipeline.map(
+    inputs={
+        "vector": [1, 2, 3],  # Iterated
+        "scalar": 10          # Constant
+    },
+    map_over="vector"
+)
+```
+
+## Why use `.map()`?
+
+1.  **Parallelism**: Engines like `DaskEngine` or `DaftEngine` automatically distribute the work.
+2.  **Caching**: HyperNodes caches each item individually. Adding 10 items to a list of 1000 only processes the new 10.
+3.  **Batching**: `DaftEngine` can automatically batch these operations for vectorization.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Stateful Objects" icon="memory" href="./stateful-objects">
+    Manage heavy resources like models.
+  </Card>
+  <Card title="Execution Engines" icon="server" href="../engines/overview">
+    Scale your map operations.
+  </Card>
+</CardGroup>
+

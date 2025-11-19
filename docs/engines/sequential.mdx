@@ -1,0 +1,45 @@
+---
+title: Sequential Engine
+description: 'The default execution engine.'
+---
+
+The `SequentialEngine` (or `SeqEngine`) is the default engine in HyperNodes. It executes nodes one by one in topological order.
+
+## Usage
+
+It is used automatically if you don't specify an engine.
+
+```python
+from hypernodes import SeqEngine
+
+# Explicitly
+pipeline = Pipeline(nodes=[...], engine=SeqEngine())
+```
+
+## Features
+
+### 1. Debugging Friendly
+Since execution is synchronous and sequential, standard Python debuggers (pdb, IDE breakpoints) work out of the box.
+
+### 2. Async Support
+It natively supports `async def` nodes. It runs the event loop for you, allowing you to mix sync and async code seamlessly.
+
+### 3. Caching
+It fully supports the `DiskCache` for avoiding re-computation.
+
+## Execution Flow
+
+When you call `.run()`:
+
+1.  **Signature Computation**: Compute hash based on code, inputs, and dependencies.
+2.  **Cache Check**: Check if signature exists in cache.
+3.  **Execution (Miss)**: Run the function.
+4.  **Store (Miss)**: Save result to cache.
+5.  **Return**: Pass result to downstream nodes.
+
+## When to use
+
+- **Development**: Always start here.
+- **Unit Tests**: Deterministic execution makes testing easy.
+- **Small Data**: If your data fits in memory and processing is fast, the overhead of distributed engines might not be worth it.
+

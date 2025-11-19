@@ -1,0 +1,96 @@
+---
+title: Caching
+description: 'Avoiding re-computation.'
+---
+
+HyperNodes treats caching as a first-class citizen. It uses **Content-Addressable Caching** to ensure you never re-run unchanged work.
+
+## How it Works
+
+For every node execution, HyperNodes computes a unique signature:
+
+```
+Signature = Hash(
+    Function Source Code
+    + Input Arguments
+    + Upstream Dependency Signatures
+)
+```
+
+- **Code Change**: Modifying the function body changes the hash -> Cache Miss.
+- **Input Change**: Changing input values changes the hash -> Cache Miss.
+- **Upstream Change**: If a parent node produces a new output -> Cache Miss.
+
+## Configuration
+
+Caching is configured at the **Engine** level.
+
+```python
+from hypernodes import DiskCache, SeqEngine, Pipeline
+
+# Persist cache to a local directory
+cache = DiskCache(path="./.hypernodes_cache")
+engine = SeqEngine(cache=cache)
+
+pipeline = Pipeline(nodes=[...], engine=engine)
+```
+
+## Advanced Caching
+
+### Private Attributes
+
+When passing objects (like model configurations) to nodes, HyperNodes hashes the object's state.
+
+**Private attributes (starting with `_`) are excluded from the hash.**
+
+```python
+class Model:
+    def __init__(self, config):
+        self.config = config      # Public: Affects cache
+        self._session = None      # Private: Ignored!
+        self._cache = {}          # Private: Ignored!
+```
+
+This allows you to store runtime state (connections, sessions) without invalidating the cache.
+
+### Custom Cache Keys
+
+For full control, implement `__cache_key__` on your objects.
+
+```python
+class APIClient:
+    def __init__(self, url, api_key):
+        self.url = url
+        self.api_key = api_key
+    
+    def __cache_key__(self):
+        # Only hash the URL, ignore the secret API key!
+        return self.url
+```
+
+### Disabling Cache
+
+You can disable caching for specific nodes (e.g., random number generators, side effects):
+
+```python
+@node(cache=False)
+def fetch_latest_data():
+    ...
+```
+
+## Granularity
+
+- **Node Level**: If you have `A -> B -> C` and change `C`, `A` and `B` remain cached.
+- **Item Level**: In `pipeline.map()`, each item is cached independently. If one item fails, you only re-run that item.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Map Operations" icon="layer-group" href="../scaling/map-operations">
+    See how caching works with scaling.
+  </Card>
+  <Card title="Stateful Objects" icon="memory" href="../scaling/stateful-objects">
+    Cache expensive initializations.
+  </Card>
+</CardGroup>
+

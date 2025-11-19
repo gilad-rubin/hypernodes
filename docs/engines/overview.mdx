@@ -1,0 +1,37 @@
+---
+title: Overview
+description: 'Execution strategies.'
+---
+
+The **Engine** determines *how* and *where* your pipeline executes.
+
+By decoupling the pipeline definition (the "what") from the execution strategy (the "how"), HyperNodes allows you to seamlessly transition from debugging on your laptop to running production workloads on a cluster.
+
+## The Engine Protocol
+
+You pass the engine to the pipeline constructor.
+
+```python
+pipeline = Pipeline(nodes=[...], engine=MyEngine())
+```
+
+## Available Engines
+
+<CardGroup cols={1}>
+  <Card title="SequentialEngine (Default)" icon="laptop" href="./sequential">
+    **Best for:** Debugging, development, small datasets.
+    
+    Executes nodes one by one in topological order. Simple, predictable, and easy to debug.
+  </Card>
+  <Card title="DaftEngine" icon="rocket" href="./daft">
+    **Best for:** Production, large datasets, high-performance batch processing.
+    
+    Integrates with [Daft](https://www.getdaft.io/) to run your pipeline as a distributed query plan. Supports auto-batching and vectorization.
+  </Card>
+  <Card title="DaskEngine" icon="network-wired" href="./dask">
+    **Best for:** CPU-bound tasks on existing Dask clusters.
+    
+    Uses Dask Bags to parallelize map operations.
+  </Card>
+</CardGroup>
+

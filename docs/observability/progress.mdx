@@ -1,0 +1,38 @@
+---
+title: Progress Bars
+description: 'Live execution monitoring.'
+---
+
+The `ProgressCallback` provides rich, real-time feedback on your pipeline's execution using `tqdm`.
+
+## Usage
+
+Add the callback to your engine.
+
+```python
+from hypernodes import SeqEngine
+from hypernodes.telemetry import ProgressCallback
+
+engine = SeqEngine(
+    callbacks=[ProgressCallback()]
+)
+
+pipeline.run(...)
+```
+
+## Features
+
+- **Hierarchical Bars**: Shows nested pipeline progress.
+- **Map Operations**: Shows overall map progress and individual node stats.
+- **Cache Status**: Visually distinguishes cached nodes (⚡) from computed nodes (✓).
+- **Timing**: Shows execution duration and rate (items/s).
+
+## Environment Variables
+
+You can control behavior via environment variables:
+
+- `HN_PROGRESS_DEBUG=1`: Enable debug logging for the progress callback.
+
+## Jupyter Support
+
+The callback automatically detects if it's running in a Jupyter notebook and uses `tqdm.notebook` for HTML-based progress bars.

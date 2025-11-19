@@ -14,51 +14,10 @@ description: 'Build once, cache intelligently, run anywhere.'
   alt="Hero Dark"
 />
 
-**HyperNodes** is a hierarchical, modular pipeline system designed for ML/AI workflows. It allows you to build complex workflows from simple, reusable functions and scale them from your laptop to a distributed cluster without changing a single line of code.
-
-## The 30-Second Hook
-
-Write standard Python functions. Decorate them. Run them.
-
-```python
-from hypernodes import node, Pipeline
-
-@node
-def load_data(path: str) -> str:
-    print(f"Loading {path}...")
-    return "raw data"
-
-@node
-def process(data: str) -> str:
-    return data.upper()
-
-# Create the pipeline (HyperNodes builds the graph automatically)
-pipe = Pipeline(nodes=[load_data, process])
-
-# Run it
-result = pipe.run(inputs={"path": "file.txt"})
-print(result)
-# Output: {'process': 'RAW DATA'}
-```
+HyperNodes is a **hierarchical, modular pipeline system** designed for ML/AI development. It solves the "re-run problem" by treating caching as a first-class citizen.
 
 ## Why HyperNodes?
 
-<CardGroup cols={2}>
-  <Card title="Test with One, Scale to Many" icon="flask">
-    Build and test your pipeline with a single input. When you're ready, run it over thousands of inputs. HyperNodes handles the batching and parallelism for you.
-    ```python
-    results = pipe.map(inputs={"path": ["file1.txt", ...]}, map_over="path")
-    ```
-  </Card>
-  <Card title="Run Anywhere" icon="server">
-    Swap the **Engine** to run on a cluster.
-    ```python
-    # Now it runs distributed!
-    pipe = Pipeline(nodes=[...], engine=DaftEngine())
-    ```
-  </Card>
-  <Card title="Intelligent Caching" icon="database">
-    Don't re-run what hasn't changed. HyperNodes automatically caches results based on function code, inputs, and upstream dependencies.
   </Card>
   <Card title="Hierarchical Modularity" icon="sitemap">
     Functions are nodes. Pipelines are nodes. Nest pipelines infinitely to compose complex systems from simple, testable blocks.
@@ -82,14 +41,14 @@ pip install "hypernodes[daft]"
 ## Documentation Guide
 
 <CardGroup cols={2}>
-  <Card title="Core Concepts" icon="book" href="/docs/essentials/nodes">
-    Learn about Nodes, Pipelines, and Execution.
+  <Card title="Core Concepts" icon="book" href="/docs/core/nodes">
+    Learn about Nodes, Pipelines, and Caching.
   </Card>
-  <Card title="Data Processing" icon="layer-group" href="/docs/data-processing/mapping">
-    Master Mapping, Nesting, and Caching.
+  <Card title="Scaling" icon="layer-group" href="/docs/scaling/map-operations">
+    Scale from one item to millions with `.map()`.
   </Card>
-  <Card title="Scaling" icon="rocket" href="/docs/scaling/engines">
-    Scale to big data with Daft and Stateful parameters.
+  <Card title="Engines" icon="rocket" href="/docs/engines/overview">
+    Run locally or distributed with Daft.
   </Card>
   <Card title="Observability" icon="chart-line" href="/docs/observability/visualization">
     Visualize and monitor your pipelines.

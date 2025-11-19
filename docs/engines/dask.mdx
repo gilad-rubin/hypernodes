@@ -1,0 +1,50 @@
+---
+title: Dask Engine
+description: 'Parallel execution with Dask.'
+---
+
+The **DaskEngine** uses [Dask](https://www.dask.org/) to parallelize map operations across multiple cores or a distributed cluster.
+
+## Why DaskEngine?
+
+1.  **Parallelism**: Distributes `.map()` operations across available CPUs.
+2.  **Smart Partitioning**: Automatically calculates optimal partitions based on workload type (CPU vs IO) and dataset size.
+3.  **Zero Overhead**: Falls back to standard sequential execution for non-map operations, avoiding scheduler overhead for simple tasks.
+
+## Configuration
+
+```python
+from hypernodes.engines import DaskEngine
+
+engine = DaskEngine(
+    scheduler="threads",      # "threads", "processes", or "synchronous"
+    num_workers=None,         # Defaults to CPU count
+    workload_type="mixed"     # "cpu", "io", or "mixed"
+)
+```
+
+### Schedulers
+
+- **threads** (Default): Best for I/O bound or mixed workloads. Low overhead.
+- **processes**: Best for CPU bound workloads (bypasses GIL). Higher overhead.
+- **synchronous**: Useful for debugging.
+
+### Workload Optimization
+
+The engine uses the `workload_type` hint to tune partitioning:
+
+- **io**: 4x oversubscription. Assumes tasks wait on network/disk.
+- **cpu**: 2x oversubscription. Matches core count closely.
+- **mixed**: 3x oversubscription. Balanced approach.
+
+## Usage
+
+```python
+pipeline = Pipeline(nodes=[...], engine=engine)
+
+# This runs in parallel!
+results = pipeline.map(
+    inputs={"x": range(100)},
+    map_over="x"
+)
+```

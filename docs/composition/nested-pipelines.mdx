@@ -1,0 +1,90 @@
+---
+title: Nested Pipelines
+description: 'Composing complex workflows.'
+---
+
+HyperNodes treats Pipelines as Nodes. This allows for **Hierarchical Modularity**, enabling you to build complex systems from simple, reusable components.
+
+## The `as_node()` Method
+
+To use a Pipeline inside another Pipeline, convert it into a node using `.as_node()`.
+
+```python
+# 1. Define a sub-pipeline
+inner = Pipeline(nodes=[clean, tokenize])
+
+# 2. Convert to node
+inner_node = inner.as_node(name="text_processor")
+
+# 3. Use in outer pipeline
+outer = Pipeline(nodes=[load_data, inner_node, save_data])
+```
+
+## Interface Mapping
+
+Inner pipelines often have different variable names than the outer pipeline. Use mapping to connect them without changing code.
+
+### Input Mapping
+
+Map outer variables to inner inputs.
+
+```python
+# Outer has "document", Inner needs "text"
+processor = inner.as_node(
+    input_mapping={"document": "text"}
+)
+```
+
+### Output Mapping
+
+Map inner outputs to outer variables.
+
+```python
+# Inner produces "cleaned", Outer expects "processed_doc"
+processor = inner.as_node(
+    output_mapping={"cleaned": "processed_doc"}
+)
+```
+
+## The Fractal Pattern (Internal Loops)
+
+A powerful feature is running a loop *inside* a node.
+
+Imagine `inner` processes a **single** document. You can configure it to process a **list** of documents when used in the outer pipeline.
+
+```python
+# Inner: Takes str -> returns str
+# Outer: Takes List[str] -> returns List[str]
+
+batch_processor = inner.as_node(
+    map_over="text"  # Tell inner pipeline to map over "text" input
+)
+```
+
+From the perspective of the outer pipeline, `batch_processor` is just a node that takes a list and returns a list. Internally, it's running a pipeline loop.
+
+## Configuration Inheritance
+
+Nested pipelines inherit the execution engine of their parent by default.
+
+However, you can override this. For example, you could run a specific sub-pipeline on a GPU-enabled `DaftEngine` while the rest runs on `SeqEngine`.
+
+```python
+# Inner pipeline runs on Daft
+inner = Pipeline(nodes=[...], engine=DaftEngine())
+
+# Outer pipeline runs on Sequential
+outer = Pipeline(nodes=[inner.as_node(), ...], engine=SeqEngine())
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Dual Nodes" icon="bolt" href="./dual-nodes">
+    Another form of composition.
+  </Card>
+  <Card title="Execution Engines" icon="server" href="../engines/overview">
+    Learn about engines.
+  </Card>
+</CardGroup>
+

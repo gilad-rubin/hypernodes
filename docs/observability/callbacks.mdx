@@ -1,0 +1,55 @@
+---
+title: Callbacks
+description: 'The Callback API.'
+---
+
+HyperNodes exposes a rich lifecycle API that allows you to hook into every stage of execution. This is the foundation for logging, tracing, and progress monitoring.
+
+## The `PipelineCallback` Class
+
+To create a custom callback, inherit from `PipelineCallback`.
+
+```python
+from hypernodes.callbacks import PipelineCallback, CallbackContext
+
+class MyCallback(PipelineCallback):
+    def on_pipeline_start(self, pipeline_id: str, inputs: dict, ctx: CallbackContext):
+        print(f"Pipeline {pipeline_id} started")
+
+    def on_node_start(self, node_id: str, inputs: dict, ctx: CallbackContext):
+        print(f"Node {node_id} started")
+        
+    def on_node_end(self, node_id: str, outputs: dict, duration: float, ctx: CallbackContext):
+        print(f"Node {node_id} finished in {duration}s")
+```
+
+## Lifecycle Events
+
+### Pipeline Events
+- `on_pipeline_start`
+- `on_pipeline_end`
+- `on_nested_pipeline_start`
+- `on_nested_pipeline_end`
+
+### Node Events
+- `on_node_start`
+- `on_node_end`
+- `on_node_cached`
+- `on_error`
+
+### Map Events
+- `on_map_start`
+- `on_map_end`
+- `on_map_item_start`
+- `on_map_item_end`
+
+## The `CallbackContext`
+
+The `ctx` object is passed to every hook. It serves as a shared state container for the duration of the execution.
+
+- `ctx.set(key, value)`: Store data.
+- `ctx.get(key)`: Retrieve data.
+- `ctx.depth`: Current nesting depth.
+- `ctx.current_pipeline_id`: ID of the currently executing pipeline.
+
+This allows you to maintain state across callbacks (e.g., tracking start times to compute duration).
