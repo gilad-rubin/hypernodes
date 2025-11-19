@@ -19,10 +19,6 @@ from hypernodes.integrations.daft.operations import (
 )
 from hypernodes.pipeline_node import PipelineNode
 
-# Apply nest_asyncio to allow nested event loops for async tests
-import nest_asyncio
-nest_asyncio.apply()
-
 # ===== Test Definitions (Module Level) =====
 
 @node(output_name="y")

@@ -181,9 +181,8 @@ class FunctionNodeOperation(DaftOperation):
         return_dtype = self._infer_daft_return_type(self.node.func) or DataType.python()
 
         def sync_wrapper(*args):
-            # We should run asyncio.run() if there is no loop, or use nest_asyncio if there is one
-            # But calling asyncio.get_event_loop() might return a loop that is not running or attached to main thread in a way we expect.
-
+            # We should run asyncio.run() if there is no loop, or run in a separate thread if there is one
+            
             try:
                 # Try to get the running loop
                 loop = asyncio.get_running_loop()
@@ -191,12 +190,17 @@ class FunctionNodeOperation(DaftOperation):
                 loop = None
 
             if loop and loop.is_running():
-                import nest_asyncio
-
-                nest_asyncio.apply(loop)
-                return loop.run_until_complete(func(*args))
-
-            return asyncio.run(func(*args))
+                # If loop is running, we can't use asyncio.run() directly or loop.run_until_complete()
+                # Instead, we run the async function in a separate thread which has its own loop
+                
+                def target():
+                    return asyncio.run(func(*args))
+                
+                # Run in a thread and wait for result
+                # We use a simple ThreadPoolExecutor to manage the thread
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(target)
+                    return future.result()
 
             return asyncio.run(func(*args))
 
