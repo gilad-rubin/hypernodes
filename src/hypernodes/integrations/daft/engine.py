@@ -16,7 +16,7 @@ try:
 except ImportError:
     DAFT_AVAILABLE = False
 
-from hypernodes.callbacks import CallbackContext
+from hypernodes.callbacks import CallbackContext, PipelineCallback
 from hypernodes.integrations.daft.codegen import CodeGenContext
 from hypernodes.integrations.daft.operations import (
     BatchNodeOperation,
@@ -29,9 +29,12 @@ from hypernodes.integrations.daft.operations import (
 )
 from hypernodes.map_planner import MapPlanner
 from hypernodes.protocols import Engine
+from hypernodes.orchestrator import ExecutionOrchestrator
+from hypernodes.node_execution import compute_node_signature
 
 if TYPE_CHECKING:
     from hypernodes.pipeline import Pipeline
+    from hypernodes.cache import Cache
 
 
 class DaftEngine(Engine):
@@ -41,7 +44,8 @@ class DaftEngine(Engine):
         self,
         use_batch_udf: bool = True,
         default_daft_config: Optional[Dict[str, Any]] = None,
-        cache: Optional[Any] = None,
+        cache: Optional["Cache"] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
     ):
         if not DAFT_AVAILABLE:
             raise ImportError(
@@ -51,6 +55,7 @@ class DaftEngine(Engine):
         self.use_batch_udf = use_batch_udf
         self.default_daft_config = default_daft_config or {}
         self.cache = cache
+        self.callbacks = callbacks or []
         self._is_map_context = False
         self._stateful_inputs = {}
 
@@ -63,41 +68,10 @@ class DaftEngine(Engine):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute pipeline with 1-row DataFrame."""
-        # Initialize context and dispatcher
-        ctx = _ctx or CallbackContext()
-        is_new_context = _ctx is None
-
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-
-        try:
-            callbacks = pipeline.callbacks or kwargs.get("callbacks") or []
-            # Ensure callbacks is a list
-            if not isinstance(callbacks, list):
-                callbacks = [callbacks]
-
-            from hypernodes.callbacks import CallbackDispatcher
-
-            dispatcher = CallbackDispatcher(callbacks)
-
-            # Set pipeline metadata for progress bar
-            execution_nodes = pipeline.graph.execution_order
-            from hypernodes.node_execution import _get_node_id
-
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(execution_nodes),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [_get_node_id(node) for node in execution_nodes],
-                },
-            )
-
-            # Notify pipeline start
-            import time
-
-            start_time = time.time()
-            dispatcher.notify_pipeline_start(pipeline.id, inputs, ctx)
+        # Use orchestrator for lifecycle management
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("DaftEngine")
+            orchestrator.notify_start(inputs)
 
             df = self._build_dataframe(pipeline, inputs)
 
@@ -105,21 +79,33 @@ class DaftEngine(Engine):
             context = ExecutionContext(self, self._stateful_inputs)
             node_signatures = {}
             nodes_to_cache = []
+            
+            # Local reference for speed
+            cache_instance = self.cache
 
             try:
                 available_columns = set(df.column_names)
                 for node in pipeline.graph.execution_order:
-                    # Compute signature
-                    signature = self._compute_node_signature(
-                        node, inputs, node_signatures
+                    # Compute signature using shared utility
+                    # DaftEngine needs to extract node-specific inputs from the global inputs dict
+                    # But here we have 'inputs' which is the global input dict.
+                    # compute_node_signature expects 'inputs' to be the dict of inputs for that node.
+                    
+                    # 1. Extract inputs for this node
+                    node_inputs = {k: inputs[k] for k in node.root_args if k in inputs}
+                    
+                    # 2. Compute signature
+                    signature = compute_node_signature(
+                        node, node_inputs, node_signatures
                     )
+                    
                     if signature:
                         node_signatures[node.output_name] = signature
 
                     # Check cache
                     cached_result = None
-                    if self.cache and node.cache and signature:
-                        cached_result = self.cache.get(signature)
+                    if cache_instance and node.cache and signature:
+                        cached_result = cache_instance.get(signature)
 
                     if cached_result is not None:
                         # Cache HIT: Join cached data
@@ -148,7 +134,7 @@ class DaftEngine(Engine):
                                 available_columns.add(out)
 
                         # Notify cache hit
-                        dispatcher.notify_node_cached(node.output_name, signature, ctx)
+                        orchestrator.dispatcher.notify_node_cached(node.output_name, signature, orchestrator.ctx)
                         continue
 
                     # Cache MISS: Execute
@@ -163,14 +149,14 @@ class DaftEngine(Engine):
                             available_columns.add(out)
 
                         # Mark for caching if enabled
-                        if self.cache and node.cache and signature:
+                        if cache_instance and node.cache and signature:
                             nodes_to_cache.append((node, signature))
 
                 # Attach subscriber if callbacks are present
                 subscriber_alias = None
-                if DAFT_AVAILABLE and callbacks:
+                if DAFT_AVAILABLE and self.callbacks:
                     daft_ctx = get_context()
-                    subscriber = HyperNodesDaftSubscriber(dispatcher, ctx, pipeline.id)
+                    subscriber = HyperNodesDaftSubscriber(orchestrator.dispatcher, orchestrator.ctx, pipeline.id)
                     subscriber_alias = f"hypernodes_{pipeline.id}"
                     daft_ctx.attach_subscriber(subscriber_alias, subscriber)
 
@@ -181,7 +167,7 @@ class DaftEngine(Engine):
                         get_context().detach_subscriber(subscriber_alias)
 
                 # Store results in cache
-                if nodes_to_cache:
+                if nodes_to_cache and cache_instance:
                     pydict = result_df.to_pydict()
                     for node, signature in nodes_to_cache:
                         # Extract result
@@ -191,27 +177,22 @@ class DaftEngine(Engine):
                                 for name in node.output_name
                                 if name in pydict
                             }
-                            self.cache.put(signature, result)
+                            cache_instance.put(signature, result)
                         elif node.output_name in pydict:
                             result = pydict[node.output_name][0]
-                            self.cache.put(signature, result)
+                            cache_instance.put(signature, result)
 
             finally:
                 context.shutdown()
 
             outputs = self._extract_single_row_outputs(result_df, pipeline)
 
-            duration = time.time() - start_time
-            dispatcher.notify_pipeline_end(pipeline.id, outputs, duration, ctx)
+            orchestrator.notify_end(outputs)
 
             if output_name:
                 names = [output_name] if isinstance(output_name, str) else output_name
                 return {k: outputs[k] for k in names}
             return outputs
-
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
 
     def map(
         self,
@@ -224,21 +205,8 @@ class DaftEngine(Engine):
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         """Execute pipeline over multiple inputs."""
-        ctx = _ctx or CallbackContext()
-        is_new_context = _ctx is None
-
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-
-        try:
-            callbacks = pipeline.callbacks or kwargs.get("callbacks") or []
-            # Ensure callbacks is a list
-            if not isinstance(callbacks, list):
-                callbacks = [callbacks]
-
-            from hypernodes.callbacks import CallbackDispatcher
-
-            dispatcher = CallbackDispatcher(callbacks)
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("DaftEngine")
 
             map_over_list = [map_over] if isinstance(map_over, str) else map_over
             planner = MapPlanner()
@@ -247,37 +215,24 @@ class DaftEngine(Engine):
             if not execution_plans:
                 return []
 
-            # Set pipeline metadata for progress bar
-            execution_nodes = pipeline.graph.execution_order
-            from hypernodes.node_execution import _get_node_id
-
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(execution_nodes),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [_get_node_id(node) for node in execution_nodes],
-                },
-            )
-
             self._is_map_context = True
-
+            
             # Notify map start
-            import time
-
-            start_time = time.time()
-            dispatcher.notify_map_start(len(execution_plans), ctx)
-
+            orchestrator.notify_map_start(len(execution_plans))
+            
             # Set map context variables
+            ctx = orchestrator.ctx
             ctx.set("_in_map", True)
             ctx.set("_map_total_items", len(execution_plans))
-            ctx.set("map_start_time", start_time)
+            ctx.set("map_start_time", getattr(orchestrator, "map_start_time", 0))
 
             try:
                 # PRE-EXECUTION CACHE CHECK (per-item)
                 cached_results = []  # List[Optional[Dict]]
                 uncached_indices = []  # List[int]
                 node_signatures_per_item = []  # List[Dict[str, str]]
+                
+                cache_instance = self.cache
 
                 for idx, plan in enumerate(execution_plans):
                     item_node_sigs = {}
@@ -285,14 +240,18 @@ class DaftEngine(Engine):
                     all_cached = True
 
                     for node in pipeline.graph.execution_order:
-                        # Compute signature for THIS item
-                        sig = self._compute_node_signature(node, plan, item_node_sigs)
+                        # Extract inputs for this node from the plan (which is the input for this item)
+                        node_inputs = {k: plan[k] for k in node.root_args if k in plan}
+                        
+                        # Compute signature using shared utility
+                        sig = compute_node_signature(node, node_inputs, item_node_sigs)
+                        
                         if sig:
                             item_node_sigs[node.output_name] = sig
 
                         # Check cache
-                        if self.cache and node.cache and sig:
-                            cached = self.cache.get(sig)
+                        if cache_instance and node.cache and sig:
+                            cached = cache_instance.get(sig)
                             if cached is not None:
                                 # Handle multi-output nodes
                                 if isinstance(node.output_name, (list, tuple)):
@@ -303,7 +262,7 @@ class DaftEngine(Engine):
                                     item_cached_results[node.output_name] = cached
 
                                 # Notify cache hit for this item
-                                dispatcher.notify_node_cached(
+                                orchestrator.dispatcher.notify_node_cached(
                                     node.output_name, sig, ctx
                                 )
                             else:
@@ -327,8 +286,7 @@ class DaftEngine(Engine):
                     final_results = [
                         cached_results[i] for i in range(len(execution_plans))
                     ]
-                    duration = time.time() - start_time
-                    dispatcher.notify_map_end(duration, ctx)
+                    orchestrator.notify_map_end()
 
                     # Filter by output_name if specified
                     if output_name:
@@ -367,10 +325,10 @@ class DaftEngine(Engine):
 
                     # Attach subscriber if callbacks are present
                     subscriber_alias = None
-                    if DAFT_AVAILABLE and callbacks:
+                    if DAFT_AVAILABLE and self.callbacks:
                         daft_ctx = get_context()
                         subscriber = HyperNodesDaftSubscriber(
-                            dispatcher, ctx, pipeline.id
+                            orchestrator.dispatcher, ctx, pipeline.id
                         )
                         subscriber_alias = f"hypernodes_map_{pipeline.id}"
                         daft_ctx.attach_subscriber(subscriber_alias, subscriber)
@@ -389,7 +347,7 @@ class DaftEngine(Engine):
                     # Cache newly computed results (per-item)
                     for uncached_idx, original_idx in enumerate(uncached_indices):
                         for node in pipeline.graph.execution_order:
-                            if node.cache and self.cache:
+                            if node.cache and cache_instance:
                                 sig = node_signatures_per_item[original_idx].get(
                                     node.output_name
                                 )
@@ -401,7 +359,7 @@ class DaftEngine(Engine):
                                             for name in node.output_name
                                             if name in uncached_results[uncached_idx]
                                         }
-                                        self.cache.put(sig, result_data)
+                                        cache_instance.put(sig, result_data)
                                     elif (
                                         node.output_name
                                         in uncached_results[uncached_idx]
@@ -409,7 +367,7 @@ class DaftEngine(Engine):
                                         result_data = uncached_results[uncached_idx][
                                             node.output_name
                                         ]
-                                        self.cache.put(sig, result_data)
+                                        cache_instance.put(sig, result_data)
 
                 finally:
                     context.shutdown()
@@ -426,9 +384,7 @@ class DaftEngine(Engine):
             finally:
                 self._is_map_context = False
                 ctx.set("_in_map", False)
-
-                duration = time.time() - start_time
-                dispatcher.notify_map_end(duration, ctx)
+                orchestrator.notify_map_end()
 
             # Filter by output_name if specified
             if output_name:
@@ -441,42 +397,6 @@ class DaftEngine(Engine):
                 ]
 
             return final_results
-
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
-
-    def _compute_node_signature(
-        self, node: Any, inputs: Dict[str, Any], node_signatures: Dict[str, str]
-    ) -> Optional[str]:
-        """Compute signature for a node."""
-        from hypernodes.cache import compute_signature, hash_inputs
-
-        # 1. Code Hash
-        if hasattr(node, "code_hash"):
-            code_hash = node.code_hash
-        else:
-            return None
-
-        # 2. Inputs Hash
-        # We need to extract inputs for this node from the global inputs
-        # Only if they are root inputs.
-        node_inputs = {}
-        for arg in node.root_args:
-            if arg in inputs:
-                node_inputs[arg] = inputs[arg]
-
-        inputs_hash = hash_inputs(node_inputs)
-
-        # 3. Dependencies Hash (Upstream signatures)
-        deps_signatures = []
-        for arg in node.root_args:
-            if arg in node_signatures:
-                deps_signatures.append(node_signatures[arg])
-
-        deps_hash = ":".join(sorted(deps_signatures))
-
-        return compute_signature(code_hash, inputs_hash, deps_hash)
 
     def generate_code(
         self, pipeline: "Pipeline", inputs: Optional[Dict[str, Any]] = None

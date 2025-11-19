@@ -6,6 +6,13 @@
 - prefer to search online and in documentations before acting
 - tests go to tests folder. scripts go to scripts folder
 - when you're finished with a task - you can write a summary, but just one is enough. no need for multiple summaries and markdowns.
+- update .ruler/2-code-structure.md if you've changed something in the code structure :)
+
+## Architecture (IMPORTANT)
+- **Pipeline = Pure Definition**: Pipeline class only defines DAG structure. NO cache or callbacks.
+- **Engine = Execution Runtime**: Engines own cache, callbacks, and execution strategy.
+- **Current API**: `engine = SequentialEngine(cache=..., callbacks=...); Pipeline(nodes=[...], engine=engine)`
+- See guides/API_MIGRATION.md for complete migration guide.
 
 ## Coding Principles
 - When designing and implementing features - always prefer using SOLID principles.

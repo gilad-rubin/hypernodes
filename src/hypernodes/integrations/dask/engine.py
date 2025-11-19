@@ -10,19 +10,20 @@ The engine automatically determines optimal parallelism based on:
 """
 
 import multiprocessing
-import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import dask
 import dask.bag as db
 import numpy as np
 
-from ...callbacks import CallbackContext
+from ...callbacks import CallbackContext, PipelineCallback
 from ...map_planner import MapPlanner
-from ...node_execution import _get_node_id, execute_single_node
+from ...node_execution import execute_single_node
+from ...orchestrator import ExecutionOrchestrator
 
 if TYPE_CHECKING:
     from ...pipeline import Pipeline
+    from ...cache import Cache
 
 
 class DaskEngine:
@@ -43,6 +44,8 @@ class DaskEngine:
         num_workers: Number of workers (defaults to CPU count)
         workload_type: "io", "cpu", or "mixed" - affects npartitions calculation
         npartitions: Manual override for number of partitions (None = auto)
+        cache: Cache instance for caching results
+        callbacks: List of callbacks for observability
 
     Example:
         >>> from hypernodes import Pipeline
@@ -74,6 +77,8 @@ class DaskEngine:
         num_workers: Optional[int] = None,
         workload_type: str = "mixed",
         npartitions: Optional[int] = None,
+        cache: Optional["Cache"] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
     ):
         """Initialize DaskEngine.
 
@@ -82,11 +87,15 @@ class DaskEngine:
             num_workers: Number of workers (None = CPU count)
             workload_type: "io" (I/O bound), "cpu" (CPU bound), or "mixed"
             npartitions: Manual npartitions override (None = auto-calculate)
+            cache: Cache instance for caching results
+            callbacks: List of callbacks for observability
         """
         self.scheduler = scheduler
         self.num_workers = num_workers or multiprocessing.cpu_count()
         self.workload_type = workload_type
         self.npartitions = npartitions
+        self.cache = cache
+        self.callbacks = callbacks or []
 
     def run(
         self,
@@ -111,31 +120,10 @@ class DaskEngine:
         Returns:
             Dictionary of output values
         """
-        ctx = _ctx or CallbackContext()
-        callbacks = pipeline.callbacks or []
-
-        # Push pipeline onto context hierarchy stack
-        is_new_context = _ctx is None
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-
-        try:
-            # Set pipeline metadata for callbacks
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(pipeline.graph.execution_order),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [
-                        _get_node_id(node) for node in pipeline.graph.execution_order
-                    ],
-                },
-            )
-
-            # Trigger pipeline start
-            start_time = time.time()
-            for callback in callbacks:
-                callback.on_pipeline_start(pipeline.id, inputs, ctx)
+        # Use orchestrator for lifecycle management
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("DaskEngine")
+            orchestrator.notify_start(inputs)
 
             # Execute nodes sequentially (same as SequentialEngine)
             available_values = dict(inputs)
@@ -150,7 +138,8 @@ class DaskEngine:
 
                 # Execute the node
                 result, signature = execute_single_node(
-                    node, node_inputs, pipeline, callbacks, ctx, node_signatures
+                    node, node_inputs, pipeline, self.cache, self.callbacks, 
+                    orchestrator.ctx, node_signatures
                 )
 
                 # Store outputs
@@ -158,10 +147,7 @@ class DaskEngine:
                     node, result, outputs, available_values, node_signatures, signature
                 )
 
-            # Trigger pipeline end
-            duration = time.time() - start_time
-            for callback in callbacks:
-                callback.on_pipeline_end(pipeline.id, outputs, duration, ctx)
+            orchestrator.notify_end(outputs)
 
             # Filter outputs if requested
             if output_name:
@@ -169,9 +155,6 @@ class DaskEngine:
                 return {k: outputs[k] for k in names}
 
             return outputs
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
 
     def map(
         self,
@@ -200,15 +183,10 @@ class DaskEngine:
         Returns:
             List of output dictionaries, one per item
         """
-        ctx = _ctx or CallbackContext()
-        callbacks = pipeline.callbacks or []
+        # Use orchestrator for lifecycle management
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("DaskEngine")
 
-        # Push pipeline onto context hierarchy stack
-        is_new_context = _ctx is None
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-
-        try:
             # Normalize map_over to list
             map_over_list = [map_over] if isinstance(map_over, str) else map_over
 
@@ -222,24 +200,11 @@ class DaskEngine:
             else:
                 nparts = self.npartitions
 
-            # Set pipeline metadata
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(pipeline.graph.execution_order),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [
-                        _get_node_id(node) for node in pipeline.graph.execution_order
-                    ],
-                },
-            )
-
-            # Trigger map start
-            map_start_time = time.time()
-            for callback in callbacks:
-                callback.on_map_start(len(items), ctx)
+            # Notify map start
+            orchestrator.notify_map_start(len(items))
 
             # Set map context
+            ctx = orchestrator.ctx
             ctx.set("_in_map", True)
             ctx.set("_map_total_items", len(items))
 
@@ -258,15 +223,9 @@ class DaskEngine:
             # Clear map context
             ctx.set("_in_map", False)
 
-            # Trigger map end
-            total_duration = time.time() - map_start_time
-            for callback in callbacks:
-                callback.on_map_end(total_duration, ctx)
+            orchestrator.notify_map_end()
 
             return list(results)
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
 
     def _calculate_npartitions(self, num_items: int) -> int:
         """Calculate optimal number of partitions using heuristic.

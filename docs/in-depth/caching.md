@@ -5,7 +5,7 @@ HyperNodes treats caching as a first-class citizen, not an afterthought. The cac
 ## Quick Start
 
 ```python
-from hypernodes import Pipeline, node, DiskCache
+from hypernodes import Pipeline, node, SequentialEngine, DiskCache
 
 @node(output_name="cleaned")
 def clean(text: str) -> str:
@@ -15,11 +15,9 @@ def clean(text: str) -> str:
 def tokenize(cleaned: str) -> list:
     return cleaned.split()
 
-# Enable caching
-pipeline = Pipeline(
-    nodes=[clean, tokenize],
-    cache=DiskCache(path=".cache")
-)
+# Enable caching at engine level
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean, tokenize], engine=engine)
 
 # First run: executes all nodes
 result1 = pipeline(text="  Hello World  ")
@@ -73,10 +71,8 @@ If you change `make_a`'s code, `make_b`'s signature changes too (via `deps_hash`
 When you map over multiple items, **each item is cached independently**:
 
 ```python
-pipeline = Pipeline(
-    nodes=[clean, tokenize],
-    cache=DiskCache(path=".cache")
-)
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean, tokenize], engine=engine)
 
 # First run: process 100 items
 results1 = pipeline.map(
@@ -106,7 +102,8 @@ The cache automatically invalidates when anything changes:
 def process(text: str) -> str:
     return text.upper()  # Version 1
 
-pipeline = Pipeline(nodes=[process], cache=DiskCache(path=".cache"))
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[process], engine=engine)
 
 # First run
 result1 = pipeline(text="hello")  # EXECUTE
@@ -120,7 +117,8 @@ result2 = pipeline(text="hello")  # CACHED
 def process(text: str) -> str:
     return text.upper() + "!"  # Version 2 (added !)
 
-pipeline = Pipeline(nodes=[process], cache=DiskCache(path=".cache"))
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[process], engine=engine)
 
 # Run again - cache invalidated automatically!
 result3 = pipeline(text="hello")  # EXECUTE (code changed)
@@ -146,7 +144,8 @@ def make_a(x: int) -> int:
 def make_b(a: int) -> int:
     return a * 2
 
-pipeline = Pipeline(nodes=[make_a, make_b], cache=DiskCache(path=".cache"))
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[make_a, make_b], engine=engine)
 
 # First run
 result1 = pipeline(x=5)  # EXECUTE both
@@ -159,7 +158,8 @@ result2 = pipeline(x=5)  # CACHED both
 def make_a(x: int) -> int:
     return x + 10  # Changed!
 
-pipeline = Pipeline(nodes=[make_a, make_b], cache=DiskCache(path=".cache"))
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[make_a, make_b], engine=engine)
 
 # Run again
 result3 = pipeline(x=5)
@@ -186,10 +186,8 @@ def fetch_data() -> dict:
     import requests
     return requests.get("https://api.example.com/data").json()
 
-pipeline = Pipeline(
-    nodes=[get_timestamp, fetch_data],
-    cache=DiskCache(path=".cache")
-)
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[get_timestamp, fetch_data], engine=engine)
 
 # Every run: timestamp re-executes, data cached
 result = pipeline(inputs={})
@@ -247,9 +245,10 @@ def predict(model: CustomModel, input: str) -> float:
 
 ```python
 # Enable caching during development
+engine = SequentialEngine(cache=DiskCache(path=".dev_cache"))
 pipeline = Pipeline(
     nodes=[expensive_preprocessing, train_model, evaluate],
-    cache=DiskCache(path=".dev_cache")
+    engine=engine
 )
 
 # Iterate on evaluate() without re-running preprocessing
@@ -260,9 +259,10 @@ pipeline = Pipeline(
 
 ```python
 # Process new data without reprocessing old data
+engine = SequentialEngine(cache=DiskCache(path="/prod/cache"))
 pipeline = Pipeline(
     nodes=[clean, extract_features, classify],
-    cache=DiskCache(path="/prod/cache")
+    engine=engine
 )
 
 # Day 1: 1000 items
@@ -293,15 +293,15 @@ def train(data: list, random_seed: int):
 Check if a result was cached:
 
 ```python
-from hypernodes import Pipeline, DiskCache, HypernodesEngine
+from hypernodes import Pipeline, SequentialEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Use ProgressCallback to see cache hits
-pipeline = Pipeline(
-    nodes=[...],
+engine = SequentialEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
+pipeline = Pipeline(nodes=[...], engine=engine)
 
 # Progress bar will show: "✓" for cache hit, "..." for execution
 result = pipeline(inputs={})

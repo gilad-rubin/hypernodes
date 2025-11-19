@@ -3,8 +3,7 @@
 import tempfile
 import time
 
-from hypernodes import DiskCache, Pipeline, node
-
+from hypernodes import DiskCache, Pipeline, SequentialEngine, node
 
 def test_basic_caching():
     """Test that caching prevents re-execution of nodes."""
@@ -18,7 +17,8 @@ def test_basic_caching():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[slow_function], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[slow_function], engine=engine)
         
         # First run - should execute
         result1 = pipeline.run(inputs={"x": 5})
@@ -43,7 +43,8 @@ def test_cache_invalidation_on_input_change():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[process], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[process], engine=engine)
         
         # First input
         result1 = pipeline.run(inputs={"x": 5})
@@ -78,7 +79,8 @@ def test_selective_caching():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[cached_function, uncached_function], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[cached_function, uncached_function], engine=engine)
         
         # First run
         pipeline.run(inputs={"x": 5})
@@ -110,11 +112,12 @@ def test_nested_pipeline_cache_inheritance():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
+        engine = SequentialEngine(cache=cache)
         
         # Outer pipeline with cache - inner should inherit
         outer = Pipeline(
             nodes=[inner.as_node(), add_one],
-            cache=cache
+            engine=engine
         )
         
         # First run - inner node executes
@@ -141,7 +144,8 @@ def test_cache_with_map():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[expensive_operation], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[expensive_operation], engine=engine)
         
         # First map - all items execute
         results1 = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
@@ -173,13 +177,14 @@ def test_code_change_invalidates_cache():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
+        engine = SequentialEngine(cache=cache)
         
         # First version: add 1
         @node(output_name="result")
         def add_x(x: int) -> int:
             return x + 1
         
-        pipeline = Pipeline(nodes=[add_x], cache=cache)
+        pipeline = Pipeline(nodes=[add_x], engine=engine)
         result1 = pipeline.run(inputs={"x": 5})
         assert result1 == {"result": 6}
         
@@ -192,7 +197,7 @@ def test_code_change_invalidates_cache():
         def add_x_v2(x: int) -> int:
             return x + 2  # Different logic
         
-        pipeline2 = Pipeline(nodes=[add_x_v2], cache=cache)
+        pipeline2 = Pipeline(nodes=[add_x_v2], engine=engine)
         
         # Should execute with new code
         result3 = pipeline2.run(inputs={"x": 5})
@@ -232,7 +237,8 @@ def test_diamond_pattern_with_cache():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[double, triple, add], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[double, triple, add], engine=engine)
         
         # First run - all execute
         result1 = pipeline.run(inputs={"x": 5})
@@ -284,7 +290,8 @@ def test_caching_with_dataclass_instances():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[encode_text], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[encode_text], engine=engine)
         
         # First run with encoder instance
         config1 = EncoderConfig(dim=4, model_name="test-v1")
@@ -349,7 +356,8 @@ def test_caching_with_custom_cache_key():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[generate_text], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[generate_text], engine=engine)
         
         # First run
         model1 = ModelWithCustomKey("gpt-4", 0.7, "secret-key-123")
@@ -399,7 +407,8 @@ def test_private_attributes_excluded_from_cache():
     
     with tempfile.TemporaryDirectory() as tmpdir:
         cache = DiskCache(path=tmpdir)
-        pipeline = Pipeline(nodes=[process_value], cache=cache)
+        engine = SequentialEngine(cache=cache)
+        pipeline = Pipeline(nodes=[process_value], engine=engine)
         
         # First run
         proc1 = ProcessorWithState(config="v1")

@@ -1,6 +1,6 @@
 # Callbacks
 
-Implement custom behavior by subclassing `PipelineCallback` and wiring into `Pipeline(callbacks=[...])`.
+Implement custom behavior by subclassing `PipelineCallback` and wiring into the engine via `engine=SequentialEngine(callbacks=[...])`.
 
 Lifecycle hooks include:
 - `on_pipeline_start/end`

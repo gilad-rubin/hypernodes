@@ -1,6 +1,6 @@
 """Callback system for pipeline execution lifecycle events."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class CallbackContext:
@@ -252,6 +252,14 @@ class PipelineCallback:
             ctx: Callback context
         """
         pass
+
+    @property
+    def supported_engines(self) -> Optional[List[str]]:
+        """List of supported engine class names (e.g. ['SequentialEngine', 'DaftEngine']).
+        
+        If None or empty, compatible with all engines (default).
+        """
+        return None
 
 
 class CallbackDispatcher:

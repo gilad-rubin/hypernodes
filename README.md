@@ -90,13 +90,11 @@ results = pipeline.map(
 ### With Caching
 
 ```python
-from hypernodes import Pipeline, DiskCache
+from hypernodes import Pipeline, SequentialEngine, DiskCache
 
-# Enable caching
-pipeline = Pipeline(
-    nodes=[clean_text, count_words],
-    cache=DiskCache(path=".cache")
-)
+# Enable caching at engine level
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
 
 # First run: executes all nodes
 result1 = pipeline.run(inputs={"passage": "Hello World"})
@@ -157,10 +155,8 @@ from hypernodes.engines import DaftEngine
 
 # Distributed execution using Daft
 # Requires: pip install getdaft
-pipeline = Pipeline(
-    nodes=[clean_text, count_words],
-    engine=DaftEngine()
-)
+engine = DaftEngine(use_batch_udf=True)
+pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
 
 # Auto-batches and executes in parallel
 # Each item is cached independently
@@ -272,17 +268,17 @@ Engines determine **how** (execution strategy) and **where** (infrastructure) no
 For high-performance distributed execution using [Daft](https://www.getdaft.io/):
 
 ```python
-from hypernodes import Pipeline
+from hypernodes import Pipeline, DiskCache, SequentialEngine
 from hypernodes.engines import DaftEngine
 
 # Requires: pip install getdaft
 # Auto-optimizes batch sizes and parallelism
-engine = DaftEngine(use_batch_udf=True)
-
-pipeline = Pipeline(
-    nodes=[...], 
-    engine=engine
+engine = DaftEngine(
+    use_batch_udf=True,
+    cache=DiskCache(path=".cache")
 )
+
+pipeline = Pipeline(nodes=[...], engine=engine)
 
 # All operations are lazy (builds computation graph)
 result = pipeline.run(inputs={"x": 5})
@@ -307,10 +303,18 @@ results = pipeline.map(
 The default engine for simple, predictable execution:
 
 ```python
-from hypernodes import Pipeline, SequentialEngine
+from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes.telemetry import ProgressCallback
 
-# Sequential execution (default - no need to specify)
-pipeline = Pipeline(nodes=[...])
+# Configure engine with cache and callbacks
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
+pipeline = Pipeline(nodes=[...], engine=engine)
+
+# Or use default (no cache, no callbacks)
+pipeline = Pipeline(nodes=[...])  # Uses SequentialEngine() by default
 ```
 
 **Features:**
@@ -350,13 +354,12 @@ results = pipeline.map(
 ### Progress Tracking
 
 ```python
-from hypernodes import Pipeline
+from hypernodes import Pipeline, SequentialEngine
 from hypernodes.telemetry import ProgressCallback
 
-pipeline = Pipeline(
-    nodes=[...],
-    callbacks=[ProgressCallback()],
-)
+# Configure engine with callbacks
+engine = SequentialEngine(callbacks=[ProgressCallback()])
+pipeline = Pipeline(nodes=[...], engine=engine)
 
 result = pipeline.run(inputs={"data": "..."})
 ```
@@ -373,13 +376,12 @@ Processing Pipeline ━━━━━━━━━━━━━━━━━━━━
 ### Distributed Tracing
 
 ```python
-from hypernodes import Pipeline
+from hypernodes import Pipeline, SequentialEngine
 from hypernodes.telemetry import TelemetryCallback
 
-pipeline = Pipeline(
-    nodes=[...],
-    callbacks=[TelemetryCallback()],
-)
+# Configure engine with telemetry callbacks
+engine = SequentialEngine(callbacks=[TelemetryCallback()])
+pipeline = Pipeline(nodes=[...], engine=engine)
 
 # Traces are automatically sent to OpenTelemetry-compatible systems
 # (Jaeger, Zipkin, Logfire, etc.)
@@ -432,28 +434,29 @@ Nested pipelines inherit configuration from parents but can override:
 
 ```python
 # Parent defines defaults
-from hypernodes import Pipeline, DiskCache
+from hypernodes import Pipeline, DiskCache, SequentialEngine
 from hypernodes.engines import DaskEngine
 from hypernodes.telemetry import ProgressCallback
 
+# Parent pipeline with DaskEngine configuration
+parent_engine = DaskEngine(
+    scheduler="threads",
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
 parent = Pipeline(
     nodes=[preprocess, child_pipeline, postprocess],
-    engine=DaskEngine(scheduler="threads"),
-    cache=DiskCache(path=".cache"),
-    callbacks=[ProgressCallback()],
+    engine=parent_engine
 )
 
-# Child inherits all configuration
-child_pipeline = Pipeline(
-    nodes=[step1, step2]
-    # Inherits: DaskEngine, DiskCache, ProgressCallback
-)
+# Child inherits parent's engine configuration through nesting
+child_pipeline = Pipeline(nodes=[step1, step2])
 
-# Grandchild overrides engine only (e.g., to process-based parallelism)
+# Grandchild can override with its own engine for specialized tasks
+grandchild_engine = DaskEngine(scheduler="processes")  # CPU-bound tasks
 grandchild_pipeline = Pipeline(
     nodes=[cpu_intensive_step],
-    engine=DaskEngine(scheduler="processes"),  # Override for CPU-bound tasks
-    # Inherits: DiskCache, ProgressCallback
+    engine=grandchild_engine
 )
 ```
 
@@ -477,8 +480,10 @@ def test_single_node():
     assert result["result"] == "HELLO"
 
 def test_with_cache():
-    cache = DiskCache(path="/tmp/test_cache")
-    pipeline = Pipeline(nodes=[my_function], cache=cache)
+    from hypernodes import SequentialEngine, DiskCache
+    
+    engine = SequentialEngine(cache=DiskCache(path="/tmp/test_cache"))
+    pipeline = Pipeline(nodes=[my_function], engine=engine)
     
     # First run
     result1 = pipeline.run(inputs={"input": "hello"})
@@ -492,6 +497,30 @@ def test_with_cache():
 ---
 
 ## 🎯 Design Principles
+
+### Engine-Centric Execution
+
+Execution configuration (cache, callbacks, execution strategy) lives at the **engine level**, not the pipeline:
+
+```python
+from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes.telemetry import ProgressCallback
+
+# Configure execution runtime
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
+
+# Pipeline focuses on DAG definition
+pipeline = Pipeline(nodes=[node1, node2], engine=engine)
+```
+
+**Benefits:**
+- **Separation of Concerns**: Pipeline defines "what", Engine defines "how"
+- **Reusability**: Same pipeline can run with different engines/configurations
+- **Extensibility**: New engines reuse shared orchestration logic
+- **Type Safety**: Callbacks can declare engine compatibility
 
 1. **Simple by default, powerful when needed** - Start with basic pipelines, scale to complex workflows
 2. **Cache-first** - Treat caching as core functionality, not an afterthought

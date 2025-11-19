@@ -17,7 +17,7 @@ HyperNodes is a hierarchical, modular pipeline system with intelligent caching f
 from hypernodes import (
     node,                    # Decorator to create nodes
     Pipeline,                # Main pipeline class
-    HypernodesEngine,        # Default execution engine
+    SequentialEngine,        # Default execution engine
     DiskCache,               # Persistent caching
 )
 from hypernodes.telemetry import (
@@ -26,13 +26,14 @@ from hypernodes.telemetry import (
 )
 from hypernodes.engines import (
     DaftEngine,              # Distributed DataFrame execution (optional)
+    DaskEngine,              # Parallel map operations (optional)
 )
 ```
 
 ## Core Concepts in 30 Seconds
 
 ```python
-from hypernodes import Pipeline, node, DiskCache, HypernodesEngine
+from hypernodes import Pipeline, node, SequentialEngine, DiskCache
 
 # 1. Functions → Nodes (dependencies via parameter names)
 @node(output_name="cleaned")
@@ -43,12 +44,11 @@ def clean(text: str) -> str:
 def tokenize(cleaned: str) -> list:  # Depends on clean()
     return cleaned.split()
 
-# 2. Nodes → Pipeline (automatic DAG resolution)
-pipeline = Pipeline(
-    nodes=[clean, tokenize],
-    cache=DiskCache(path=".cache"),
-    engine=HypernodesEngine(node_executor="async")  # I/O-optimized
+# 2. Nodes → Pipeline with Engine (automatic DAG resolution)
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache")
 )
+pipeline = Pipeline(nodes=[clean, tokenize], engine=engine)
 
 # 3. Single execution
 result = pipeline(text="  Hello World  ")

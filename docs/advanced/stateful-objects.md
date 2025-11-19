@@ -446,7 +446,7 @@ assert obj.__class__.__hypernode_stateful__ is True
 ### Verify Caching Behavior
 
 ```python
-from hypernodes import DiskCache
+from hypernodes import SequentialEngine, DiskCache
 
 @stateful
 class Model:
@@ -466,8 +466,8 @@ def process(x: int, model: Model) -> int:
     return x * 2
 
 model = Model("test.pkl")
-cache = DiskCache(path=".cache")
-pipeline = Pipeline(nodes=[process], cache=cache)
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[process], engine=engine)
 
 # First run
 result1 = pipeline.run(inputs={"x": 5, "model": model})

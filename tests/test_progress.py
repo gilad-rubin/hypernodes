@@ -12,7 +12,7 @@ Tests cover:
 
 import time
 import tempfile
-from hypernodes import node, Pipeline, DiskCache
+from hypernodes import node, Pipeline, DiskCache, SequentialEngine
 from hypernodes.telemetry import ProgressCallback
 
 
@@ -31,9 +31,10 @@ def test_progress_basic_pipeline():
     
     # Create pipeline with progress callback
     progress = ProgressCallback(enable=False)  # Disable for tests
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[double, add_one], 
-        callbacks=[progress],
+        engine=engine,
         name="double_and_add"
     )
     
@@ -56,9 +57,10 @@ def test_progress_with_map():
         return doubled + 1
     
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[double, add_one],
-        callbacks=[progress],
+        engine=engine,
         name="map_test"
     )
     
@@ -87,10 +89,10 @@ def test_progress_with_cache():
         
         cache = DiskCache(path=tmpdir)
         progress = ProgressCallback(enable=False)
+        engine = SequentialEngine(cache=cache, callbacks=[progress])
         pipeline = Pipeline(
             nodes=[double, add_one],
-            cache=cache,
-            callbacks=[progress],
+            engine=engine,
             name="cached_pipeline"
         )
         
@@ -118,10 +120,10 @@ def test_progress_with_map_and_cache():
         
         cache = DiskCache(path=tmpdir)
         progress = ProgressCallback(enable=False)
+        engine = SequentialEngine(cache=cache, callbacks=[progress])
         pipeline = Pipeline(
             nodes=[double],
-            cache=cache,
-            callbacks=[progress],
+            engine=engine,
             name="map_cache_test"
         )
         
@@ -154,7 +156,8 @@ def test_progress_disabled():
         return x + 1
     
     progress = ProgressCallback(enable=False)
-    pipeline = Pipeline(nodes=[simple], callbacks=[progress])
+    engine = SequentialEngine(callbacks=[progress])
+    pipeline = Pipeline(nodes=[simple], engine=engine)
     
     result = pipeline.run(inputs={"x": 5})
     
@@ -179,9 +182,10 @@ def test_progress_with_nested_pipelines():
         return doubled + 1
     
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     outer_pipeline = Pipeline(
         nodes=[inner_pipeline.as_node(), add_one],
-        callbacks=[progress],
+        engine=engine,
         name="outer"
     )
     
@@ -209,9 +213,10 @@ def test_progress_with_diamond_pattern():
         return doubled + tripled
     
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[double, triple, add],
-        callbacks=[progress],
+        engine=engine,
         name="diamond"
     )
     
@@ -229,9 +234,10 @@ def test_progress_with_multiple_map_params():
         return x + y
     
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[add],
-        callbacks=[progress],
+        engine=engine,
         name="multi_param_map"
     )
     
@@ -257,9 +263,10 @@ def test_progress_with_fixed_and_varying_params():
         return x * factor
     
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[multiply],
-        callbacks=[progress],
+        engine=engine,
         name="fixed_varying"
     )
     
@@ -291,9 +298,10 @@ def test_progress_enabled_visual():
     # Note: enable=False for automated tests
     # Change to enable=True and run manually to see progress bars
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[double, add_one],
-        callbacks=[progress],
+        engine=engine,
         name="visual_test"
     )
     
@@ -312,9 +320,10 @@ def test_progress_map_visual():
     # Note: enable=False for automated tests
     # Change to enable=True and run manually to see progress bars
     progress = ProgressCallback(enable=False)
+    engine = SequentialEngine(callbacks=[progress])
     pipeline = Pipeline(
         nodes=[square],
-        callbacks=[progress],
+        engine=engine,
         name="map_visual_test"
     )
     

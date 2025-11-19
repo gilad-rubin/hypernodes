@@ -1,27 +1,35 @@
 """Sequential execution engine - minimal implementation.
 
 This engine executes nodes one by one in topological order.
-For nested pipelines, it inherits the parent's cache, callbacks, and engine.
+No parallelism, no async - just simple, predictable execution.
 """
 
-import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
-from .callbacks import CallbackContext, CallbackDispatcher
+from .callbacks import CallbackContext, PipelineCallback
 from .map_planner import MapPlanner
-from .node_execution import _get_node_id, execute_single_node
+from .node_execution import execute_single_node
+from .orchestrator import ExecutionOrchestrator
 from .protocols import Engine
 
 if TYPE_CHECKING:
     from .pipeline import Pipeline
+    from .cache import Cache
 
 
 class SequentialEngine:
     """Sequential execution engine.
 
     Executes nodes one by one in topological order.
-    No parallelism, no async - just simple, predictable execution.
     """
+
+    def __init__(
+        self,
+        cache: Optional["Cache"] = None,
+        callbacks: Optional[List[PipelineCallback]] = None,
+    ):
+        self.cache = cache
+        self.callbacks = callbacks or []
 
     def run(
         self,
@@ -32,41 +40,24 @@ class SequentialEngine:
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute pipeline sequentially."""
-        ctx = _ctx or CallbackContext()
-        is_new_context = _ctx is None
-        
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-            
-        try:
-            callbacks = pipeline.callbacks or []
-            dispatcher = CallbackDispatcher(callbacks)
+        # Use orchestrator for lifecycle management
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("SequentialEngine")
+            orchestrator.notify_start(inputs)
             
             # Plan
             execution_nodes = self._determine_execution_nodes(pipeline, output_name)
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(execution_nodes),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [_get_node_id(node) for node in execution_nodes],
-                },
-            )
             
             # Execute
-            start_time = time.time()
-            dispatcher.notify_pipeline_start(pipeline.id, inputs, ctx)
+            outputs = self._execute_nodes(
+                execution_nodes, 
+                inputs, 
+                pipeline, 
+                orchestrator.ctx
+            )
             
-            outputs = self._execute_nodes(execution_nodes, inputs, pipeline, callbacks, ctx)
-            
-            duration = time.time() - start_time
-            dispatcher.notify_pipeline_end(pipeline.id, outputs, duration, ctx)
-
+            orchestrator.notify_end(outputs)
             return self._filter_outputs(outputs, output_name)
-            
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
 
     def map(
         self,
@@ -79,43 +70,21 @@ class SequentialEngine:
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         """Execute pipeline for each item sequentially."""
-        ctx = _ctx or CallbackContext()
-        is_new_context = _ctx is None
-        
-        if is_new_context:
-            ctx.push_pipeline(pipeline.id)
-            
-        try:
-            callbacks = pipeline.callbacks or []
-            dispatcher = CallbackDispatcher(callbacks)
+        with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
+            orchestrator.validate_callbacks("SequentialEngine")
             
             # Plan
             items, stateful_cache = self._plan_map(inputs, map_over, map_mode, pipeline)
-            ctx.set_pipeline_metadata(
-                pipeline.id,
-                {
-                    "total_nodes": len(pipeline.graph.execution_order),
-                    "pipeline_name": pipeline.name or pipeline.id,
-                    "node_ids": [_get_node_id(node) for node in pipeline.graph.execution_order],
-                },
-            )
             
             # Execute
-            start_time = time.time()
-            dispatcher.notify_map_start(len(items), ctx)
+            orchestrator.notify_map_start(len(items))
             
             results = self._execute_map_loop(
-                items, stateful_cache, pipeline, output_name, ctx, dispatcher
+                items, stateful_cache, pipeline, output_name, orchestrator
             )
             
-            duration = time.time() - start_time
-            dispatcher.notify_map_end(duration, ctx)
-
+            orchestrator.notify_map_end()
             return results
-            
-        finally:
-            if is_new_context:
-                ctx.pop_pipeline()
 
     def _determine_execution_nodes(
         self, pipeline: "Pipeline", output_name: Optional[Union[str, List[str]]]
@@ -130,7 +99,6 @@ class SequentialEngine:
         nodes: List[Any],
         inputs: Dict[str, Any],
         pipeline: "Pipeline",
-        callbacks: List[Any],
         ctx: CallbackContext,
     ) -> Dict[str, Any]:
         available_values = dict(inputs)
@@ -140,7 +108,13 @@ class SequentialEngine:
         for node in nodes:
             node_inputs = {param: available_values[param] for param in node.root_args}
             result, signature = execute_single_node(
-                node, node_inputs, pipeline, callbacks, ctx, node_signatures
+                node, 
+                node_inputs, 
+                pipeline,  # Still needed for now, but cache/callbacks are explicit
+                self.cache,
+                self.callbacks,
+                ctx, 
+                node_signatures
             )
             self._store_node_result(node, result, signature, available_values, outputs, node_signatures)
             
@@ -204,27 +178,27 @@ class SequentialEngine:
         stateful_cache: Dict[str, Any],
         pipeline: "Pipeline",
         output_name: Optional[Union[str, List[str]]],
-        ctx: CallbackContext,
-        dispatcher: CallbackDispatcher,
+        orchestrator: ExecutionOrchestrator,
     ) -> List[Dict[str, Any]]:
+        ctx = orchestrator.ctx
         ctx.set("_in_map", True)
         ctx.set("_map_total_items", len(items))
         
         results = []
         for idx, item_inputs in enumerate(items):
-            item_start_time = time.time()
+            item_start_time = __import__("time").time()
             ctx.set("_map_item_index", idx)
             ctx.set("_map_item_start_time", item_start_time)
             
-            dispatcher.notify_map_item_start(idx, ctx)
+            orchestrator.notify_map_item_start(idx)
             
             merged_inputs = {**item_inputs, **stateful_cache}
             # Recursively call run, passing the existing context
             result = self.run(pipeline, merged_inputs, output_name, _ctx=ctx)
             results.append(result)
             
-            duration = time.time() - item_start_time
-            dispatcher.notify_map_item_end(idx, duration, ctx)
+            duration = __import__("time").time() - item_start_time
+            orchestrator.notify_map_item_end(idx, duration)
             
         ctx.set("_in_map", False)
         return results

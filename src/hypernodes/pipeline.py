@@ -16,17 +16,11 @@ class Pipeline:
         self,
         nodes: List[HyperNode],
         engine: Optional[Engine] = None,
-        cache: Optional[Cache] = None,
-        callbacks: Optional[List[PipelineCallback]] = None,
         name: Optional[str] = None,
     ):
         # Set engine with default fallback to SequentialEngine
         self.engine = engine if engine is not None else SequentialEngine()
-
-        self.cache = cache
-        self.callbacks = callbacks if callbacks is not None else []
         self.name = name
-
         self.nodes = nodes
 
         graph_builder = SimpleGraphBuilder()
@@ -128,11 +122,22 @@ class Pipeline:
         self,
         inputs: Dict[str, Any],
         output_name: Union[str, List[str], None] = None,
+        engine: Optional[Engine] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
+        """Execute the pipeline.
+        
+        Args:
+            inputs: Input parameters
+            output_name: Optional output(s) to compute
+            engine: Optional engine override for this execution
+            **kwargs: Additional args passed to engine
+        """
         self._validate_output_names(output_name)
         self._validate_inputs(inputs, output_name=output_name)
-        return self.engine.run(self, inputs, output_name=output_name, **kwargs)
+        
+        exec_engine = engine if engine is not None else self.engine
+        return exec_engine.run(self, inputs, output_name=output_name, **kwargs)
 
     def map(
         self,
@@ -140,15 +145,27 @@ class Pipeline:
         map_over: Union[str, List[str]],
         map_mode: Literal["zip", "product"] = "zip",
         output_name: Union[str, List[str], None] = None,
+        engine: Optional[Engine] = None,
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
+        """Execute the pipeline over multiple items.
+        
+        Args:
+            inputs: Input parameters
+            map_over: Parameter(s) to map over
+            map_mode: "zip" or "product"
+            output_name: Optional output(s) to compute
+            engine: Optional engine override for this execution
+            **kwargs: Additional args passed to engine
+        """
         self._validate_output_names(output_name)
         self._validate_inputs(inputs, output_name=output_name)
 
         if isinstance(map_over, str):
             map_over = [map_over]
 
-        return self.engine.map(self, inputs, map_over, map_mode, output_name, **kwargs)
+        exec_engine = engine if engine is not None else self.engine
+        return exec_engine.map(self, inputs, map_over, map_mode, output_name, **kwargs)
 
     def as_node(
         self,
@@ -256,30 +273,6 @@ class Pipeline:
             Self for method chaining
         """
         self.engine = engine
-        return self
-
-    def with_cache(self, cache: Cache) -> "Pipeline":
-        """Configure with a cache backend.
-
-        Args:
-            cache: Cache instance (DiskCache, etc.)
-
-        Returns:
-            Self for method chaining
-        """
-        self.cache = cache
-        return self
-
-    def with_callbacks(self, callbacks: List[PipelineCallback]) -> "Pipeline":
-        """Configure with pipeline callbacks.
-
-        Args:
-            callbacks: List of callback instances
-
-        Returns:
-            Self for method chaining
-        """
-        self.callbacks = callbacks
         return self
 
     def with_name(self, name: str) -> "Pipeline":

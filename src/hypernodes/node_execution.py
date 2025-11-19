@@ -25,6 +25,7 @@ from .callbacks import CallbackContext, PipelineCallback
 if TYPE_CHECKING:
     from .node import Node
     from .pipeline import Pipeline
+    from .cache import Cache
 
 T = TypeVar("T")
 
@@ -173,6 +174,7 @@ def _execute_pipeline_node(
     pipeline_node,
     inputs: Dict[str, Any],
     pipeline: "Pipeline",
+    cache: Optional["Cache"],
     callbacks: List[PipelineCallback],
     ctx: CallbackContext,
 ) -> Dict[str, Any]:
@@ -190,6 +192,7 @@ def _execute_pipeline_node(
         pipeline_node: The PipelineNode to execute
         inputs: Input values for the pipeline node
         pipeline: The parent pipeline (provides config to inherit)
+        cache: Cache instance to use
         callbacks: List of callbacks to trigger
         ctx: Callback context
 
@@ -201,20 +204,16 @@ def _execute_pipeline_node(
 
     # Mark this as a PipelineNode in context
     ctx.set(f"_is_pipeline_node:{node_id}", True)
-
-    # Save inner pipeline's original configuration
-    original_cache = inner_pipeline.cache
-    original_callbacks = inner_pipeline.callbacks
-    original_engine = inner_pipeline.engine
-
-    # INHERIT PARENT CONFIGURATION
-    # This ensures:
-    # - Inner nodes cache to parent's cache
-    # - Parent's callbacks see all nested node events
-    # - Parent's engine controls execution strategy
-    inner_pipeline.cache = pipeline.cache
-    inner_pipeline.callbacks = pipeline.callbacks
-    inner_pipeline.engine = pipeline.engine
+    
+    # IMPORTANT: The Pipeline class itself no longer holds execution state.
+    # We need to run the inner pipeline using the *same engine instance* 
+    # (or a compatible one) to preserve the execution context (cache, callbacks).
+    
+    # Create an engine that inherits the parent's context
+    # This is effectively "inheriting" the runtime environment
+    from .sequential_engine import SequentialEngine
+    
+    nested_engine = SequentialEngine(cache=cache, callbacks=callbacks)
 
     try:
         # Trigger nested pipeline start callbacks
@@ -226,9 +225,20 @@ def _execute_pipeline_node(
         # This is the parent-level optimization information
         required_outputs = pipeline.graph.required_outputs.get(pipeline_node)
 
-        # Call the PipelineNode with required outputs
-        # Context is already available through contextvar
-        result = pipeline_node(required_outputs=required_outputs, **inputs)
+        # Execute via the pipeline_node, which applies input/output mapping
+        # and then internally calls the inner pipeline.
+        # But we need to override the engine for the inner execution.
+        
+        # Temporarily set the inner pipeline's engine to our nested engine
+        original_engine = inner_pipeline.engine
+        inner_pipeline.engine = nested_engine
+        
+        try:
+            # Use PipelineNode's __call__ which handles mapping
+            result = pipeline_node(required_outputs=required_outputs, **inputs)
+        finally:
+            # Restore original engine
+            inner_pipeline.engine = original_engine
 
         # Trigger nested pipeline end callbacks
         nested_duration = time.time() - nested_start_time
@@ -240,17 +250,14 @@ def _execute_pipeline_node(
         return result
 
     finally:
-        # Restore inner pipeline's original configuration
-        # This is important if the pipeline is reused elsewhere
-        inner_pipeline.cache = original_cache
-        inner_pipeline.callbacks = original_callbacks
-        inner_pipeline.engine = original_engine
+        pass
 
 
 def execute_single_node(
     node,
     inputs: Dict[str, Any],
     pipeline: "Pipeline",
+    cache: Optional["Cache"],
     callbacks: List[PipelineCallback],
     ctx: CallbackContext,
     node_signatures: Dict[str, str],
@@ -260,7 +267,8 @@ def execute_single_node(
     Args:
         node: Node or PipelineNode to execute
         inputs: Input values for the node
-        pipeline: Parent pipeline (for config inheritance)
+        pipeline: Parent pipeline (for graph/metadata access)
+        cache: Cache instance to use (or None)
         callbacks: List of callbacks to trigger
         ctx: Callback context for state sharing
         node_signatures: Signatures of upstream nodes (for dependency tracking)
@@ -269,9 +277,6 @@ def execute_single_node(
         Tuple of (result, signature)
     """
     node_id = _get_node_id(node)
-
-    # Get cache from pipeline
-    cache = pipeline.cache
     cache_enabled = cache is not None and node.cache
 
     # Only compute signature if caching is enabled (optimization)
@@ -322,7 +327,7 @@ def execute_single_node(
         # Execute based on node type
         if hasattr(node, "pipeline"):
             # PipelineNode - delegate to specialized function
-            result = _execute_pipeline_node(node, inputs, pipeline, callbacks, ctx)
+            result = _execute_pipeline_node(node, inputs, pipeline, cache, callbacks, ctx)
         elif hasattr(node, "is_dual_node") and node.is_dual_node:
             # DualNode - use singular function (SequentialEngine executes one at a time)
             result = node.singular(**inputs)

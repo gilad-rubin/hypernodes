@@ -24,7 +24,7 @@ def test_progress_callback_basic():
     
     # Create pipeline with progress callback
     progress = ProgressCallback(enable=False)  # Disable for tests
-    pipeline = Pipeline(nodes=[double, add_one], callbacks=[progress])
+    pipeline = Pipeline(nodes=[double, add_one], engine=SequentialEngine(callbacks=[progress]))
     
     result = pipeline.run(inputs={"x": 5})
     
@@ -39,7 +39,7 @@ def test_progress_callback_disabled():
         return x + 1
     
     progress = ProgressCallback(enable=False)
-    pipeline = Pipeline(nodes=[simple], callbacks=[progress])
+    pipeline = Pipeline(nodes=[simple], engine=SequentialEngine(callbacks=[progress]))
     
     result = pipeline.run(inputs={"x": 5})
     

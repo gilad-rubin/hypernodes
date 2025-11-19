@@ -59,12 +59,10 @@ print(results)
 Enable intelligent caching for instant re-runs:
 
 ```python
-from hypernodes import DiskCache
+from hypernodes import SequentialEngine, DiskCache
 
-pipeline = Pipeline(
-    nodes=[clean_text, count_words],
-    cache=DiskCache(path=".cache")
-)
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
 
 # First run: executes
 result1 = pipeline(passage="  Hello World  ")
@@ -136,13 +134,14 @@ results = pipeline.map(
 Monitor execution with built-in progress bars:
 
 ```python
+from hypernodes import SequentialEngine
 from hypernodes.telemetry import ProgressCallback
 
-pipeline = Pipeline(
-    nodes=[clean_text, count_words],
-    callbacks=[ProgressCallback()],
-    cache=DiskCache(path=".cache")
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
 )
+pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
 
 results = pipeline.map(
     inputs={"passage": ["text1", "text2", "text3", ...]},
@@ -256,10 +255,8 @@ def experiment(preprocessed: list, param: float) -> dict:
     """Not cached - re-runs every time"""
     return run_experiment(preprocessed, param)
 
-pipeline = Pipeline(
-    nodes=[expensive_preprocessing, experiment],
-    cache=DiskCache(path=".cache")
-)
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[expensive_preprocessing, experiment], engine=engine)
 
 # Iterate on experiment without re-running preprocessing
 for param in [0.1, 0.2, 0.3]:

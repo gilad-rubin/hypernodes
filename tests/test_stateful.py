@@ -155,7 +155,7 @@ class TestCachingWithStateful:
 
         model = Model(model_path="test.pkl")
         cache = DiskCache(path=str(tmp_path / ".cache"))
-        pipeline = Pipeline(nodes=[predict], cache=cache, engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[predict], engine=SequentialEngine(cache=cache))
 
         # First run - should execute
         result1 = pipeline.run(inputs={"x": 5, "model": model})
@@ -181,7 +181,7 @@ class TestCachingWithStateful:
 
         model = ModelWithoutKey(model_path="test.pkl")
         cache = DiskCache(path=str(tmp_path / ".cache"))
-        pipeline = Pipeline(nodes=[process], cache=cache, engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[process], engine=SequentialEngine(cache=cache))
 
         # Should work with default cache key (from init args)
         result1 = pipeline.run(inputs={"x": 5, "model": model})
@@ -196,7 +196,7 @@ class TestCachingWithStateful:
             call_count["count"] += 1
             return x * 2
 
-        pipeline2 = Pipeline(nodes=[process2], cache=cache, engine=SequentialEngine())
+        pipeline2 = Pipeline(nodes=[process2], engine=SequentialEngine(cache=cache))
         result2 = pipeline2.run(inputs={"x": 5, "model": model2})
         assert result2 == {"result2": 10}
         assert call_count["count"] == 1  # Executed (different init args)

@@ -22,15 +22,20 @@ def process(x: int) -> int:
 - `cache`: Whether to cache this node's output
 
 ### 2. Pipeline (`pipeline.py`)
-Manages and executes a DAG of nodes. Auto-builds dependency graph from node signatures.
+Manages a DAG of nodes. **Pure definition** - no execution state.
+
+**NEW ARCHITECTURE:** Pipeline no longer holds `cache` or `callbacks`. These are now configured at the engine level.
 
 ```python
-pipeline = Pipeline(
-    nodes=[node1, node2],
-    engine=SequentialEngine(),  # Default
+from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes.telemetry import ProgressCallback
+
+# Execution config is at the engine level
+engine = SequentialEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
+pipeline = Pipeline(nodes=[node1, node2], engine=engine)
 
 # Execute once
 result = pipeline.run(inputs={"x": 5})  # Returns: {"result": 10}
@@ -52,13 +57,64 @@ Structural protocol (duck typing) for executable units. Both `Node` and `Pipelin
 **Required attributes:**
 - `name`, `cache`, `root_args`, `output_name`, `code_hash`
 
-### 4. Engines (`engines.py`, `sequential_engine.py`)
+### 4. Engines & Orchestration
+
+#### Engines (`engines.py`, `sequential_engine.py`)
 Pluggable execution strategies. All implement the `Engine` protocol.
+
+**NEW ARCHITECTURE:** Engines now own the runtime environment:
+- `cache`: Cache backend instance
+- `callbacks`: List of callback instances  
+- Execution strategy (sequential, parallel, distributed)
+
+```python
+from hypernodes import SequentialEngine, DiskCache
+from hypernodes.telemetry import ProgressCallback
+
+# SequentialEngine - simple topological execution
+engine = SequentialEngine(
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
+
+# DaftEngine - distributed execution
+from hypernodes.engines import DaftEngine
+engine = DaftEngine(
+    use_batch_udf=True,
+    cache=DiskCache(path=".cache"),
+    callbacks=[ProgressCallback()]
+)
+
+pipeline = Pipeline(nodes=[...], engine=engine)
+```
 
 **Available engines:**
 - `SequentialEngine`: Default - simple topological execution, no parallelism
-- `DaskEngine`: Parallel map operations using Dask Bag (optional, install dask)
 - `DaftEngine`: Distributed DataFrame execution (optional, install getdaft)
+- `DaskEngine`: Parallel map operations using Dask Bag (optional, install dask)
+
+#### ExecutionOrchestrator (`orchestrator.py`)
+**NEW:** Shared lifecycle management for all engines.
+
+Centralizes the "outer loop" of execution:
+- CallbackDispatcher setup
+- Pipeline metadata tracking
+- Start/End event notifications
+- Callback/engine compatibility validation
+
+```python
+# Used internally by engines
+with ExecutionOrchestrator(pipeline, callbacks, context) as orchestrator:
+    orchestrator.validate_callbacks("SequentialEngine")
+    orchestrator.notify_start(inputs)
+    # ... execute nodes ...
+    orchestrator.notify_end(outputs)
+```
+
+**Benefits:**
+- Consistent behavior across all engines
+- No code duplication for lifecycle management
+- Easy to add new engines without re-implementing orchestration
 
 #### DaftEngine - High-Performance Distributed Execution
 
@@ -128,8 +184,10 @@ def predict(text: str, model: Model) -> str:
     return model.predict(text)
 ```
 
-### 5. Cache (`cache.py`)
+### 6. Cache (`cache.py`)
 Content-addressed caching using computation signatures.
+
+**NEW ARCHITECTURE:** Cache implementations are configured at the engine level.
 
 **Signature formula:**
 ```
@@ -140,26 +198,57 @@ sig(node) = hash(code_hash + env_hash + inputs_hash + deps_hash)
 - Cache keys are deterministic - same inputs + code = same signature
 
 ```python
-cache = DiskCache(path=".cache")
-pipeline = Pipeline(nodes=[...], cache=cache)
+from hypernodes import SequentialEngine, DiskCache
+
+# Configure cache at engine level
+engine = SequentialEngine(cache=DiskCache(path=".cache"))
+pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
-### 6. Callbacks (`callbacks.py`)
+**Cache Hierarchy:**
+1. **Engine Level**: `engine.cache` - the backend instance
+2. **Node Level**: `node.cache` (True/False) - whether this node should be cached
+3. **Effective**: Caching happens if `engine.cache is not None and node.cache is True`
+
+### 7. Callbacks (`callbacks.py`, `orchestrator.py`)
 Lifecycle hooks for observability. All callbacks inherit from `PipelineCallback`.
+
+**NEW ARCHITECTURE:** Callbacks are configured at the engine level.
+
+```python
+from hypernodes import SequentialEngine
+from hypernodes.telemetry import ProgressCallback
+
+# Configure callbacks at engine level
+engine = SequentialEngine(callbacks=[ProgressCallback()])
+pipeline = Pipeline(nodes=[...], engine=engine)
+```
 
 **Lifecycle events:**
 - `on_pipeline_start/end`
 - `on_node_start/end`
-- `on_cache_hit/miss`
+- `on_node_cached` (cache hit)
+- `on_map_start/end`
+- `on_map_item_start/end`
+- `on_nested_pipeline_start/end`
 
 **Available callbacks (telemetry/):**
 - `ProgressCallback`: Live tqdm progress bars (auto-detects Jupyter vs CLI)
 - `TelemetryCallback`: Distributed tracing with Logfire
 
+**Engine Compatibility:**
+Callbacks can declare which engines they support:
 ```python
-from hypernodes.telemetry import ProgressCallback
-pipeline = Pipeline(nodes=[...], callbacks=[ProgressCallback()])
+class DaftOnlyCallback(PipelineCallback):
+    @property
+    def supported_engines(self):
+        return ["DaftEngine"]  # Fails early if used with SequentialEngine
+
+# Usage
+engine = SequentialEngine(callbacks=[DaftOnlyCallback()])  # ❌ ValueError!
 ```
+
+Validation happens at execution time via `ExecutionOrchestrator.validate_callbacks()`.
 
 ## Advanced Features
 
@@ -284,13 +373,14 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 
 ### Core (`src/hypernodes/`)
 - `node.py`: Node class and `@node` decorator
-- `pipeline.py`: Pipeline class with run/map/as_node methods
-- `sequential_engine.py`: Default execution engine
-- `node_execution.py`: Single node execution logic (caching + callbacks)
+- `pipeline.py`: Pipeline class with run/map/as_node methods (pure definition, no execution state)
+- `sequential_engine.py`: Default execution engine (owns cache, callbacks)
+- `orchestrator.py`: **NEW** - Shared execution orchestration for all engines
+- `node_execution.py`: Single node execution logic (decoupled, accepts explicit cache/callbacks)
 - `graph_builder.py`: DAG construction from node list (SimpleGraphBuilder implementation)
 - `map_planner.py`: Map operation planning (zip vs product)
 - `cache.py`: Caching system with signature computation
-- `callbacks.py`: Callback protocol + context
+- `callbacks.py`: Callback protocol + context + dispatcher
 - `visualization.py`: Graphviz rendering (optional, requires graphviz package)
 
 ### Integrations (`src/hypernodes/integrations/`)
@@ -326,14 +416,15 @@ result = pipeline.run(inputs={"x": 5})  # {"doubled": 10}
 
 ### With Caching + Progress
 ```python
-from hypernodes import Pipeline, node, DiskCache
+from hypernodes import Pipeline, SequentialEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
-pipeline = Pipeline(
-    nodes=[slow_node1, slow_node2],
+# Configure engine with cache and callbacks
+engine = SequentialEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
+pipeline = Pipeline(nodes=[slow_node1, slow_node2], engine=engine)
 ```
 
 ### Multiple Outputs

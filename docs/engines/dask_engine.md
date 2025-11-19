@@ -251,12 +251,8 @@ DaskEngine fully supports telemetry and callbacks:
 ```python
 from hypernodes.telemetry import ProgressCallback
 
-engine = DaskEngine()
-pipeline = Pipeline(
-    nodes=[...],
-    engine=engine,
-    callbacks=[ProgressCallback()]
-)
+engine = DaskEngine(callbacks=[ProgressCallback()])
+pipeline = Pipeline(nodes=[...], engine=engine)
 
 # Progress bar shows parallel execution
 results = pipeline.map(inputs={"x": range(100)}, map_over="x")

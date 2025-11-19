@@ -76,13 +76,15 @@ def test_daft_sequential_parity_run():
 
     # Sequential
     seq_recorder = EventRecorder()
-    pipeline_seq = Pipeline(nodes=[add_one, multiply_two], callbacks=[seq_recorder])
-    SequentialEngine().run(pipeline_seq, inputs)
+    engine_seq = SequentialEngine(callbacks=[seq_recorder])
+    pipeline_seq = Pipeline(nodes=[add_one, multiply_two], engine=engine_seq)
+    pipeline_seq.run(inputs)
 
     # Daft
     daft_recorder = EventRecorder()
-    pipeline_daft = Pipeline(nodes=[add_one, multiply_two], callbacks=[daft_recorder])
-    DaftEngine().run(pipeline_daft, inputs)
+    engine_daft = DaftEngine(callbacks=[daft_recorder])
+    pipeline_daft = Pipeline(nodes=[add_one, multiply_two], engine=engine_daft)
+    pipeline_daft.run(inputs)
 
     # Compare events
     seq_events = [
@@ -101,13 +103,15 @@ def test_daft_sequential_parity_map():
 
     # Sequential
     seq_recorder = EventRecorder()
-    pipeline_seq = Pipeline(nodes=[add_one], callbacks=[seq_recorder])
-    SequentialEngine().map(pipeline_seq, inputs, map_over="x")
+    engine_seq = SequentialEngine(callbacks=[seq_recorder])
+    pipeline_seq = Pipeline(nodes=[add_one], engine=engine_seq)
+    pipeline_seq.map(inputs, map_over="x")
 
     # Daft
     daft_recorder = EventRecorder()
-    pipeline_daft = Pipeline(nodes=[add_one], callbacks=[daft_recorder])
-    DaftEngine().map(pipeline_daft, inputs, map_over="x")
+    engine_daft = DaftEngine(callbacks=[daft_recorder])
+    pipeline_daft = Pipeline(nodes=[add_one], engine=engine_daft)
+    pipeline_daft.map(inputs, map_over="x")
 
     # Verify Map Start/End
     seq_map_start = next(e for e in seq_recorder.events if e[0] == "map_start")
