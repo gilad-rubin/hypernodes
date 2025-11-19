@@ -1,0 +1,168 @@
+---
+title: Nodes
+description: 'The atomic unit of computation.'
+---
+
+The `Node` is the atomic unit of computation in HyperNodes. It wraps a standard Python function with metadata that allows it to be part of a dependency graph.
+
+## Creating a Node
+
+The simplest way to create a node is using the `@node` decorator.
+
+```python
+from hypernodes import node
+
+@node
+def add_one(x: int) -> int:
+    return x + 1
+```
+
+### Output Names
+
+By default, the output name of the node in the pipeline results will be the function name (`add_one` in the example above).
+
+You can customize this:
+
+```python
+@node(output_name="result")
+def add_one(x: int) -> int:
+    return x + 1
+```
+
+### Multiple Outputs
+
+If your function returns multiple values, you can specify a tuple of output names. The function should return a tuple (or list) of corresponding length.
+
+```python
+@node(output_name=("quotient", "remainder"))
+def divide(a: int, b: int) -> tuple:
+    return a // b, a % b
+```
+
+These outputs become available independently to downstream nodes. One node might depend on `quotient`, while another depends on `remainder`.
+
+## Async Nodes
+
+HyperNodes natively supports `async def` functions. This is ideal for I/O-bound operations like API calls or database queries.
+
+```python
+import asyncio
+
+@node
+async def fetch_data(url: str) -> str:
+    await asyncio.sleep(0.1)  # Simulate I/O
+    return f"Data from {url}"
+```
+
+When running with an engine that supports async (like the default `SeqEngine` or `DaskEngine`), these nodes will be executed efficiently, potentially concurrently.
+
+## Code Hashing
+
+One of HyperNodes' most powerful features is **Code Hashing**.
+
+When you define a node, HyperNodes computes a SHA256 hash of the function's source code. This hash is part of the cache key.
+
+- **Change the code?** -> Hash changes -> Cache invalidates -> Node re-runs.
+- **Same code?** -> Hash stays same -> Cache hit -> Instant result.
+
+This happens automatically. You don't need to version your functions manually.
+
+```python
+# If I change 1 to 2 here, the next run will automatically re-execute.
+@node
+def unstable_func(x):
+    return x + 1 
+```
+
+## Dependencies (Root Args)
+
+HyperNodes analyzes the signature of your function to determine its inputs (`root_args`).
+
+```python
+@node
+def combine(a, b): ...
+```
+
+Here, `a` and `b` are dependencies.
+- If `a` is the output of another node, HyperNodes links them.
+- If `a` is provided in the `inputs` dictionary to `pipeline.run()`, it's treated as a root input.
+
+This allows implicit graph construction without manual edge definitions.
+
+## Advanced: DualNode (Vectorized Optimization)
+
+For maximum performance with **primitive types** (int, float, str), you can provide two implementations:
+1. **Singular**: Simple Python logic for debugging/single items
+2. **Batch**: Vectorized logic using PyArrow compute functions
+
+The `DualNode` allows you to provide both.
+
+```python
+from hypernodes import DualNode
+import pyarrow as pa
+import pyarrow.compute as pc
+
+def double_one(x: int) -> int:
+    return x * 2
+
+def double_batch(x: pa.Array) -> pa.Array:
+    # MUST accept pa.Array inputs (strict contract)
+    # Can return pa.Array, list, or numpy.ndarray (relaxed contract)
+    return pc.multiply(x, 2)
+
+node = DualNode(
+    output_name="doubled",
+    singular=double_one,
+    batch=double_batch
+)
+```
+
+### DualNode Contract
+
+**Input (Strict):**
+- Mapped parameters (vary across items): **Must accept `pyarrow.Array`**
+- Constant parameters (same for all): Receive scalar values
+
+**Output (Relaxed):**
+- Can return `pyarrow.Array`, `list`, or `numpy.ndarray`
+
+**When to Use:**
+- ✅ Primitive types with vectorized operations (`pc.multiply`, `pc.add`, etc.)
+- ❌ Complex types (dataclasses, custom objects) - use regular `@node` instead
+- 💡 Only use DualNode when you have **true vectorization**, not just batching
+
+### Example with Constant Parameters
+
+```python
+def process_one(text: str, multiplier: int) -> int:
+    return len(text) * multiplier
+
+def process_batch(text: pa.Array, multiplier: int) -> pa.Array:
+    # text: pa.Array (varies)
+    # multiplier: int (constant - passed as scalar!)
+    lengths = pc.utf8_length(text)
+    return pc.multiply(lengths, multiplier)
+
+node = DualNode(
+    output_name="result",
+    singular=process_one,
+    batch=process_batch
+)
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Execution Engines" icon="server" href="/docs/scaling/engines">
+    Learn about Sequential, Dask, and Daft engines.
+  </Card>
+  <Card title="Caching" icon="database" href="/docs/data-processing/caching">
+    Understand how HyperNodes caches results.
+  </Card>
+  <Card title="Nested Pipelines" icon="layer-group" href="/docs/data-processing/nesting">
+    Build complex workflows with composition.
+  </Card>
+  <Card title="Visualization" icon="eye" href="/docs/observability/visualization">
+    Visualize your pipeline structure.
+  </Card>
+</CardGroup>

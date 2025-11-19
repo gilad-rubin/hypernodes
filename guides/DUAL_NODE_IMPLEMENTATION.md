@@ -1,7 +1,7 @@
 # DualNode Implementation Summary
 
 ## Overview
-Successfully implemented `DualNode` - a new node type that supports both singular (scalar) and batch (Series) execution modes, enabling type-safe pipeline design with automatic batch optimization.
+Successfully implemented `DualNode` - a new node type that supports both singular (scalar) and batch (PyArrow Array) execution modes, enabling type-safe pipeline design with automatic batch optimization.
 
 ## Key Design Decisions
 
@@ -10,15 +10,17 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 - Users explicitly provide both `singular` and `batch` functions
 - Clear contract: singular for types/docs, batch for performance
 
-### 2. **Type-Hint Based Design**
-- Uses `daft.Series` for batch parameters (not custom types)
+### 2. **Strict PyArrow Contract**
+- Uses `pyarrow.Array` for batch parameters (strict input)
 - Singular function defines canonical signature
-- No double-underscore magic (`__batch_methods__`)
+- Batch functions MUST accept `pa.Array` for mapped parameters
+- Constant parameters (models, configs) passed as scalars
 
-### 3. **Automatic Parameter Unwrapping**
-- Constant parameters (encoder, config) automatically unwrapped from Series
-- Only varying parameters (mapped over) stay as Series
-- User doesn't need to handle this complexity
+### 3. **Performance Philosophy**
+- DualNode is for **vectorized operations on primitive types**
+- Uses PyArrow compute functions (`pc.multiply`, `pc.add`, etc.)
+- For complex types (dataclasses), use regular `@node`
+- Only batch when you have true vectorization
 
 ## Implementation Details
 
@@ -43,7 +45,14 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 #### 1. `src/hypernodes/__init__.py`
 - **Added:** `DualNode` import and export
 
-#### 2. `src/hypernodes/integrations/daft/engine.py`
+#### 2. `src/hypernodes/sequential_engine.py`
+- **Added:** `_execute_dual_node_batch()` method
+  - Automatic batch execution for single-DualNode pipelines
+  - Converts inputs to PyArrow Arrays (strict contract)
+  - Accepts PyArrow Array, list, or numpy output (relaxed contract)
+  - Clear error messages for non-convertible types
+
+#### 3. `src/hypernodes/integrations/daft/engine.py`
 - **Added:** `_apply_dual_node_transformation()` method
   - Chooses singular vs batch based on `self._is_map_context`
   - Uses `@daft.func` for singular (row-wise)
@@ -57,7 +66,7 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 - **Modified:** `_apply_node_transformation()`
   - Added DualNode detection before other node types
 
-#### 3. `src/hypernodes/node_execution.py`
+#### 4. `src/hypernodes/node_execution.py`
 - **Modified:** `execute_single_node()`
   - Added DualNode execution path (uses singular function)
   
@@ -90,7 +99,7 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 ### SeqEngine
 ```
 .run()  → execute_single_node() → node.singular(**inputs)
-.map()  → execute_single_node() → node.singular(**inputs)  [called N times]
+.map()  → _execute_dual_node_batch() → node.batch(**pa.Array inputs) [1 call!]
 ```
 
 ### DaftEngine
@@ -109,19 +118,27 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 
 ## Key Features
 
-### 1. Automatic Parameter Handling
+### 1. Strict Input Contract
 ```python
-def encode_batch(texts: Series, encoder: Encoder) -> Series:
-    # texts: Series (mapped over)
-    # encoder: Encoder (constant - auto-unwrapped!)
+def encode_batch(texts: pa.Array, encoder: Encoder) -> pa.Array:
+    # texts: pa.Array (REQUIRED - strict contract!)
+    # encoder: Encoder (constant - passed as scalar)
     return encoder.encode_batch(texts)
 ```
 
-DaftEngine's `batch_wrapper` checks each Series parameter:
-- If all values identical → unwrap to scalar
-- If values vary → keep as Series
+Both SeqEngine and DaftEngine enforce:
+- **Mapped parameters** → `pyarrow.Array`
+- **Constant parameters** → Scalar values (auto-unwrapped)
 
-### 2. Type Inference
+### 2. Relaxed Output Contract
+Batch functions can return:
+- `pyarrow.Array` (preferred)
+- `list` 
+- `numpy.ndarray`
+
+SeqEngine automatically converts outputs back to lists.
+
+### 3. Type Inference
 Uses singular function for Daft type inference:
 ```python
 inferred_type = self._infer_daft_return_type_from_func(node.singular)
@@ -129,7 +146,7 @@ inferred_type = self._infer_daft_return_type_from_func(node.singular)
 
 This ensures visualization and type hints match the singular signature.
 
-### 3. Combined Code Hash
+### 4. Combined Code Hash
 ```python
 hash(singular_source_code + batch_source_code)
 ```
@@ -140,61 +157,95 @@ Cache invalidates when *either* implementation changes.
 
 ### SeqEngine (3 items)
 ```
-✅ Singular calls: 3
-✅ Batch calls: 0
+✅ Batch calls: 1 (optimization!)
+✅ Singular calls: 0
 ```
 
 ### DaftEngine (3 items)
 ```
+✅ Batch calls: 1
 ✅ Singular calls: 0
-✅ Batch calls: 1  (10x fewer calls!)
 ```
 
 ## Usage Patterns
 
-### Pattern 1: Stateless
+### Pattern 1: Stateless with Primitive Types
 ```python
-def encode_singular(text: str, encoder: Encoder) -> list[float]:
-    return encoder.encode(text)
+import pyarrow as pa
+import pyarrow.compute as pc
 
-def encode_batch(texts: Series, encoder: Encoder) -> Series:
-    return encoder.encode_batch(texts)
+def double_one(x: int) -> int:
+    return x * 2
 
-node = DualNode(output_name="encoded", singular=encode_singular, batch=encode_batch)
+def double_batch(x: pa.Array) -> pa.Array:
+    # Must accept pa.Array (strict contract)
+    return pc.multiply(x, 2)
+
+node = DualNode(output_name="doubled", singular=double_one, batch=double_batch)
 ```
 
-### Pattern 2: Stateful
+### Pattern 2: Stateful with Model
 ```python
-class TextOps:
+import pyarrow as pa
+import pyarrow.compute as pc
+
+class TextProcessor:
     def __init__(self, model_name: str):
         self.model = load_model(model_name)
     
-    def process_singular(self, text: str) -> str:
-        return self.model.process(text)
+    def process_one(self, text: str) -> int:
+        return len(self.model.process(text))
     
-    def process_batch(self, texts: Series) -> Series:
-        return self.model.process_batch(texts)
+    def process_batch(self, texts: pa.Array) -> pa.Array:
+        # texts: pa.Array (strict!)
+        # self.model: automatically available
+        processed = [self.model.process(t) for t in texts.to_pylist()]
+        return pa.array([len(p) for p in processed])
 
-ops = TextOps("gpt-4")
-node = DualNode(output_name="processed", singular=ops.process_singular, batch=ops.process_batch)
+processor = TextProcessor("gpt-4")
+node = DualNode(
+    output_name="lengths",
+    singular=processor.process_one,
+    batch=processor.process_batch
+)
+```
+
+### Anti-Pattern: Complex Types
+```python
+# ❌ DON'T DO THIS
+def process_batch(items: pa.Array) -> List[ProcessedItem]:
+    # Dataclasses can't convert to pa.Array!
+    # This will fail with TypeError
+    ...
+
+# ✅ DO THIS INSTEAD
+@node
+def process_one(item: Item) -> ProcessedItem:
+    # Use regular node for complex types
+    return ProcessedItem(...)
 ```
 
 ## Performance Impact
 
 ### Before (Regular @node)
 ```python
-.map() with 1000 items → 1000 function calls
+.map() with 1000 items → 1000 function calls (SeqEngine)
+```
+
+### After (DualNode with SeqEngine)
+```python
+.map() with 1000 items → 1 batch call (1000x fewer Python calls!)
 ```
 
 ### After (DualNode with DaftEngine)
 ```python
-.map() with 1000 items → ~10 batch calls (100x speedup possible!)
+.map() with 1000 items → ~10 batch calls (parallelized + vectorized!)
 ```
 
 Actual speedup depends on:
+- Vectorization efficiency (PyArrow compute is fast!)
 - Batch size configuration
 - I/O vs CPU bound operations
-- Vectorization efficiency
 
 ## Future Enhancements
 
@@ -226,21 +277,22 @@ Actual speedup depends on:
 
 ✅ **Type Safety**: Singular signature defines types  
 ✅ **Debuggability**: Easy to test with scalars  
-✅ **Performance**: Automatic batch optimization  
-✅ **Clarity**: No magic, explicit mapping  
+✅ **Performance**: Automatic batch optimization (both engines!)  
+✅ **Clarity**: Explicit PyArrow contract  
 ✅ **Compatibility**: Works with existing engines  
 ✅ **Documentation**: Comprehensive guides  
 ✅ **Tests**: Full coverage with examples  
+✅ **Error Messages**: Clear guidance when contract violated  
 
 ## Conclusion
 
 DualNode successfully bridges the gap between:
 - **Developer Experience**: Simple, scalar-first design
-- **Production Performance**: Automatic batch optimization
+- **Production Performance**: Automatic vectorization with PyArrow
 
 The implementation follows HyperNodes' design principles:
-- Explicit over implicit
+- Explicit over implicit (strict PyArrow contract)
 - Composable over complex
 - Type-safe over flexible
-- Performant over clever
+- Performant over clever (true vectorization, not fake batching)
 

@@ -1,0 +1,55 @@
+---
+title: Engines
+description: 'Execution strategies.'
+---
+
+The **Engine** determines *how* and *where* your pipeline executes.
+
+By decoupling the pipeline definition (the "what") from the execution strategy (the "how"), HyperNodes allows you to seamlessly transition from debugging on your laptop to running production workloads on a cluster.
+
+## The Engine Protocol
+
+All engines in HyperNodes implement a common protocol. You pass the engine to the pipeline constructor.
+
+```python
+pipeline = Pipeline(nodes=[...], engine=MyEngine())
+```
+
+## Available Engines
+
+### 1. SequentialEngine (`SeqEngine`)
+
+The default engine.
+- **Behavior**: Executes nodes one by one in topological order.
+- **Concurrency**: Single-threaded.
+- **Use Case**: Debugging, development, small datasets.
+
+```python
+from hypernodes import SeqEngine
+engine = SeqEngine()
+```
+
+### 2. DaftEngine
+
+Integrates with [Daft](https://www.getdaft.io/) for distributed data processing.
+- **Behavior**: Compiles the pipeline into a Daft Logical Plan.
+- **Concurrency**: Parallel (Threaded/Process) or Distributed (Ray/K8s).
+- **Use Case**: Production, large datasets, high-performance batch processing.
+
+```python
+from hypernodes.engines import DaftEngine
+engine = DaftEngine()
+```
+
+### 3. DaskEngine
+
+Integrates with [Dask](https://www.dask.org/).
+- **Behavior**: Uses Dask Bags for parallel map operations.
+- **Concurrency**: Parallel (Threaded/Process) or Distributed.
+- **Use Case**: Parallelizing CPU-bound tasks using existing Dask clusters.
+
+```python
+from hypernodes.engines import DaskEngine
+engine = DaskEngine(scheduler="processes")
+```
+

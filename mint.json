@@ -22,25 +22,32 @@
         {
             "group": "Essentials",
             "pages": [
-                "docs/essentials/core-concepts",
-                "docs/essentials/caching",
-                "docs/essentials/pipeline-visualization",
-                "docs/essentials/telemetry",
-                "docs/essentials/nested-pipelines",
-                "docs/essentials/callbacks"
+                "docs/essentials/nodes",
+                "docs/essentials/pipelines",
+                "docs/essentials/execution"
             ]
         },
         {
-            "group": "Advanced",
+            "group": "Data Processing",
             "pages": [
-                "docs/advanced/execution-engines",
-                "docs/advanced/daft-engine",
-                "docs/advanced/daft-engine-complex-types",
-                "docs/advanced/automatic-type-inference-for-daft",
-                "docs/advanced/daft-engine-map-over-support",
-                "docs/advanced/dual-node",
-                "docs/advanced/stateful-objects",
-                "docs/advanced/async-autowrap"
+                "docs/data-processing/mapping",
+                "docs/data-processing/nesting",
+                "docs/data-processing/caching"
+            ]
+        },
+        {
+            "group": "Scaling",
+            "pages": [
+                "docs/scaling/engines",
+                "docs/scaling/daft-engine",
+                "docs/scaling/stateful"
+            ]
+        },
+        {
+            "group": "Observability",
+            "pages": [
+                "docs/observability/visualization",
+                "docs/observability/telemetry"
             ]
         },
         {

@@ -1,0 +1,56 @@
+---
+title: Caching
+description: 'Avoiding re-computation.'
+---
+
+HyperNodes caches results to disk (or other backends) to avoid redundant computation. This is particularly useful during development when iterating on a specific part of a workflow.
+
+## How it Works
+
+HyperNodes uses **Content-Addressable Caching**. For every node execution, it computes a unique signature:
+
+```
+Signature = Hash(
+    Function Source Code
+    + Input Arguments
+    + Upstream Dependency Signatures
+)
+```
+
+1.  **Code Stability**: If you change the code inside a function, its hash changes, invalidating the cache for that node and all downstream nodes.
+2.  **Input Stability**: If you change an input value, the cache invalidates.
+3.  **Dependency Stability**: If an upstream node produces a different result, the downstream node re-runs.
+
+## Configuring Cache
+
+Caching is configured at the **Engine** level (or `Pipeline` level as a shortcut).
+
+```python
+from hypernodes import DiskCache, Pipeline
+
+# Persist cache to a local directory
+cache = DiskCache(path="./.hypernodes_cache")
+
+pipeline = Pipeline(
+    nodes=[...], 
+    cache=cache
+)
+```
+
+## Granularity
+
+Caching happens at the **Node** level and the **Item** level (in maps).
+
+- If you have a pipeline A->B->C, and you change C, A and B remain cached.
+- If you map over 100 items, and 1 fails, re-running fixes only the failed item.
+
+## Disabling Cache
+
+You can disable caching for specific nodes (e.g., random number generators, side effects):
+
+```python
+@node(cache=False)
+def fetch_latest_data():
+    ...
+```
+

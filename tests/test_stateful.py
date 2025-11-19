@@ -1,6 +1,8 @@
 """Tests for @stateful decorator and stateful object handling."""
 
 import pytest
+import pyarrow as pa
+import pyarrow.compute as pc
 
 from hypernodes import DiskCache, Pipeline, node, stateful
 from hypernodes.engines import SeqEngine
@@ -285,8 +287,8 @@ class TestStatefulWithDualNode:
             def process_one(self, x: int) -> int:
                 return x * self.multiplier
 
-            def process_batch(self, xs: list[int]) -> list[int]:
-                return [x * self.multiplier for x in xs]
+            def process_batch(self, x: pa.Array) -> pa.Array:
+                return pc.multiply(x, self.multiplier)
 
         # Create DualNode with methods from stateful instance
         processor = BatchProcessor(multiplier=5)

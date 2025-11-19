@@ -14,44 +14,84 @@ description: 'Build once, cache intelligently, run anywhere.'
   alt="Hero Dark"
 />
 
-HyperNodes is a hierarchical, modular pipeline system with intelligent caching designed for ML/AI development workflows. It treats caching as a first-class citizen, enabling developers to iterate rapidly without re-running expensive computations.
+**HyperNodes** is a hierarchical, modular pipeline system designed for ML/AI workflows. It allows you to build complex workflows from simple, reusable functions and scale them from your laptop to a distributed cluster without changing a single line of code.
 
-## Key Features
+## The 30-Second Hook
+
+Write standard Python functions. Decorate them. Run them.
+
+```python
+from hypernodes import node, Pipeline
+
+@node
+def load_data(path: str) -> str:
+    print(f"Loading {path}...")
+    return "raw data"
+
+@node
+def process(data: str) -> str:
+    return data.upper()
+
+# Create the pipeline (HyperNodes builds the graph automatically)
+pipe = Pipeline(nodes=[load_data, process])
+
+# Run it
+result = pipe.run(inputs={"path": "file.txt"})
+print(result)
+# Output: {'process': 'RAW DATA'}
+```
+
+## Why HyperNodes?
 
 <CardGroup cols={2}>
   <Card title="Test with One, Scale to Many" icon="flask">
-    Build and test your pipeline with a single input, then run it over thousands of inputs without changing a line of code.
+    Build and test your pipeline with a single input. When you're ready, run it over thousands of inputs. HyperNodes handles the batching and parallelism for you.
+    ```python
+    results = pipe.map(inputs={"path": ["file1.txt", ...]}, map_over="path")
+    ```
   </Card>
-  <Card title="Development-First Caching" icon="floppy-disk">
-    HyperNodes automatically caches at node and example granularity. Only re-run what changed.
+  <Card title="Run Anywhere" icon="server">
+    Swap the **Engine** to run on a cluster.
+    ```python
+    # Now it runs distributed!
+    pipe = Pipeline(nodes=[...], engine=DaftEngine())
+    ```
   </Card>
-  <Card title="Hierarchical Modularity" icon="layer-group">
-    Functions are nodes. Pipelines are nodes. Build complex workflows from simple, reusable pieces.
+  <Card title="Intelligent Caching" icon="database">
+    Don't re-run what hasn't changed. HyperNodes automatically caches results based on function code, inputs, and upstream dependencies.
   </Card>
-  <Card title="Flexible Execution" icon="bolt">
-    Run sequentially for debugging, async for I/O, or distributed with [Daft](https://www.getdaft.io/).
-  </Card>
-  <Card title="First-Class Daft Support" icon="rocket">
-    Deep integration with Daft for distributed, lazy, and batched execution.
-  </Card>
-  <Card title="Observable by Default" icon="chart-simple">
-    Built-in progress bars, logs, and metrics. Every execution is tracked.
+  <Card title="Hierarchical Modularity" icon="sitemap">
+    Functions are nodes. Pipelines are nodes. Nest pipelines infinitely to compose complex systems from simple, testable blocks.
   </Card>
 </CardGroup>
 
-## Getting Started
+## Installation
+
+```bash
+pip install hypernodes
+# or with uv
+uv add hypernodes
+```
+
+To use the distributed engine features:
+
+```bash
+pip install "hypernodes[daft]"
+```
+
+## Documentation Guide
 
 <CardGroup cols={2}>
-  <Card title="Install HyperNodes" icon="download" href="./get-started/installation">
-    Get up and running in seconds.
+  <Card title="Core Concepts" icon="book" href="/docs/essentials/nodes">
+    Learn about Nodes, Pipelines, and Execution.
   </Card>
-  <Card title="Quick Start" icon="bolt" href="./get-started/quickstart">
-    Build your first pipeline in 5 minutes.
+  <Card title="Data Processing" icon="layer-group" href="/docs/data-processing/mapping">
+    Master Mapping, Nesting, and Caching.
   </Card>
-  <Card title="Core Concepts" icon="book" href="./essentials/core-concepts">
-    Learn about Nodes, Pipelines, and Engines.
+  <Card title="Scaling" icon="rocket" href="/docs/scaling/engines">
+    Scale to big data with Daft and Stateful parameters.
   </Card>
-  <Card title="Daft Engine" icon="server" href="./advanced/daft-engine">
-    Scale to distributed execution with Daft.
+  <Card title="Observability" icon="chart-line" href="/docs/observability/visualization">
+    Visualize and monitor your pipelines.
   </Card>
 </CardGroup>

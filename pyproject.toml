@@ -1,6 +1,6 @@
 [project]
 name = "hypernodes"
-version = "0.4.0"
+version = "0.4.1"
 description = "A hierarchical, modular pipeline system for ML/AI workflows"
 authors = [
     {name = "Gilad Rubin", email = "me@giladrubin.com"}
@@ -23,6 +23,10 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+batch = [
+    "pyarrow>=14.0.0",
+]
+
 daft = [
     "daft>=0.6.11",
 ]
@@ -45,6 +49,7 @@ telemetry = [
 ]
 
 all = [
+    "pyarrow>=14.0.0",
     "daft>=0.6.11",
     "graphviz>=0.20",
     "ipykernel<7",
@@ -126,4 +131,9 @@ norecursedirs = [
     "build",
     "dist",
     "*.egg",
+]
+# Filter out third-party deprecation warnings
+filterwarnings = [
+    # Ignore numpy.linalg deprecation warning from daft's cloudpickle
+    "ignore:The numpy.linalg.linalg has been made private:DeprecationWarning:daft.pickle.cloudpickle",
 ]

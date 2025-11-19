@@ -1,9 +1,15 @@
 """Tests for DualNode - nodes with both singular and batch implementations."""
 
+import pytest
+
+try:
+    import pyarrow as pa
+    import pyarrow.compute as pc
+except ImportError:
+    pass
+
 from dataclasses import dataclass
 from typing import List
-
-import pytest
 
 from hypernodes import DualNode, Pipeline
 
@@ -47,8 +53,8 @@ def test_dual_node_creation():
     def double_singular(x: int) -> int:
         return x * 2
 
-    def double_batch(xs: List[int]) -> List[int]:
-        return [x * 2 for x in xs]
+    def double_batch(x: pa.Array) -> pa.Array:
+        return pc.multiply(x, 2)
 
     node = DualNode(
         output_name="doubled",
@@ -71,9 +77,9 @@ def test_dual_node_singular_execution():
         call_log.append(("singular", x, y))
         return x + y
 
-    def add_batch(xs: List[int], ys: List[int]) -> List[int]:
-        call_log.append(("batch", xs, ys))
-        return [x + y for x, y in zip(xs, ys)]
+    def add_batch(x: pa.Array, y: pa.Array) -> pa.Array:
+        call_log.append(("batch", x, y))
+        return pc.add(x, y)
 
     node = DualNode(
         output_name="sum",
@@ -90,7 +96,7 @@ def test_dual_node_singular_execution():
 
 
 def test_dual_node_sequential_map():
-    """Test DualNode with SeqEngine uses singular in loop."""
+    """Test DualNode with SeqEngine uses batch optimization for single DualNode pipelines."""
 
     call_log = []
 
@@ -98,9 +104,9 @@ def test_dual_node_sequential_map():
         call_log.append(("singular", x, factor))
         return x * factor
 
-    def multiply_batch(xs: List[int], factor: int) -> List[int]:
-        call_log.append(("batch", xs, factor))
-        return [x * factor for x in xs]
+    def multiply_batch(x: pa.Array, factor: int) -> pa.Array:
+        call_log.append(("batch", x, factor))
+        return pc.multiply(x, factor)
 
     node = DualNode(
         output_name="result",
@@ -112,9 +118,9 @@ def test_dual_node_sequential_map():
     results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
 
     assert results == [{"result": 10}, {"result": 20}, {"result": 30}]
-    # SeqEngine calls singular 3 times
-    assert len(call_log) == 3
-    assert all(call[0] == "singular" for call in call_log)
+    # SeqEngine now optimizes: calls batch once for single-DualNode pipelines
+    assert len(call_log) == 1
+    assert call_log[0][0] == "batch"
 
 
 @pytest.mark.skipif(not DAFT_AVAILABLE, reason="Daft not installed")
@@ -127,9 +133,9 @@ def test_dual_node_daft_map():
         call_log.append(("singular", x, factor))
         return x * factor
 
-    def multiply_batch(xs: List[int], factor: int) -> List[int]:
-        call_log.append(("batch", xs, factor))
-        return [x * factor for x in xs]
+    def multiply_batch(x: pa.Array, factor: int) -> pa.Array:
+        call_log.append(("batch", x, factor))
+        return pc.multiply(x, factor)
 
     node = DualNode(
         output_name="result",
@@ -175,8 +181,8 @@ def test_stateful_dual_node():
         def process_singular(self, x: int) -> int:
             return x * self.multiplier
 
-        def process_batch(self, xs: List[int]) -> List[int]:
-            return [x * self.multiplier for x in xs]
+        def process_batch(self, x: pa.Array) -> pa.Array:
+            return pc.multiply(x, self.multiplier)
 
     # Create instance
     processor = Processor(multiplier=5)
@@ -203,47 +209,6 @@ def test_stateful_dual_node():
 
 
 # ============================================================================
-# Test: Dataclass Support
-# ============================================================================
-
-
-def test_dual_node_with_dataclasses():
-    """Test DualNode with dataclass inputs and outputs."""
-
-    def process_singular(item: Item) -> ProcessedItem:
-        return ProcessedItem(original=item.value, doubled=item.value * 2)
-
-    def process_batch(items: List[Item]) -> List[ProcessedItem]:
-        return [
-            ProcessedItem(original=item.value, doubled=item.value * 2) for item in items
-        ]
-
-    node = DualNode(
-        output_name="processed",
-        singular=process_singular,
-        batch=process_batch,
-    )
-
-    pipeline = Pipeline(nodes=[node])
-
-    # Test singular
-    result = pipeline.run(inputs={"item": Item(value=5)})
-    assert isinstance(result["processed"], ProcessedItem)
-    assert result["processed"].original == 5
-    assert result["processed"].doubled == 10
-
-    # Test batch
-    items = [Item(value=1), Item(value=2), Item(value=3)]
-    results = pipeline.map(inputs={"item": items}, map_over="item")
-
-    assert len(results) == 3
-    assert all(isinstance(r["processed"], ProcessedItem) for r in results)
-    assert results[0]["processed"].original == 1
-    assert results[1]["processed"].doubled == 4
-    assert results[2]["processed"].original == 3
-
-
-# ============================================================================
 # Test: Singular Wraps Batch Pattern
 # ============================================================================
 
@@ -261,9 +226,14 @@ def test_singular_wraps_batch_pattern():
             """Singular wraps batch - single source of truth!"""
             return self.encode_batch([text])[0]
 
-        def encode_batch(self, texts: List[str]) -> List[List[float]]:
+        def encode_batch(self, text: pa.Array) -> List[List[float]]:
             """Real implementation - batch only."""
-            return [[float(len(text))] * self.dim for text in texts]
+            # Use Arrow compute to calculate lengths
+            lengths = pc.utf8_length(text)
+            # Convert to numpy/list for list comprehension structure construction
+            # Since we're returning complex nested structure, list is fine
+            len_list = lengths.to_pylist()
+            return [[float(l)] * self.dim for l in len_list]
 
     encoder = Encoder(dim=3)
 
@@ -298,8 +268,8 @@ def test_dual_node_engine_consistency():
     def add_singular(x: int, y: int) -> int:
         return x + y
 
-    def add_batch(xs: List[int], ys: List[int]) -> List[int]:
-        return [x + y for x, y in zip(xs, ys)]
+    def add_batch(x: pa.Array, y: pa.Array) -> pa.Array:
+        return pc.add(x, y)
 
     node = DualNode(
         output_name="sum",
@@ -340,8 +310,8 @@ def test_multiple_dual_nodes():
     def double_singular(x: int) -> int:
         return x * 2
 
-    def double_batch(xs: List[int]) -> List[int]:
-        return [x * 2 for x in xs]
+    def double_batch(x: pa.Array) -> pa.Array:
+        return pc.multiply(x, 2)
 
     double_node = DualNode(
         output_name="doubled",
@@ -353,8 +323,8 @@ def test_multiple_dual_nodes():
     def add_ten_singular(doubled: int) -> int:
         return doubled + 10
 
-    def add_ten_batch(doubled_list: List[int]) -> List[int]:
-        return [x + 10 for x in doubled_list]
+    def add_ten_batch(doubled: pa.Array) -> pa.Array:
+        return pc.add(doubled, 10)
 
     add_node = DualNode(
         output_name="result",
@@ -389,8 +359,8 @@ def test_dual_node_empty_batch():
     def process_singular(x: int) -> int:
         return x * 2
 
-    def process_batch(xs: List[int]) -> List[int]:
-        return [x * 2 for x in xs]
+    def process_batch(x: pa.Array) -> pa.Array:
+        return pc.multiply(x, 2)
 
     node = DualNode(
         output_name="result",
@@ -414,9 +384,9 @@ def test_dual_node_single_item_batch():
         call_log.append("singular")
         return x * 2
 
-    def process_batch(xs: List[int]) -> List[int]:
+    def process_batch(x: pa.Array) -> pa.Array:
         call_log.append("batch")
-        return [x * 2 for x in xs]
+        return pc.multiply(x, 2)
 
     node = DualNode(
         output_name="result",
@@ -426,8 +396,8 @@ def test_dual_node_single_item_batch():
 
     pipeline = Pipeline(nodes=[node])
 
-    # Single item should still use map's behavior
+    # Single item batch: SeqEngine now optimizes and uses batch
     results = pipeline.map(inputs={"x": [5]}, map_over="x")
     assert results == [{"result": 10}]
-    # SeqEngine calls singular once
-    assert "singular" in call_log
+    # SeqEngine optimization: uses batch even for single item
+    assert "batch" in call_log

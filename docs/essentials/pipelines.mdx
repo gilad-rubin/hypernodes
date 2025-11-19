@@ -1,0 +1,76 @@
+---
+title: Pipelines
+description: 'Managing execution graphs.'
+---
+
+A `Pipeline` manages a collection of Nodes and executes them as a Directed Acyclic Graph (DAG).
+
+## Initialization
+
+You pass a list of nodes to the pipeline constructor.
+
+```python
+from hypernodes import Pipeline, node
+
+@node
+def step1(x): return x + 1
+
+@node
+def step2(step1): return step1 * 2
+
+# Order doesn't matter! HyperNodes resolves dependencies.
+pipeline = Pipeline(nodes=[step2, step1])
+```
+
+## Fluent Configuration
+
+HyperNodes supports a fluent (method chaining) API for configuration. This makes it easy to build complex pipelines step-by-step.
+
+```python
+from hypernodes import Pipeline, DiskCache, SeqEngine
+from hypernodes.telemetry import ProgressCallback
+
+pipeline = (
+    Pipeline(nodes=[step1, step2])
+    .with_name("my_pipeline")
+    .with_engine(
+        SeqEngine(
+            cache=DiskCache(".cache"),
+            callbacks=[ProgressCallback()]
+        )
+    )
+)
+```
+
+### Available Methods
+- `.with_engine(engine)`: Set the execution engine.
+- `.with_name(name)`: Set a name for visualization/logging.
+
+## Automatic Graph Building
+
+In the example above:
+1. `step2` requires an argument named `step1`.
+2. `step1` (the node) has an output name of `step1` (defaulting to function name).
+3. HyperNodes detects this match and creates an edge: `step1 -> step2`.
+
+If a node requires an input that *isn't* produced by any other node (like `x` in `step1`), it becomes a **Pipeline Input**.
+
+## Validation
+
+When created, the pipeline validates:
+- **Cycles**: Ensuring the graph is acyclic.
+- **Missing Inputs**: All node arguments must be satisfied either by other nodes or be available as pipeline inputs.
+- **Duplicate Outputs**: Two nodes cannot produce the output with the same name.
+
+## Configuration (Constructor)
+
+Alternatively, pipelines can be configured directly in the constructor:
+
+```python
+pipeline = Pipeline(
+    nodes=[...],
+    engine=SeqEngine(cache=DiskCache(".cache")),
+    name="my_pipeline"
+)
+```
+

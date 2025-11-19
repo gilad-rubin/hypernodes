@@ -182,6 +182,23 @@ class SeqEngine:
         ctx.set("_in_map", True)
         ctx.set("_map_total_items", len(items))
 
+        # Optimization: Check if pipeline contains ONLY a single DualNode
+        # If so, we can execute it as a batch operation instead of looping
+        execution_nodes = self._determine_execution_nodes(pipeline, output_name)
+        if (
+            len(execution_nodes) == 1
+            and hasattr(execution_nodes[0], "is_dual_node")
+            and execution_nodes[0].is_dual_node
+        ):
+            return self._execute_dual_node_batch(
+                execution_nodes[0],
+                items,
+                stateful_cache,
+                pipeline,
+                output_name,
+                orchestrator,
+            )
+
         results = []
         for idx, item_inputs in enumerate(items):
             item_start_time = __import__("time").time()
@@ -199,6 +216,111 @@ class SeqEngine:
             orchestrator.notify_map_item_end(idx, duration)
 
         ctx.set("_in_map", False)
+        return results
+
+    def _execute_dual_node_batch(
+        self,
+        node: Any,
+        items: List[Dict[str, Any]],
+        stateful_cache: Dict[str, Any],
+        pipeline: "Pipeline",
+        output_name: Optional[Union[str, List[str]]],
+        orchestrator: ExecutionOrchestrator,
+    ) -> List[Dict[str, Any]]:
+        """Execute a single DualNode in batch mode using PyArrow."""
+        try:
+            import pyarrow as pa
+        except ImportError:
+            # Fallback to loop if pyarrow is missing (or raise error if enforced)
+            # Since DualNode explicitly checks for pyarrow, we can assume it's available
+            # if we are here, OR we should let the import error bubble up.
+            raise ImportError(
+                "DualNode batch execution requires 'pyarrow'. "
+                "Please install it with: uv add pyarrow"
+            )
+
+        # 1. Collect inputs
+        # We need to transpose list of dicts to dict of lists
+        batch_inputs = {}
+        for param in node.root_args:
+            if param in stateful_cache:
+                # Stateful param - pass as single value (broadcast/constant)
+                # But wait, the batch function expects array inputs usually.
+                # However, for stateful params (like models), we usually pass the object itself.
+                batch_inputs[param] = stateful_cache[param]
+            else:
+                # Map param - collect list
+                batch_inputs[param] = [item.get(param) for item in items]
+
+        # 2. Convert map inputs to PyArrow Arrays
+        # Strict Input Contract: All mapped inputs must be convertible to pa.Array
+        arrow_inputs = {}
+        for k, v in batch_inputs.items():
+            if k in stateful_cache:
+                # Stateful/constant params: pass as-is (scalars)
+                arrow_inputs[k] = v
+            else:
+                # Mapped params: convert to pa.Array
+                try:
+                    arrow_inputs[k] = pa.array(v)
+                except Exception as e:
+                    raise TypeError(
+                        f"Failed to convert input '{k}' to PyArrow Array: {e}\n"
+                        f"DualNode batch functions require inputs that can be converted to pa.Array.\n"
+                        f"For complex types (dataclasses, custom objects), use regular nodes with .map() instead.\n"
+                        f"Batch optimization is intended for vectorized operations on primitive types."
+                    )
+
+        # 3. Execute Batch Function
+        ctx = orchestrator.ctx
+
+        # Notify start (as a single batch operation)
+        # We could notify per-item start/end, but that's fake.
+        # Let's just notify map_start/end at the orchestrator level which is already done.
+
+        try:
+            batch_result = node.batch(**arrow_inputs)
+        except Exception as e:
+            raise RuntimeError(
+                f"Error executing batch function for node '{node.output_name}': {e}"
+            )
+
+        # 4. Convert output back to list of dicts
+        # We relax the contract here to allow list, np.ndarray, or pa.Array
+        result_list = []
+
+        if isinstance(batch_result, list):
+            result_list = batch_result
+        elif hasattr(batch_result, "tolist"):  # numpy, daft series
+            result_list = batch_result.tolist()
+        elif hasattr(batch_result, "to_pylist"):  # pyarrow
+            result_list = batch_result.to_pylist()
+        else:
+            # Try iterating as last resort
+            try:
+                result_list = list(batch_result)
+            except Exception:
+                raise TypeError(
+                    f"Batch function for '{node.output_name}' returned {type(batch_result)}. "
+                    "Expected pyarrow.Array, list, or numpy.ndarray."
+                )
+
+        if len(result_list) != len(items):
+            raise RuntimeError(
+                f"Batch function returned {len(result_list)} items, expected {len(items)}. "
+                "Batch functions must preserve input length."
+            )
+
+        # Reconstruct results
+        results = []
+        for val in result_list:
+            if isinstance(node.output_name, str):
+                results.append({node.output_name: val})
+            else:
+                # Tuple output support would require struct array or similar,
+                # simpler to assume single output for now or handle dict/struct return
+                results.append({node.output_name[0]: val})  # Simplified
+
         return results
 
     def _is_stateful_object(self, obj: Any) -> bool:

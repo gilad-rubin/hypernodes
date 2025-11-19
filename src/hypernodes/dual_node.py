@@ -22,10 +22,12 @@ class DualNode:
 
     Examples:
         Stateless DualNode:
+        >>> import pyarrow as pa
         >>> def encode_one(text: str, encoder: Encoder) -> list[float]:
         ...     return encoder.encode(text)
         ...
-        >>> def encode_many(texts: Series[str], encoder: Encoder) -> Series[list[float]]:
+        >>> def encode_many(texts: pa.Array, encoder: Encoder) -> pa.Array:
+        ...     # Explicitly use PyArrow for vector ops
         ...     return encoder.encode_batch(texts)
         ...
         >>> node = DualNode(
@@ -42,7 +44,7 @@ class DualNode:
         ...     def process_one(self, text: str) -> str:
         ...         return self.model.process(text)
         ...
-        ...     def process_many(self, texts: Series[str]) -> Series[str]:
+        ...     def process_many(self, texts: pa.Array) -> pa.Array:
         ...         return self.model.process_batch(texts)
         ...
         >>> ops = TextOps(model_name="my-model")
@@ -65,7 +67,20 @@ class DualNode:
         Args:
             output_name: Name(s) of output(s) produced by this node
             singular: Function for single-item execution (defines canonical signature)
-            batch: Function for batch execution (optimized for multiple items)
+            batch: Function for batch execution with strict PyArrow contract:
+                   
+                   **Input Contract (Strict):**
+                   - Mapped parameters (vary across items): Must accept `pyarrow.Array`
+                   - Constant parameters (same for all items): Receive scalar values
+                   
+                   **Output Contract (Relaxed):**
+                   - Can return `pyarrow.Array`, `list`, or `numpy.ndarray`
+                   
+                   **Performance Philosophy:**
+                   - Batch functions are for vectorized operations on primitive types
+                   - For complex types (dataclasses, custom objects), use regular nodes
+                   - Only use DualNode when you have true vectorization (e.g., pyarrow.compute)
+                   
             cache: Whether to cache this node's outputs (default: True)
         """
         self.output_name = output_name
@@ -73,6 +88,9 @@ class DualNode:
         self.batch = batch
         self.cache = cache
         self.is_dual_node = True  # Flag for engine detection
+
+        # Ensure PyArrow is available if batch function is provided (it always is for DualNode)
+        self._ensure_pyarrow()
 
         # Extract root_args from singular function (canonical signature)
         sig = inspect.signature(singular)
@@ -90,6 +108,17 @@ class DualNode:
             # Extract instance from bound method
             if hasattr(singular, "__self__"):
                 self.instance = singular.__self__
+
+    def _ensure_pyarrow(self) -> None:
+        """Check if pyarrow is available, as it's required for batch functions."""
+        try:
+            import pyarrow
+        except ImportError:
+            raise ImportError(
+                "DualNode batch execution requires 'pyarrow'. "
+                "Please install it with: uv add pyarrow "
+                "or: pip install hypernodes[batch]"
+            )
 
     def _detect_stateful(self) -> bool:
         """Detect if this is a stateful node (uses bound methods)."""
@@ -162,4 +191,3 @@ class DualNode:
             f"output={self.output_name}, "
             f"stateful={self.is_stateful})"
         )
-

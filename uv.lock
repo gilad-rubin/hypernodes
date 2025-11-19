@@ -881,7 +881,7 @@ wheels = [
 
 [[package]]
 name = "hypernodes"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -893,8 +893,12 @@ all = [
     { name = "logfire" },
     { name = "nbformat" },
     { name = "plotly" },
+    { name = "pyarrow" },
     { name = "rich" },
     { name = "tqdm" },
+]
+batch = [
+    { name = "pyarrow" },
 ]
 daft = [
     { name = "daft" },
@@ -962,6 +966,8 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'examples'", specifier = ">=2.3.3" },
     { name = "plotly", marker = "extra == 'all'", specifier = ">=5.18.0" },
     { name = "plotly", marker = "extra == 'telemetry'", specifier = ">=5.18.0" },
+    { name = "pyarrow", marker = "extra == 'all'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "extra == 'batch'", specifier = ">=14.0.0" },
     { name = "pydantic", marker = "extra == 'examples'", specifier = ">=2.12.3" },
     { name = "pylate", marker = "extra == 'examples'", specifier = ">=1.0.0" },
     { name = "pytrec-eval", marker = "extra == 'examples'", specifier = ">=0.5" },
@@ -971,7 +977,7 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'all'", specifier = ">=4.67.1" },
     { name = "tqdm", marker = "extra == 'telemetry'", specifier = ">=4.67.1" },
 ]
-provides-extras = ["daft", "viz", "notebook", "telemetry", "all", "modal", "examples"]
+provides-extras = ["batch", "daft", "viz", "notebook", "telemetry", "all", "modal", "examples"]
 
 [package.metadata.requires-dev]
 dev = [

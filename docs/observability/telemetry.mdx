@@ -1,0 +1,68 @@
+---
+title: Telemetry
+description: 'Monitoring execution.'
+---
+
+HyperNodes provides a robust **Callback System** to hook into the execution lifecycle. This is used for progress tracking, logging, and distributed tracing.
+
+## Progress Bars
+
+The simplest way to observe execution is using the `ProgressCallback`.
+
+```python
+from hypernodes import SeqEngine
+from hypernodes.telemetry import ProgressCallback
+
+engine = SeqEngine(
+    callbacks=[ProgressCallback()]
+)
+
+pipeline.run(...)
+```
+
+This renders a rich progress bar (using `tqdm`) that shows:
+- Which node is running
+- Cache hit/miss status
+- Timing information
+
+## Distributed Tracing
+
+For production systems, you often want to send traces to an observability backend (like Jaeger, Honeycomb, or Datadog).
+
+HyperNodes integrates with OpenTelemetry via the `TelemetryCallback`.
+
+```python
+from hypernodes import SeqEngine
+from hypernodes.telemetry import TelemetryCallback
+
+engine = SeqEngine(
+    callbacks=[TelemetryCallback()]
+)
+```
+
+This will automatically create spans for:
+- Pipeline execution
+- Node execution
+- Cache operations
+
+## Custom Callbacks
+
+You can implement your own callbacks by inheriting from `PipelineCallback`.
+
+```python
+from hypernodes.callbacks import PipelineCallback
+
+class MyLogger(PipelineCallback):
+    def on_node_start(self, node_name, inputs, ctx):
+        print(f"Starting {node_name}...")
+
+    def on_node_end(self, node_name, outputs, duration, ctx):
+        print(f"Finished {node_name} in {duration:.2f}s")
+```
+
+Pass it to the engine:
+
+```python
+engine = SeqEngine(callbacks=[MyLogger()])
+```
+
