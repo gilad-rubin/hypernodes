@@ -148,10 +148,9 @@ class FunctionNodeOperation(DaftOperation):
                 hasattr(real_func, "__code__") and (real_func.__code__.co_flags & 0x80)
             )
 
-        print(
-            f"DEBUG: Node {self.node.output_name}, Stateful: {list(stateful_params.keys())}, Dynamic: {dynamic_params}"
-        )
-        print(f"DEBUG: Func {self.node.func}, is_coroutine: {is_coroutine}")
+        # Debug prints removed
+        # print(f"DEBUG: Node {self.node.output_name}, Stateful: {list(stateful_params.keys())}, Dynamic: {dynamic_params}")
+        # print(f"DEBUG: Func {self.node.func}, is_coroutine: {is_coroutine}")
 
         if stateful_params:
             return self._execute_stateful(df, dynamic_params, stateful_params, context)
@@ -165,6 +164,8 @@ class FunctionNodeOperation(DaftOperation):
         self, df: "daft.DataFrame", dynamic_params: List[str]
     ) -> "daft.DataFrame":
         func = self._make_serializable_by_value(self.node.func)
+        # Enforce function name to match node output name for telemetry mapping
+        func.__name__ = self.node.func.__name__
         return_dtype = self._infer_daft_return_type(self.node.func) or DataType.python()
 
         udf = daft.func(func, return_dtype=return_dtype)
@@ -174,7 +175,6 @@ class FunctionNodeOperation(DaftOperation):
     def _execute_async_stateless(
         self, df: "daft.DataFrame", dynamic_params: List[str]
     ) -> "daft.DataFrame":
-        print(f"DEBUG: Executing async stateless for {self.node.output_name}")
         # Daft doesn't support async functions in daft.func directly.
         # We must wrap it to run synchronously.
         func = self._make_serializable_by_value(self.node.func)
@@ -198,6 +198,10 @@ class FunctionNodeOperation(DaftOperation):
 
             return asyncio.run(func(*args))
 
+            return asyncio.run(func(*args))
+
+        # Enforce function name to match node output name for telemetry mapping
+        sync_wrapper.__name__ = self.node.func.__name__
         udf = daft.func(sync_wrapper, return_dtype=return_dtype)
         input_cols = [daft.col(p) for p in dynamic_params]
         return df.with_column(self.node.output_name, udf(*input_cols))
@@ -286,13 +290,27 @@ class FunctionNodeOperation(DaftOperation):
         # Pass captured_stateful_params explicitly to __init__
         wrapper = StatefulNodeWrapper(captured_stateful_params)
 
+        # For stateful nodes, Daft uses the class/method name.
+        # We can try to set the __name__ of the instance or the call method,
+        # but Daft's UDF naming for classes is more complex.
+        # However, since we return a column with the output_name,
+        # and the UDF itself might be named after the class.
+        # Let's try to set the class name dynamically if possible, or just rely on the fact
+        # that we might not get perfect mapping for stateful nodes yet.
+        # Actually, we can set __name__ on the wrapper instance's __call__?
+        # No, Daft inspects the class.
+        # Let's rename the class locally.
+        StatefulNodeWrapper.__name__ = f"Stateful_{self.node.output_name}"
+        StatefulNodeWrapper.__qualname__ = f"Stateful_{self.node.output_name}"
+
         # Ensure we only pass dynamic params as columns
         input_cols = []
         for param in dynamic_params:
             if param not in stateful_params:
                 input_cols.append(daft.col(param))
 
-        print(f"DEBUG: Input Cols: {input_cols}")
+        # Remove debug print
+        # print(f"DEBUG: Input Cols: {input_cols}")
 
         # Handle stateful-only nodes (no dynamic inputs)
         if not input_cols:
@@ -405,8 +423,7 @@ class DualNodeOperation(DaftOperation):
                 "batch_size"
             ]
 
-        @daft.func.batch(**batch_kwargs)
-        def batch_wrapper(*series_args: Series) -> Series:
+        def batch_wrapper_impl(*series_args: Series) -> Series:
             # Unwrap constants
             unwrapped_args = []
             for series_arg in series_args:
@@ -419,9 +436,32 @@ class DualNodeOperation(DaftOperation):
                     if is_constant:
                         unwrapped_args.append(first_val)
                     else:
-                        unwrapped_args.append(pylist)
+                        # Convert Daft Series to Python list (to_pylist()) or Arrow (to_arrow())
+                        # Daft Series don't support scalar arithmetic like `x * 2`.
+                        # Arrow Arrays don't support it either with `*` operator in all versions.
+                        # Python lists support `*` but it means extend, not multiply.
+
+                        # BUT, the previous implementation (that "worked") likely relied on something else.
+                        # If we look at the guide code:
+                        # def compute_batch(x_series):
+                        #     # x_series is a Daft Series or Arrow Array
+                        #     return x_series * 2
+
+                        # If this code worked before, what was `x_series`?
+                        # Maybe it was a numpy array? Or maybe Daft Series supported it?
+                        # Let's try numpy.
+
+                        arrow_arr = series_arg.to_arrow()
+                        try:
+                            unwrapped_args.append(arrow_arr.to_numpy())
+                        except:
+                            unwrapped_args.append(series_arg.to_pylist())
                 else:
-                    unwrapped_args.append([])
+                    arrow_arr = series_arg.to_arrow()
+                    try:
+                        unwrapped_args.append(arrow_arr.to_numpy())
+                    except:
+                        unwrapped_args.append(series_arg.to_pylist())
 
             # Call user's batch function
             result = serializable_func(*unwrapped_args)
@@ -429,6 +469,11 @@ class DualNodeOperation(DaftOperation):
             if isinstance(result, list):
                 return Series.from_pylist(result)
             return result
+
+        # Enforce function name to match node output name for telemetry mapping
+        batch_wrapper_impl.__name__ = self.node.name
+        batch_wrapper_impl.__qualname__ = self.node.name
+        batch_wrapper = daft.func.batch(**batch_kwargs)(batch_wrapper_impl)
 
         input_cols = [daft.col(p) for p in self.node.root_args]
         return df.with_column(self.node.output_name, batch_wrapper(*input_cols))
@@ -460,8 +505,7 @@ class BatchNodeOperation(DaftOperation):
         # Optimization: Create executor inside to avoid serialization issues
         # We cannot capture the context.executor because it's not picklable
 
-        @daft.func.batch(return_dtype=return_dtype)
-        def batch_udf(*series_args: Series) -> Series:
+        def batch_udf_impl(*series_args: Series) -> Series:
             python_args = []
             for s in series_args:
                 python_args.append(s.to_pylist())
@@ -503,6 +547,11 @@ class BatchNodeOperation(DaftOperation):
 
                 results = list(executor.map(process_item, range(n_items)))
             return Series.from_pylist(results)
+
+        # Enforce function name to match node output name for telemetry mapping
+        batch_udf_impl.__name__ = self.node.func.__name__
+        batch_udf_impl.__qualname__ = self.node.func.__name__
+        batch_udf = daft.func.batch(return_dtype=return_dtype)(batch_udf_impl)
 
         input_cols = [daft.col(p) for p in self.node.root_args]
         return df.with_column(self.node.output_name, batch_udf(*input_cols))

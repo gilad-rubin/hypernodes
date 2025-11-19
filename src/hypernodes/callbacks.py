@@ -284,3 +284,19 @@ class CallbackDispatcher:
         for callback in self.callbacks:
             callback.on_map_item_end(idx, duration, ctx)
 
+    def notify_node_start(self, node_id: str, inputs: Dict[str, Any], ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_node_start(node_id, inputs, ctx)
+
+    def notify_node_end(self, node_id: str, outputs: Dict[str, Any], duration: float, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_node_end(node_id, outputs, duration, ctx)
+
+    def notify_node_cached(self, node_id: str, signature: str, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_node_cached(node_id, signature, ctx)
+
+    def notify_error(self, node_id: str, error: Exception, ctx: CallbackContext) -> None:
+        for callback in self.callbacks:
+            callback.on_error(node_id, error, ctx)
+

@@ -150,7 +150,16 @@ def test_dual_node_daft_map():
     # DaftEngine calls batch once (not singular)
     assert len(call_log) == 1
     assert call_log[0][0] == "batch"
-    assert call_log[0][1] == [1, 2, 3]  # Batch received all values
+    # Batch received all values as list/array
+    # Note: The value comparison depends on the engine's internal conversion
+    # but it should contain 1, 2, 3
+    batch_arg = call_log[0][1]
+    if hasattr(batch_arg, "tolist"):
+        assert batch_arg.tolist() == [1, 2, 3]
+    elif hasattr(batch_arg, "to_pylist"):
+        assert batch_arg.to_pylist() == [1, 2, 3]
+    else:
+        assert list(batch_arg) == [1, 2, 3]
 
 
 # ============================================================================

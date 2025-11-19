@@ -68,7 +68,7 @@ DaftEngine transforms pipelines into lazy DataFrame operations using `@daft.func
 from hypernodes.engines import DaftEngine
 
 # Auto-optimized for best performance (recommended)
-engine = DaftEngine(use_batch_udf=True)
+engine = DaftEngine(use_batch_udf=True, cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[...], engine=engine)
 results = pipeline.map(inputs={"x": [1,2,3]}, map_over="x")
 ```
@@ -78,11 +78,13 @@ results = pipeline.map(inputs={"x": [1,2,3]}, map_over="x")
 - **Batch UDFs**: Auto-calculates optimal batch sizes (64-1024) based on data size
 - **Auto-tuned parallelism**: Optimizes `max_workers` (8-16x CPU cores) for I/O-bound tasks
 - **Stateful parameters**: Auto-detects or explicitly handles expensive resources (models, DB connections)
+- **Per-item caching**: In map mode, caches individual items (not batches) for efficient incremental computation
 
 **Configuration options:**
 ```python
 engine = DaftEngine(
     use_batch_udf=True,  # Use batch UDFs for performance
+    cache=DiskCache(path=".cache"),  # Enable per-item caching
     default_daft_config={
         "batch_size": 1024,      # Override auto-calculation
         "max_workers": 128,      # ThreadPoolExecutor workers
@@ -91,6 +93,14 @@ engine = DaftEngine(
     }
 )
 ```
+
+**Caching behavior:**
+- **run() mode**: Standard signature-based caching (same as SequentialEngine)
+- **map() mode**: Per-item caching - each item in the batch is cached individually
+  - Pre-checks cache for all items before execution
+  - Only executes uncached items through Daft
+  - Merges cached and newly computed results
+  - Example: `[1, 2, 3]` cached → `[1, 2, 4]` only executes item `4`
 
 **Stateful parameters** (expensive to initialize):
 ```python
