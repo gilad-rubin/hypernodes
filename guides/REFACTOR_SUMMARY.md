@@ -32,7 +32,7 @@ pipeline = Pipeline(
 
 **After:**
 ```python
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(),
     callbacks=[Progress()]
 )

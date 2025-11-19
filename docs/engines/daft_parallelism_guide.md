@@ -348,9 +348,9 @@ async def fetch(url):
 ```python
 # BEFORE (Sequential)
 from hypernodes import Pipeline, node
-from hypernodes.engines import SequentialEngine
+from hypernodes.engines import SeqEngine
 
-pipeline = Pipeline(nodes=[...], engine=SequentialEngine())
+pipeline = Pipeline(nodes=[...], engine=SeqEngine())
 
 # AFTER (Parallel)
 # Option 1: Async functions (30-37x speedup)
@@ -379,7 +379,7 @@ pipeline = Pipeline(nodes=[sync_node], engine=DaskEngine())
 - ✅ You want **zero configuration** (works out of the box)
 - ✅ You don't need complex data transformations
 
-### Use SequentialEngine when:
+### Use SeqEngine when:
 - ✅ **Debugging** (predictable, step-by-step execution)
 - ✅ **Very small datasets** (<10 items where overhead > benefit)
 - ✅ **Trivial operations** (<1ms per item)

@@ -4,7 +4,7 @@ This script demonstrates:
 - Stateful DualNode pattern (encoder/searcher as classes)
 - Singular functions that call batch internally (single source of truth)
 - Dataclasses for type-safe embeddings and results (Daft-compatible!)
-- Testing with both SequentialEngine and DaftEngine
+- Testing with both SeqEngine and DaftEngine
 """
 
 import time
@@ -21,7 +21,7 @@ try:
     DAFT_AVAILABLE = True
 except ImportError:
     DAFT_AVAILABLE = False
-    print("⚠️  Daft not available - will only test SequentialEngine")
+    print("⚠️  Daft not available - will only test SeqEngine")
 
 
 # ============================================================================
@@ -246,9 +246,9 @@ def create_search_pipeline():
 
 
 def test_sequential_engine():
-    """Test with SequentialEngine."""
+    """Test with SeqEngine."""
     print("\n" + "=" * 70)
-    print("Testing with SequentialEngine")
+    print("Testing with SeqEngine")
     print("=" * 70)
 
     passages, queries = create_test_data(num_passages=10, num_queries=3)
@@ -447,7 +447,7 @@ if __name__ == "__main__":
     print("  - Dataclasses for type-safe embeddings and results")
     print("  - Automatic batch optimization with DaftEngine (4-5x faster!)")
 
-    # Test with SequentialEngine
+    # Test with SeqEngine
     seq_results = test_sequential_engine()
 
     # Test with DaftEngine

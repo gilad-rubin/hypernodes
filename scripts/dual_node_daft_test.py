@@ -5,8 +5,9 @@ from typing import List
 from hypernodes import DualNode, Pipeline
 
 try:
-    from hypernodes.engines import DaftEngine
     from daft import Series
+
+    from hypernodes.engines import DaftEngine
 
     DAFT_AVAILABLE = True
 except ImportError:
@@ -63,22 +64,22 @@ encode_node = DualNode(
 
 
 # ============================================================================
-# Test with SequentialEngine (should use singular)
+# Test with SeqEngine (should use singular)
 # ============================================================================
 
 
 def test_sequential_engine():
-    """Test that SequentialEngine uses singular function."""
+    """Test that SeqEngine uses singular function."""
     print("\n" + "=" * 60)
-    print("Testing SequentialEngine (should use SINGULAR)")
+    print("Testing SeqEngine (should use SINGULAR)")
     print("=" * 60)
 
-    from hypernodes.engines import SequentialEngine
+    from hypernodes.engines import SeqEngine
 
-    pipeline = Pipeline(nodes=[encode_node], engine=SequentialEngine())
+    pipeline = Pipeline(nodes=[encode_node], engine=SeqEngine())
     encoder = InstrumentedEncoder(model_name="test-model")
 
-    print("\n[TEST] Running .map() with SequentialEngine (3 items):")
+    print("\n[TEST] Running .map() with SeqEngine (3 items):")
     results = pipeline.map(
         inputs={
             "text": ["Hello", "World", "Test"],
@@ -91,11 +92,15 @@ def test_sequential_engine():
     print(f"Singular calls: {encoder.singular_calls}")
     print(f"Batch calls: {encoder.batch_calls}")
 
-    # SequentialEngine should call singular 3 times, batch 0 times
-    assert encoder.singular_calls == 3, f"Expected 3 singular calls, got {encoder.singular_calls}"
-    assert encoder.batch_calls == 0, f"Expected 0 batch calls, got {encoder.batch_calls}"
+    # SeqEngine should call singular 3 times, batch 0 times
+    assert encoder.singular_calls == 3, (
+        f"Expected 3 singular calls, got {encoder.singular_calls}"
+    )
+    assert encoder.batch_calls == 0, (
+        f"Expected 0 batch calls, got {encoder.batch_calls}"
+    )
 
-    print("\n✅ SequentialEngine correctly uses singular function!")
+    print("\n✅ SeqEngine correctly uses singular function!")
 
 
 # ============================================================================
@@ -151,4 +156,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("🎉 All tests passed!")
     print("=" * 60)
-

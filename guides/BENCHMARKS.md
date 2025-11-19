@@ -18,7 +18,7 @@ pytest tests/test_benchmarks_engines.py -v -s
 
 ### 1. **Simple Execution** (Baseline)
 - **What**: Sequential execution of a 2-node pipeline
-- **Expected**: SequentialEngine faster (no overhead)
+- **Expected**: SeqEngine faster (no overhead)
 - **DAFT Cost**: Graph construction, DataFrame creation
 
 ```python
@@ -33,7 +33,7 @@ def multiply_by_two(add_result: int) -> int:
 
 ### 2. **Map - Basic** (10 items)
 - **What**: Map operation over 10 simple items
-- **Expected**: SequentialEngine faster (less overhead)
+- **Expected**: SeqEngine faster (less overhead)
 - **Use Case**: Shows when DAFT overhead outweighs benefits
 
 ```python
@@ -113,7 +113,7 @@ pipeline.map(inputs=inputs, map_over=["x", "y"], map_mode="zip")
 ## Results Interpretation
 
 ### Speedup Values
-- **1.00x** or less: SequentialEngine is faster (or comparable)
+- **1.00x** or less: SeqEngine is faster (or comparable)
 - **>1.00x**: DaftEngine is faster (speedup factor)
 
 Example: **1.10x** means DAFT is 10% faster
@@ -174,7 +174,7 @@ def test_benchmarks_custom(benchmark_suite):
         return x * 2
     
     # Create pipelines
-    seq_engine = SequentialEngine()
+    seq_engine = SeqEngine()
     seq_pipeline = Pipeline(nodes=[my_operation], engine=seq_engine)
     seq_time = benchmark_suite.run_benchmark(
         test_name, seq_engine, seq_pipeline, {"x": 5}

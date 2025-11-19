@@ -57,7 +57,7 @@ else:
 | Engine | Pipeline Time | NDCG@20 | Status |
 |--------|---------------|---------|--------|
 | **DaftEngine** | **15.07s** | 0.0134 | ✅ Winner! |
-| SequentialEngine | 15.97s | 0.0134 | ✅ Works |
+| SeqEngine | 15.97s | 0.0134 | ✅ Works |
 
 **Speedup**: DaftEngine is **1.06x faster** (5.6% improvement)
 
@@ -115,7 +115,7 @@ uv run scripts/retrieval_ultra_fast.py --daft
 
 **Performance**: ~15.07s
 
-### Run with SequentialEngine (Simple)
+### Run with SeqEngine (Simple)
 
 ```bash
 uv run scripts/retrieval_ultra_fast.py
@@ -254,7 +254,7 @@ class RecallEvaluator
 - One-by-one encoding: ~11s for 1168 passages
 - Total pipeline: ~27s
 
-### Optimized (SequentialEngine)
+### Optimized (SeqEngine)
 - Batch encoding: ~1.2s for 1168 passages
 - Total pipeline: ~15.97s
 - **Speedup: 1.69x faster**
@@ -263,7 +263,7 @@ class RecallEvaluator
 - Batch encoding: ~1.1s for 1168 passages
 - Total pipeline: ~15.07s
 - **Speedup: 1.79x faster than original**
-- **Speedup: 1.06x faster than SequentialEngine**
+- **Speedup: 1.06x faster than SeqEngine**
 
 ---
 
@@ -300,7 +300,7 @@ Use DaftEngine when:
 - ✅ You want lazy evaluation
 - ✅ You're working with large datasets
 
-Use SequentialEngine when:
+Use SeqEngine when:
 - ✅ You want simplicity
 - ✅ Single-machine execution is fine
 - ✅ Easier debugging

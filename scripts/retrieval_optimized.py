@@ -643,7 +643,7 @@ if __name__ == "__main__":
         print("Engine: DaftEngine (parallelism enabled)")
         pipeline_optimized = pipeline_optimized.with_engine(DaftEngine())
     else:
-        print("Engine: SequentialEngine (baseline)")
+        print("Engine: SeqEngine (baseline)")
 
     print("=" * 60)
     print("\nOptimizations:")

@@ -23,9 +23,9 @@ from .cache import compute_signature, hash_inputs
 from .callbacks import CallbackContext, PipelineCallback
 
 if TYPE_CHECKING:
+    from .cache import Cache
     from .node import Node
     from .pipeline import Pipeline
-    from .cache import Cache
 
 T = TypeVar("T")
 
@@ -37,7 +37,9 @@ def _get_async_executor() -> ThreadPoolExecutor:
     """Lazily create a shared thread pool for running coroutines in Jupyter."""
     global _ASYNC_EXECUTOR
     if _ASYNC_EXECUTOR is None:
-        _ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hypernodes-async")
+        _ASYNC_EXECUTOR = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="hypernodes-async"
+        )
     return _ASYNC_EXECUTOR
 
 
@@ -204,16 +206,16 @@ def _execute_pipeline_node(
 
     # Mark this as a PipelineNode in context
     ctx.set(f"_is_pipeline_node:{node_id}", True)
-    
+
     # IMPORTANT: The Pipeline class itself no longer holds execution state.
-    # We need to run the inner pipeline using the *same engine instance* 
+    # We need to run the inner pipeline using the *same engine instance*
     # (or a compatible one) to preserve the execution context (cache, callbacks).
-    
+
     # Create an engine that inherits the parent's context
     # This is effectively "inheriting" the runtime environment
-    from .sequential_engine import SequentialEngine
-    
-    nested_engine = SequentialEngine(cache=cache, callbacks=callbacks)
+    from .sequential_engine import SeqEngine
+
+    nested_engine = SeqEngine(cache=cache, callbacks=callbacks)
 
     try:
         # Trigger nested pipeline start callbacks
@@ -228,11 +230,11 @@ def _execute_pipeline_node(
         # Execute via the pipeline_node, which applies input/output mapping
         # and then internally calls the inner pipeline.
         # But we need to override the engine for the inner execution.
-        
+
         # Temporarily set the inner pipeline's engine to our nested engine
         original_engine = inner_pipeline.engine
         inner_pipeline.engine = nested_engine
-        
+
         try:
             # Use PipelineNode's __call__ which handles mapping
             result = pipeline_node(required_outputs=required_outputs, **inputs)
@@ -327,9 +329,11 @@ def execute_single_node(
         # Execute based on node type
         if hasattr(node, "pipeline"):
             # PipelineNode - delegate to specialized function
-            result = _execute_pipeline_node(node, inputs, pipeline, cache, callbacks, ctx)
+            result = _execute_pipeline_node(
+                node, inputs, pipeline, cache, callbacks, ctx
+            )
         elif hasattr(node, "is_dual_node") and node.is_dual_node:
-            # DualNode - use singular function (SequentialEngine executes one at a time)
+            # DualNode - use singular function (SeqEngine executes one at a time)
             result = node.singular(**inputs)
 
             # Handle async functions - auto-detect and run with asyncio

@@ -21,11 +21,11 @@ result = pipeline.run(inputs={"x": 5})
 
 ### New API ✅ (Current)
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Cache and callbacks on Engine
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
@@ -37,8 +37,8 @@ result = pipeline.run(inputs={"x": 5})
 
 ### 1. Update Imports
 ```python
-# Add SequentialEngine import
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+# Add SeqEngine import
+from hypernodes import Pipeline, SeqEngine, DiskCache
 ```
 
 ### 2. Move Configuration to Engine
@@ -53,7 +53,7 @@ pipeline = Pipeline(
 
 **After:**
 ```python
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(),
     callbacks=[ProgressCallback()]
 )
@@ -103,31 +103,31 @@ from hypernodes import Pipeline, node
 def process(x: int) -> int:
     return x * 2
 
-# Default engine is SequentialEngine with no cache/callbacks
+# Default engine is SeqEngine with no cache/callbacks
 pipeline = Pipeline(nodes=[process])
 result = pipeline.run(inputs={"x": 5})
 ```
 
 ### With Caching
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 
-engine = SequentialEngine(cache=DiskCache(path=".cache"))
+engine = SeqEngine(cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
 ### With Callbacks
 ```python
-from hypernodes import Pipeline, SequentialEngine
+from hypernodes import Pipeline, SeqEngine
 from hypernodes.telemetry import ProgressCallback
 
-engine = SequentialEngine(callbacks=[ProgressCallback()])
+engine = SeqEngine(callbacks=[ProgressCallback()])
 pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
 ### With Both
 ```python
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
@@ -137,7 +137,7 @@ pipeline = Pipeline(nodes=[...], engine=engine)
 ### Engine Override Per Execution
 ```python
 # Default engine
-pipeline = Pipeline(nodes=[...], engine=SequentialEngine())
+pipeline = Pipeline(nodes=[...], engine=SeqEngine())
 
 # Override for specific execution
 daft_engine = DaftEngine(use_batch_udf=True)
@@ -160,9 +160,9 @@ class DaftOnlyCallback(PipelineCallback):
 This fails early if used with incompatible engines:
 ```python
 # ❌ Raises ValueError at execution time
-engine = SequentialEngine(callbacks=[DaftOnlyCallback()])
+engine = SeqEngine(callbacks=[DaftOnlyCallback()])
 pipeline = Pipeline(nodes=[...], engine=engine)
-pipeline.run(inputs={})  # ValueError: Callback not compatible with SequentialEngine
+pipeline.run(inputs={})  # ValueError: Callback not compatible with SeqEngine
 ```
 
 ## Removed Methods
@@ -175,7 +175,7 @@ Use engine configuration instead:
 ```python
 # Old: pipeline.with_cache(DiskCache()).with_callbacks([Progress()])
 # New: 
-engine = SequentialEngine(cache=DiskCache(), callbacks=[Progress()])
+engine = SeqEngine(cache=DiskCache(), callbacks=[Progress()])
 pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 

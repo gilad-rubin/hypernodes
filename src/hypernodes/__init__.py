@@ -28,7 +28,7 @@ from .cache import DiskCache
 from .callbacks import CallbackContext, PipelineCallback
 from .decorators import stateful
 from .dual_node import DualNode
-from .engines import SequentialEngine
+from .engines import SeqEngine
 from .exceptions import (
     CycleError,
     DependencyError,
@@ -64,7 +64,7 @@ __all__ = [
     "Node",
     "Pipeline",
     # Engines
-    "SequentialEngine",
+    "SeqEngine",
     # Cache & Callbacks
     "DiskCache",
     "PipelineCallback",

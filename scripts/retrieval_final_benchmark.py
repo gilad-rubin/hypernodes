@@ -3,9 +3,9 @@
 Comprehensive Retrieval Encoding Benchmark
 
 Compares multiple optimization strategies:
-1. SequentialEngine + batch encoding (baseline)
+1. SeqEngine + batch encoding (baseline)
 2. DaftEngine + automatic threading (using engine's built-in parallelism)
-3. SequentialEngine + @daft.cls optimization
+3. SeqEngine + @daft.cls optimization
 
 Focus: Find the FASTEST approach for encoding in the retrieval pipeline
 """
@@ -13,25 +13,24 @@ Focus: Find the FASTEST approach for encoding in the retrieval pipeline
 import time
 from typing import List
 
+import daft
 import numpy as np
 import pandas as pd
+from daft import DataType, Series
 from model2vec import StaticModel
 
-import daft
-from daft import DataType, Series
-
 from hypernodes import Pipeline, node
-from hypernodes.engines import SequentialEngine, DaftEngine
+from hypernodes.engines import DaftEngine, SeqEngine
 
 
 # ==================== Simple Encoder (Baseline) ====================
 class SimpleEncoder:
     """Simple encoder - no special optimizations."""
-    
+
     def __init__(self, model_name: str):
         print(f"[SimpleEncoder] Loading: {model_name}")
         self._model = StaticModel.from_pretrained(model_name)
-    
+
     def encode_batch(self, texts: List[str]) -> List[np.ndarray]:
         """Batch encode."""
         batch_embeddings = self._model.encode(texts)
@@ -42,11 +41,11 @@ class SimpleEncoder:
 @daft.cls
 class DaftEncoder:
     """Encoder with @daft.cls for lazy init and batch optimization."""
-    
+
     def __init__(self, model_name: str):
         print(f"[DaftEncoder] Loading: {model_name}")
         self._model = StaticModel.from_pretrained(model_name)
-    
+
     @daft.method.batch(return_dtype=DataType.python())
     def encode_batch(self, texts):
         """Batch encode - dual mode."""
@@ -87,38 +86,38 @@ def benchmark_strategy(strategy_name: str, encoder, engine, num_examples: int = 
     print(f"\n{'=' * 70}")
     print(f"STRATEGY: {strategy_name}")
     print(f"{'=' * 70}")
-    
+
     # Create pipeline
     pipeline = Pipeline(
         nodes=[load_passages, encode_passages_batch],
         engine=engine,
         name=f"benchmark_{strategy_name}",
     )
-    
+
     inputs = {
         "corpus_path": f"data/sample_{num_examples}/corpus.parquet",
         "limit": 0,
         "encoder": encoder,
     }
-    
+
     # Warmup run (to load model if lazy)
     print("Warming up...")
     _ = pipeline.run(output_name="encoded_passages", inputs=inputs)
-    
+
     # Timed run
     print("Running benchmark...")
     start = time.time()
     result = pipeline.run(output_name="encoded_passages", inputs=inputs)
     elapsed = time.time() - start
-    
+
     num_passages = len(result["encoded_passages"])
     throughput = num_passages / elapsed
-    
-    print(f"\nResults:")
+
+    print("\nResults:")
     print(f"  Passages: {num_passages}")
     print(f"  Time: {elapsed:.3f}s")
     print(f"  Throughput: {throughput:.1f} passages/s")
-    
+
     return {
         "strategy": strategy_name,
         "time": elapsed,
@@ -132,71 +131,62 @@ def main():
     print("RETRIEVAL ENCODING BENCHMARK")
     print("=" * 70)
     print("\nComparing optimization strategies:")
-    print("  1. SequentialEngine + Simple encoder")
-    print("  2. SequentialEngine + @daft.cls encoder")
+    print("  1. SeqEngine + Simple encoder")
+    print("  2. SeqEngine + @daft.cls encoder")
     print("  3. DaftEngine + @daft.cls encoder (auto threading)")
     print("=" * 70)
-    
+
     num_examples = 5
     model_name = "minishlab/potion-retrieval-32M"
-    
+
     results = []
-    
+
     # Strategy 1: Sequential + Simple
     print("\n\nPreparing Strategy 1...")
     encoder1 = SimpleEncoder(model_name)
-    engine1 = SequentialEngine()
-    result1 = benchmark_strategy(
-        "Sequential + Simple",
-        encoder1,
-        engine1,
-        num_examples
-    )
+    engine1 = SeqEngine()
+    result1 = benchmark_strategy("Sequential + Simple", encoder1, engine1, num_examples)
     results.append(result1)
-    
+
     time.sleep(0.5)
-    
+
     # Strategy 2: Sequential + @daft.cls
     print("\n\nPreparing Strategy 2...")
     encoder2 = DaftEncoder(model_name)
-    engine2 = SequentialEngine()
+    engine2 = SeqEngine()
     result2 = benchmark_strategy(
-        "Sequential + @daft.cls",
-        encoder2,
-        engine2,
-        num_examples
+        "Sequential + @daft.cls", encoder2, engine2, num_examples
     )
     results.append(result2)
-    
+
     time.sleep(0.5)
-    
+
     # Strategy 3: DaftEngine + @daft.cls (with batch UDF disabled for list returns)
     print("\n\nPreparing Strategy 3...")
     encoder3 = DaftEncoder(model_name)
     engine3 = DaftEngine(use_batch_udf=False)  # Disable batch UDF for complex types
     result3 = benchmark_strategy(
-        "DaftEngine + @daft.cls (row-wise)",
-        encoder3,
-        engine3,
-        num_examples
+        "DaftEngine + @daft.cls (row-wise)", encoder3, engine3, num_examples
     )
     results.append(result3)
-    
+
     # Comparison table
     print("\n" + "=" * 70)
     print("COMPARISON")
     print("=" * 70)
     print(f"\n{'Strategy':<40} {'Time (s)':<15} {'Throughput':<15} {'vs Baseline'}")
     print("-" * 70)
-    
+
     baseline_time = results[0]["time"]
     for r in results:
         speedup = baseline_time / r["time"]
-        print(f"{r['strategy']:<40} "
-              f"{r['time']:<15.3f} "
-              f"{r['throughput']:<15.1f} "
-              f"{speedup:.2f}x")
-    
+        print(
+            f"{r['strategy']:<40} "
+            f"{r['time']:<15.3f} "
+            f"{r['throughput']:<15.1f} "
+            f"{speedup:.2f}x"
+        )
+
     # Find best
     best = min(results, key=lambda x: x["time"])
     print("\n" + "=" * 70)
@@ -206,7 +196,7 @@ def main():
     print(f"   Time: {best['time']:.3f}s")
     print(f"   Speedup: {baseline_time / best['time']:.2f}x faster than baseline")
     print("=" * 70)
-    
+
     # Key insights
     print("\n" + "=" * 70)
     print("KEY INSIGHTS:")
@@ -218,10 +208,9 @@ def main():
     print("\nFor retrieval encoding:")
     print("  ✅ Use batch encoding nodes (97x faster than one-by-one)")
     print("  ✅ Use @daft.cls for lazy initialization")
-    print("  ✅ Use SequentialEngine (simplest, works great for batch ops)")
+    print("  ✅ Use SeqEngine (simplest, works great for batch ops)")
     print("=" * 70)
 
 
 if __name__ == "__main__":
     main()
-

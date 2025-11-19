@@ -90,7 +90,7 @@ def test_dual_node_singular_execution():
 
 
 def test_dual_node_sequential_map():
-    """Test DualNode with SequentialEngine uses singular in loop."""
+    """Test DualNode with SeqEngine uses singular in loop."""
 
     call_log = []
 
@@ -109,13 +109,10 @@ def test_dual_node_sequential_map():
     )
 
     pipeline = Pipeline(nodes=[node])
-    results = pipeline.map(
-        inputs={"x": [1, 2, 3], "factor": 10},
-        map_over="x"
-    )
+    results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
 
     assert results == [{"result": 10}, {"result": 20}, {"result": 30}]
-    # SequentialEngine calls singular 3 times
+    # SeqEngine calls singular 3 times
     assert len(call_log) == 3
     assert all(call[0] == "singular" for call in call_log)
 
@@ -141,10 +138,7 @@ def test_dual_node_daft_map():
     )
 
     pipeline = Pipeline(nodes=[node], engine=DaftEngine())
-    results = pipeline.map(
-        inputs={"x": [1, 2, 3], "factor": 10},
-        map_over="x"
-    )
+    results = pipeline.map(inputs={"x": [1, 2, 3], "factor": 10}, map_over="x")
 
     assert results == [{"result": 10}, {"result": 20}, {"result": 30}]
     # DaftEngine calls batch once (not singular)
@@ -221,8 +215,7 @@ def test_dual_node_with_dataclasses():
 
     def process_batch(items: List[Item]) -> List[ProcessedItem]:
         return [
-            ProcessedItem(original=item.value, doubled=item.value * 2)
-            for item in items
+            ProcessedItem(original=item.value, doubled=item.value * 2) for item in items
         ]
 
     node = DualNode(
@@ -287,10 +280,7 @@ def test_singular_wraps_batch_pattern():
     assert result["embedding"] == [5.0, 5.0, 5.0]
 
     # Batch execution
-    results = pipeline.map(
-        inputs={"text": ["hi", "bye", "test"]},
-        map_over="text"
-    )
+    results = pipeline.map(inputs={"text": ["hi", "bye", "test"]}, map_over="text")
     assert results[0]["embedding"] == [2.0, 2.0, 2.0]  # "hi" = 2 chars
     assert results[1]["embedding"] == [3.0, 3.0, 3.0]  # "bye" = 3 chars
     assert results[2]["embedding"] == [4.0, 4.0, 4.0]  # "test" = 4 chars
@@ -319,7 +309,7 @@ def test_dual_node_engine_consistency():
 
     inputs = {"x": [1, 2, 3, 4, 5], "y": [10, 20, 30, 40, 50]}
 
-    # SequentialEngine
+    # SeqEngine
     pipeline_seq = Pipeline(nodes=[node])
     results_seq = pipeline_seq.map(inputs=inputs, map_over=["x", "y"])
 
@@ -382,9 +372,9 @@ def test_multiple_dual_nodes():
     # Test batch
     results = pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
     assert results == [
-        {"doubled": 2, "result": 12},   # (1 * 2) + 10
-        {"doubled": 4, "result": 14},   # (2 * 2) + 10
-        {"doubled": 6, "result": 16},   # (3 * 2) + 10
+        {"doubled": 2, "result": 12},  # (1 * 2) + 10
+        {"doubled": 4, "result": 14},  # (2 * 2) + 10
+        {"doubled": 6, "result": 16},  # (3 * 2) + 10
     ]
 
 
@@ -439,6 +429,5 @@ def test_dual_node_single_item_batch():
     # Single item should still use map's behavior
     results = pipeline.map(inputs={"x": [5]}, map_over="x")
     assert results == [{"result": 10}]
-    # SequentialEngine calls singular once
+    # SeqEngine calls singular once
     assert "singular" in call_log
-

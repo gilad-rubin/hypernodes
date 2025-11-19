@@ -29,7 +29,7 @@ assert result["encoded"] == [0.1, 0.2, 0.3]
 
 ### 3. Performance
 Automatically use batch operations during `.map()`:
-- **SequentialEngine**: Uses singular function (3 calls for 3 items)
+- **SeqEngine**: Uses singular function (3 calls for 3 items)
 - **DaftEngine**: Uses batch function (1 call for 3 items) ⚡
 
 ## Basic Usage
@@ -67,7 +67,7 @@ pipeline = Pipeline(nodes=[encode_node])
 result = pipeline.run(inputs={"text": "Hello", "encoder": encoder})
 # Calls: encode_singular("Hello", encoder)
 
-# .map() with SequentialEngine - uses singular function
+# .map() with SeqEngine - uses singular function
 results = pipeline.map(
     inputs={"text": ["A", "B", "C"], "encoder": encoder},
     map_over="text"
@@ -204,7 +204,7 @@ The **singular** function's type hints are used for:
 The batch function's types are only used internally by DaftEngine.
 
 ### Engine Support
-- ✅ **SequentialEngine**: Always uses singular function
+- ✅ **SeqEngine**: Always uses singular function
 - ✅ **DaftEngine**: Uses batch function during `.map()`, singular during `.run()`
 - ⚠️ **DaskEngine**: Not yet supported (uses singular function)
 

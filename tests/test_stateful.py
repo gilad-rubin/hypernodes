@@ -3,7 +3,7 @@
 import pytest
 
 from hypernodes import DiskCache, Pipeline, node, stateful
-from hypernodes.engines import SequentialEngine
+from hypernodes.engines import SeqEngine
 
 
 class TestStatefulDecorator:
@@ -59,8 +59,8 @@ class TestStatefulDecorator:
         assert init_count["count"] == 1  # Still only initialized once
 
 
-class TestSequentialEngineStateful:
-    """Test SequentialEngine stateful object caching."""
+class TestSeqEngineStateful:
+    """Test SeqEngine stateful object caching."""
 
     def test_stateful_object_reused_in_map(self):
         """Test that stateful objects are reused across map items."""
@@ -86,7 +86,7 @@ class TestSequentialEngineStateful:
         resource = ExpensiveResource(multiplier=10)
         assert init_count["count"] == 0  # Not initialized yet
 
-        pipeline = Pipeline(nodes=[process], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[process], engine=SeqEngine())
 
         # Run map over 5 items
         results = pipeline.map(
@@ -118,7 +118,7 @@ class TestSequentialEngineStateful:
             return x + resource.value
 
         resource = RegularResource(value=100)
-        pipeline = Pipeline(nodes=[process], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[process], engine=SeqEngine())
 
         results = pipeline.map(
             inputs={"x": [1, 2, 3], "resource": resource}, map_over="x"
@@ -155,7 +155,7 @@ class TestCachingWithStateful:
 
         model = Model(model_path="test.pkl")
         cache = DiskCache(path=str(tmp_path / ".cache"))
-        pipeline = Pipeline(nodes=[predict], engine=SequentialEngine(cache=cache))
+        pipeline = Pipeline(nodes=[predict], engine=SeqEngine(cache=cache))
 
         # First run - should execute
         result1 = pipeline.run(inputs={"x": 5, "model": model})
@@ -181,7 +181,7 @@ class TestCachingWithStateful:
 
         model = ModelWithoutKey(model_path="test.pkl")
         cache = DiskCache(path=str(tmp_path / ".cache"))
-        pipeline = Pipeline(nodes=[process], engine=SequentialEngine(cache=cache))
+        pipeline = Pipeline(nodes=[process], engine=SeqEngine(cache=cache))
 
         # Should work with default cache key (from init args)
         result1 = pipeline.run(inputs={"x": 5, "model": model})
@@ -196,7 +196,7 @@ class TestCachingWithStateful:
             call_count["count"] += 1
             return x * 2
 
-        pipeline2 = Pipeline(nodes=[process2], engine=SequentialEngine(cache=cache))
+        pipeline2 = Pipeline(nodes=[process2], engine=SeqEngine(cache=cache))
         result2 = pipeline2.run(inputs={"x": 5, "model": model2})
         assert result2 == {"result2": 10}
         assert call_count["count"] == 1  # Executed (different init args)
@@ -297,7 +297,7 @@ class TestStatefulWithDualNode:
         )
 
         # Use in pipeline
-        pipeline = Pipeline(nodes=[dual], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[dual], engine=SeqEngine())
 
         # Test single execution (uses singular)
         result = pipeline.run(inputs={"x": 10})
@@ -322,7 +322,7 @@ class TestAsyncSupport:
     """Test async function support with stateful objects."""
 
     def test_async_node_sequential_engine(self):
-        """Test that SequentialEngine auto-detects and runs async functions."""
+        """Test that SeqEngine auto-detects and runs async functions."""
         import asyncio
 
         @node(output_name="result")
@@ -330,12 +330,12 @@ class TestAsyncSupport:
             await asyncio.sleep(0.001)
             return x * 2
 
-        pipeline = Pipeline(nodes=[async_task], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[async_task], engine=SeqEngine())
         result = pipeline.run(inputs={"x": 5})
         assert result == {"result": 10}
 
     def test_async_with_stateful_sequential(self):
-        """Test async function with stateful parameter in SequentialEngine."""
+        """Test async function with stateful parameter in SeqEngine."""
         import asyncio
 
         @stateful
@@ -349,7 +349,7 @@ class TestAsyncSupport:
             return f"{client.base_url}/{item_id}"
 
         client = AsyncClient(base_url="http://api.com")
-        pipeline = Pipeline(nodes=[fetch], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[fetch], engine=SeqEngine())
         result = pipeline.run(inputs={"item_id": "test", "client": client})
         assert result == {"response": "http://api.com/test"}
 
@@ -362,7 +362,7 @@ class TestAsyncSupport:
             await asyncio.sleep(0.001)
             return x * 10
 
-        pipeline = Pipeline(nodes=[async_fetch], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[async_fetch], engine=SeqEngine())
 
         # Simulate Jupyter by running in async context
         async def run_in_loop():
@@ -394,7 +394,7 @@ class TestStatefulEdgeCases:
         def process(x: int, mult: Multiplier) -> int:
             return mult.multiply(x)
 
-        pipeline = Pipeline(nodes=[process], engine=SequentialEngine())
+        pipeline = Pipeline(nodes=[process], engine=SeqEngine())
 
         # Different multiplier instances should produce different results
         mult_2 = Multiplier(factor=2)

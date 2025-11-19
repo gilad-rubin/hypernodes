@@ -126,7 +126,7 @@ def encode_passages_batch(passages, encoder):
 ```python
 engine = DaftEngine(use_batch_udf=True)  # Auto-optimized!
 # Or:
-engine = SequentialEngine()  # Simple for batch ops
+engine = SeqEngine()  # Simple for batch ops
 ```
 
 **Total Effort:** 30 minutes  
@@ -196,7 +196,7 @@ Why? Eliminates per-item overhead completely.
 
 1. ✅ **Batch encoding** → 97x faster
 2. ✅ **@stateful** → Instant init
-3. ✅ **SequentialEngine or DaftEngine** → Optimal for batch
+3. ✅ **SeqEngine or DaftEngine** → Optimal for batch
 
 **Expected Result:**
 - Encoding: 11s → 0.11s (100x faster!)

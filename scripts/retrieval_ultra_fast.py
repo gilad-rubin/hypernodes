@@ -601,7 +601,7 @@ def print_profiling_results(telemetry: TelemetryCallback) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Hebrew retrieval pipeline with SequentialEngine or DaftEngine."
+        description="Hebrew retrieval pipeline with SeqEngine or DaftEngine."
     )
 
     # Dataset options
@@ -750,7 +750,7 @@ def main() -> None:
     )
 
     pipeline = full_pipeline
-    engine_name = "SequentialEngine"
+    engine_name = "SeqEngine"
 
     if args.engine == "daft":
         from hypernodes.engines import DaftEngine
@@ -786,9 +786,9 @@ def main() -> None:
         pipeline = pipeline.with_engine(DaskEngine())
         engine_name = "DaskEngine"
     else:
-        from hypernodes.engines import SequentialEngine
+        from hypernodes.engines import SeqEngine
 
-        pipeline = pipeline.with_engine(SequentialEngine())
+        pipeline = pipeline.with_engine(SeqEngine())
 
     if not args.quiet:
         print("=" * 70)

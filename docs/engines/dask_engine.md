@@ -2,7 +2,7 @@
 
 ## Overview
 
-`DaskEngine` is a parallel execution engine for HyperNodes that leverages Dask Bag to provide automatic parallelization of map operations. It's designed to be a drop-in replacement for `SequentialEngine` with zero configuration required.
+`DaskEngine` is a parallel execution engine for HyperNodes that leverages Dask Bag to provide automatic parallelization of map operations. It's designed to be a drop-in replacement for `SeqEngine` with zero configuration required.
 
 ## Key Features
 
@@ -81,7 +81,7 @@ engine = DaskEngine(
 
 ### Architecture
 
-1. **Single Run (`pipeline.run()`)**: Uses sequential execution identical to `SequentialEngine` to avoid Dask overhead
+1. **Single Run (`pipeline.run()`)**: Uses sequential execution identical to `SeqEngine` to avoid Dask overhead
 2. **Map Operations (`pipeline.map()`)**: Uses Dask Bag with automatically calculated `npartitions`
 3. **Nested Pipelines**: Parent engine configuration is inherited
 
@@ -200,13 +200,13 @@ Based on empirical testing (see `notebooks/map_benchmark_io_cpu.ipynb`):
 ### ❌ Not Ideal For
 
 1. **Very small datasets** (<10 items) - overhead outweighs benefit
-2. **Already-optimized single runs** - use SequentialEngine
+2. **Already-optimized single runs** - use SeqEngine
 3. **Distributed clusters** - consider DaftEngine instead
 4. **Heavy inter-task communication** - Dask Bag isn't optimized for this
 
 ## Comparison with Other Engines
 
-| Feature | SequentialEngine | DaskEngine | DaftEngine |
+| Feature | SeqEngine | DaskEngine | DaftEngine |
 |---------|-----------------|------------|------------|
 | Parallelism | ❌ None | ✅ Local multi-core | ✅ Distributed cluster |
 | Configuration | ✅ None needed | ✅ Auto-optimized | ⚠️ Manual setup |
@@ -262,7 +262,7 @@ results = pipeline.map(inputs={"x": range(100)}, map_over="x")
 
 ### "Results are slow for small datasets"
 
-**Solution**: This is expected. Dask has overhead. For <50 items, use `SequentialEngine`.
+**Solution**: This is expected. Dask has overhead. For <50 items, use `SeqEngine`.
 
 ### "Getting serialization errors"
 
@@ -311,5 +311,5 @@ class DaskEngine:
 - [Dask Documentation](https://docs.dask.org/)
 - [Dask Bag API](https://docs.dask.org/en/stable/bag.html)
 - [Benchmark Notebook](../notebooks/map_benchmark_io_cpu.ipynb)
-- [SequentialEngine](sequential_engine.md)
+- [SeqEngine](sequential_engine.md)
 - [DaftEngine](integrations/daft/README.md)

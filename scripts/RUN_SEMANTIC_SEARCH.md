@@ -147,7 +147,7 @@ This demonstrates:
   - Automatic batch optimization with DaftEngine
 
 ======================================================================
-Testing with SequentialEngine
+Testing with SeqEngine
 ======================================================================
 
 [STEP 1] Encoding 10 passages...
@@ -232,7 +232,7 @@ Pipeline:
 
 Execution:
   - .run() → uses singular functions
-  - .map() with SequentialEngine → uses singular (loops)
+  - .map() with SeqEngine → uses singular (loops)
   - .map() with DaftEngine → uses batch (automatic!) ⚡
 ```
 

@@ -2,7 +2,7 @@
 
 ## Context
 - Pipeline: `scripts/retrieval_ultra_fast.py`
-- Engine: `SequentialEngine`
+- Engine: `SeqEngine`
 - Model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (MPS backend on Apple Silicon)
 - Dataset variants: `data/sample_5` and `data/sample_10` (`dev` split)
 - Command template:

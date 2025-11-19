@@ -76,37 +76,37 @@ class GroundTruth(BaseModel):
 class Model2VecEncoderDaft:
     """
     Highly optimized encoder using Daft's native batch processing.
-    
+
     @daft.cls provides:
     - Lazy initialization (model loaded on first use)
     - Instance reuse across batches (amortized init cost)
     - Better serialization (only config pickled)
-    
+
     This encoder supports DUAL MODE:
-    - SequentialEngine: receives Python list, returns Python list
+    - SeqEngine: receives Python list, returns Python list
     - DaftEngine: receives Daft Series, returns Daft Series (via @daft.method.batch)
     """
-    
+
     def __init__(self, model_name: str):
         """Initialize with model config (lazy - model not loaded yet)."""
         from model2vec import StaticModel
-        
+
         print(f"Loading Model2Vec model: {model_name}")
         self.model_name = model_name
         self._model = StaticModel.from_pretrained(model_name)
-    
+
     @daft.method.batch(return_dtype=DataType.python())
     def encode_batch(self, texts, is_query: bool = False):
         """
         Batch encode - works with both Python lists and Daft Series.
-        
+
         @daft.method.batch makes this work with DaftEngine's batch UDF.
-        For SequentialEngine, Daft still allows calling with Python lists.
-        
+        For SeqEngine, Daft still allows calling with Python lists.
+
         Args:
             texts: Either Python list or Daft Series of strings
             is_query: Whether these are queries (unused for Model2Vec)
-        
+
         Returns:
             Either Python list or Daft Series of embeddings (matches input type)
         """
@@ -118,7 +118,7 @@ class Model2VecEncoderDaft:
             embeddings_list = [batch_embeddings[i] for i in range(len(text_list))]
             return Series.from_pylist(embeddings_list)
         else:
-            # SequentialEngine path: list -> batch encode -> list
+            # SeqEngine path: list -> batch encode -> list
             batch_embeddings = self._model.encode(texts)
             return [batch_embeddings[i] for i in range(len(texts))]
 
@@ -126,17 +126,17 @@ class Model2VecEncoderDaft:
 # ==================== Simple Implementation Classes ====================
 class CosineSimIndex:
     """Cosine similarity vector index."""
-    
+
     def __init__(self, encoded_passages: List[EncodedPassage]):
         self._passage_uuids = [p.uuid for p in encoded_passages]
         self._embeddings = np.vstack([p.embedding for p in encoded_passages])
-    
+
     def search(self, query_embedding: np.ndarray, k: int) -> List[SearchHit]:
         from sklearn.metrics.pairwise import cosine_similarity
-        
+
         scores = cosine_similarity([query_embedding], self._embeddings)[0]
         top_k_indices = np.argsort(scores)[::-1][:k]
-        
+
         return [
             SearchHit(passage_uuid=self._passage_uuids[idx], score=float(scores[idx]))
             for idx in top_k_indices
@@ -145,19 +145,19 @@ class CosineSimIndex:
 
 class BM25IndexImpl:
     """BM25 index implementation."""
-    
+
     def __init__(self, passages: List[Passage]):
         from rank_bm25 import BM25Okapi
-        
+
         self._passage_uuids = [p.uuid for p in passages]
         tokenized_corpus = [p.text.split() for p in passages]
         self._index = BM25Okapi(tokenized_corpus)
-    
+
     def search(self, query_text: str, k: int) -> List[SearchHit]:
         tokenized_query = query_text.split()
         scores = self._index.get_scores(tokenized_query)
         top_k_indices = np.argsort(scores)[::-1][:k]
-        
+
         return [
             SearchHit(passage_uuid=self._passage_uuids[idx], score=float(scores[idx]))
             for idx in top_k_indices
@@ -166,14 +166,14 @@ class BM25IndexImpl:
 
 class CrossEncoderReranker:
     """CrossEncoder reranker implementation."""
-    
+
     def __init__(self, model_name: str):
         from sentence_transformers import CrossEncoder
-        
+
         self.model_name = model_name
         self._model = CrossEncoder(model_name)
         self._passage_lookup = None
-    
+
     def rerank(
         self,
         query: Query,
@@ -183,17 +183,17 @@ class CrossEncoderReranker:
     ) -> List[SearchHit]:
         if self._passage_lookup is None:
             self._passage_lookup = {p.uuid: p.text for p in encoded_passages}
-        
+
         candidate_uuids = [hit.passage_uuid for hit in candidates[:k]]
         candidate_texts = [self._passage_lookup[uuid] for uuid in candidate_uuids]
-        
+
         pairs = [(query.text, text) for text in candidate_texts]
         scores = self._model.predict(pairs)
-        
+
         reranked = sorted(
             zip(candidate_uuids, scores), key=lambda x: x[1], reverse=True
         )
-        
+
         return [
             SearchHit(passage_uuid=uuid, score=float(score)) for uuid, score in reranked
         ]
@@ -201,21 +201,21 @@ class CrossEncoderReranker:
 
 class RRFFusion:
     """Reciprocal Rank Fusion implementation."""
-    
+
     def __init__(self, k: int = 60):
         self.k = k
-    
+
     def fuse(self, results_list: List[List[SearchHit]]) -> List[SearchHit]:
         rrf_scores = {}
-        
+
         for results in results_list:
             for rank, hit in enumerate(results, 1):
                 rrf_scores[hit.passage_uuid] = rrf_scores.get(
                     hit.passage_uuid, 0
                 ) + 1 / (self.k + rank)
-        
+
         sorted_hits = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
-        
+
         return [
             SearchHit(passage_uuid=uuid, score=score) for uuid, score in sorted_hits
         ]
@@ -223,58 +223,58 @@ class RRFFusion:
 
 class NDCGEvaluator:
     """NDCG evaluation implementation."""
-    
+
     def __init__(self, k: int):
         self.k = k
-    
+
     def compute(
         self, predictions: List[Prediction], ground_truths: List[GroundTruth]
     ) -> float:
         pred_df = pd.DataFrame([p.model_dump() for p in predictions])
         gt_df = pd.DataFrame([gt.model_dump() for gt in ground_truths])
-        
+
         qrels = {}
         for _, row in gt_df.iterrows():
             query_id = row["query_uuid"]
             doc_id = row["paragraph_uuid"]
             relevance = int(row["label_score"])
-            
+
             if query_id not in qrels:
                 qrels[query_id] = {}
             qrels[query_id][doc_id] = relevance
-        
+
         results = {}
         for _, row in pred_df.iterrows():
             query_id = row["query_uuid"]
             doc_id = row["paragraph_uuid"]
             score = float(row["score"])
-            
+
             if query_id not in results:
                 results[query_id] = {}
             results[query_id][doc_id] = score
-        
+
         evaluator = pytrec_eval.RelevanceEvaluator(qrels, {f"ndcg_cut_{self.k}"})
         scores = evaluator.evaluate(results)
-        
+
         metric_name = f"ndcg_cut_{self.k}"
         per_query_scores = [metrics[metric_name] for metrics in scores.values()]
         avg_ndcg = float(np.mean(per_query_scores))
-        
+
         return avg_ndcg
 
 
 class RecallEvaluator:
     """Recall evaluation implementation."""
-    
+
     def __init__(self, k_list: List[int]):
         self.k_list = k_list
-    
+
     def compute(
         self, predictions: List[Prediction], ground_truths: List[GroundTruth]
     ) -> dict[str, float]:
         pred_df = pd.DataFrame([p.model_dump() for p in predictions])
         gt_df = pd.DataFrame([gt.model_dump() for gt in ground_truths])
-        
+
         recall_results = {}
         for k in self.k_list:
             top_k_list = []
@@ -282,11 +282,11 @@ class RecallEvaluator:
                 top_k_group = group.nlargest(k, "score")
                 top_k_list.append(top_k_group)
             top_k_preds = pd.concat(top_k_list, ignore_index=True)
-            
+
             merged = gt_df.merge(
                 top_k_preds, on=["query_uuid", "paragraph_uuid"], how="left"
             )
-            
+
             recall_at_k = (
                 merged[merged["label_score"] > 0]
                 .groupby("query_uuid")["score"]
@@ -294,7 +294,7 @@ class RecallEvaluator:
                 .mean()
             )
             recall_results[f"recall@{k}"] = recall_at_k
-        
+
         return recall_results
 
 
@@ -342,21 +342,21 @@ def encode_passages_batch(
 ) -> List[EncodedPassage]:
     """
     Encode ALL passages in ONE batch call using Daft's native batch processing.
-    
+
     This node works with both:
-    - SequentialEngine: calls encoder.encode_batch() directly on Python list
+    - SeqEngine: calls encoder.encode_batch() directly on Python list
     - DaftEngine: Daft converts to Series and uses @daft.method.batch
-    
+
     Result: 100-250x faster than one-by-one!
     """
     print(f"Batch encoding {len(passages)} passages...")
-    
+
     # Extract texts
     texts = [p.text for p in passages]
-    
+
     # Batch encode - Daft will handle Series conversion if using DaftEngine
     embeddings = encoder.encode_batch(texts, is_query=False)
-    
+
     # Combine with metadata
     return [
         EncodedPassage(uuid=p.uuid, text=p.text, embedding=emb)
@@ -370,17 +370,17 @@ def encode_queries_batch(
 ) -> List[EncodedQuery]:
     """
     Encode ALL queries in ONE batch call using Daft's native batch processing.
-    
+
     Result: 100-250x faster than one-by-one!
     """
     print(f"Batch encoding {len(queries)} queries...")
-    
+
     # Extract texts
     texts = [q.text for q in queries]
-    
+
     # Batch encode
     embeddings = encoder.encode_batch(texts, is_query=True)
-    
+
     # Combine with metadata
     return [
         EncodedQuery(uuid=q.uuid, text=q.text, embedding=emb)
@@ -409,7 +409,9 @@ def extract_query(encoded_query: EncodedQuery) -> Query:
 
 
 @node(output_name="vector_hits")
-def retrieve_vector(encoded_query: EncodedQuery, vector_index, top_k: int) -> List[SearchHit]:
+def retrieve_vector(
+    encoded_query: EncodedQuery, vector_index, top_k: int
+) -> List[SearchHit]:
     """Retrieve from vector index."""
     return vector_index.search(encoded_query.embedding, k=top_k)
 
@@ -441,7 +443,9 @@ def rerank_with_crossencoder(
 
 
 @node(output_name="predictions")
-def hits_to_predictions(query: Query, reranked_hits: List[SearchHit]) -> List[Prediction]:
+def hits_to_predictions(
+    query: Query, reranked_hits: List[SearchHit]
+) -> List[Prediction]:
     """Convert hits to predictions."""
     return [
         Prediction(
@@ -453,7 +457,9 @@ def hits_to_predictions(query: Query, reranked_hits: List[SearchHit]) -> List[Pr
 
 # ==================== Flattening and Evaluation Nodes ====================
 @node(output_name="all_predictions")
-def flatten_predictions(all_query_predictions: List[List[Prediction]]) -> List[Prediction]:
+def flatten_predictions(
+    all_query_predictions: List[List[Prediction]],
+) -> List[Prediction]:
     """Flatten nested predictions from mapped results."""
     return [pred for query_preds in all_query_predictions for pred in query_preds]
 
@@ -537,39 +543,39 @@ pipeline_optimized = Pipeline(
 
 if __name__ == "__main__":
     import sys
-    
-    from hypernodes.engines import DaftEngine, SequentialEngine
-    
+
+    from hypernodes.engines import DaftEngine
+
     print("=" * 60)
     print("DAFT-OPTIMIZED RETRIEVAL PIPELINE")
     print("=" * 60)
-    
+
     # Config
     num_examples = 5
     data_variant = "test"
-    
+
     print(f"Dataset: {num_examples} examples")
-    
+
     # Check for --daft flag
     use_daft = any(arg.lower() in {"--daft", "daft"} for arg in sys.argv[1:])
-    
+
     # Create encoder (Daft will handle lazy init)
     print("\nCreating encoder...")
     encoder = Model2VecEncoderDaft("minishlab/potion-retrieval-32M")
-    
+
     # Create other instances
     rrf = RRFFusion(k=60)
     ndcg_evaluator = NDCGEvaluator(k=20)
     recall_evaluator = RecallEvaluator(k_list=[20, 50, 100, 200, 300])
     reranker = CrossEncoderReranker(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
-    
+
     if use_daft:
         print("Engine: DaftEngine (with native batch UDFs)")
         engine = DaftEngine(use_batch_udf=True)
         pipeline_optimized = pipeline_optimized.with_engine(engine)
     else:
-        print("Engine: SequentialEngine (baseline)")
-    
+        print("Engine: SeqEngine (baseline)")
+
     print("=" * 60)
     print("\nOptimizations:")
     print("  ✅ @daft.cls for lazy initialization & instance reuse")
@@ -579,7 +585,7 @@ if __name__ == "__main__":
     print("\nExpected improvement:")
     print("  - Encoding: 100-250x faster")
     print("=" * 60)
-    
+
     # Build inputs
     inputs = {
         "corpus_path": f"data/sample_{num_examples}/corpus.parquet",
@@ -594,13 +600,13 @@ if __name__ == "__main__":
         "rerank_k": 300,
         "ndcg_k": 20,
     }
-    
+
     # Run pipeline with timing
     print("\nRunning pipeline...\n")
     start_time = time.time()
     results = pipeline_optimized.run(output_name="evaluation_results", inputs=inputs)
     elapsed_time = time.time() - start_time
-    
+
     # Display results
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS")
@@ -613,4 +619,3 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"\nPipeline execution time: {elapsed_time:.2f} seconds")
     print("=" * 60)
-

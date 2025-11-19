@@ -27,11 +27,11 @@ Manages a DAG of nodes. **Pure definition** - no execution state.
 **NEW ARCHITECTURE:** Pipeline no longer holds `cache` or `callbacks`. These are now configured at the engine level.
 
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Execution config is at the engine level
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
@@ -68,11 +68,11 @@ Pluggable execution strategies. All implement the `Engine` protocol.
 - Execution strategy (sequential, parallel, distributed)
 
 ```python
-from hypernodes import SequentialEngine, DiskCache
+from hypernodes import SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
-# SequentialEngine - simple topological execution
-engine = SequentialEngine(
+# SeqEngine - simple topological execution
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
@@ -89,7 +89,7 @@ pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
 **Available engines:**
-- `SequentialEngine`: Default - simple topological execution, no parallelism
+- `SeqEngine`: Default - simple topological execution, no parallelism
 - `DaftEngine`: Distributed DataFrame execution (optional, install getdaft)
 - `DaskEngine`: Parallel map operations using Dask Bag (optional, install dask)
 
@@ -105,7 +105,7 @@ Centralizes the "outer loop" of execution:
 ```python
 # Used internally by engines
 with ExecutionOrchestrator(pipeline, callbacks, context) as orchestrator:
-    orchestrator.validate_callbacks("SequentialEngine")
+    orchestrator.validate_callbacks("SeqEngine")
     orchestrator.notify_start(inputs)
     # ... execute nodes ...
     orchestrator.notify_end(outputs)
@@ -160,7 +160,7 @@ engine = DaftEngine(
 ```
 
 **Caching behavior:**
-- **run() mode**: Standard signature-based caching (same as SequentialEngine)
+- **run() mode**: Standard signature-based caching (same as SeqEngine)
 - **map() mode**: Per-item caching - each item in the batch is cached individually
   - Pre-checks cache for all items before execution
   - Only executes uncached items through Daft
@@ -198,10 +198,10 @@ sig(node) = hash(code_hash + env_hash + inputs_hash + deps_hash)
 - Cache keys are deterministic - same inputs + code = same signature
 
 ```python
-from hypernodes import SequentialEngine, DiskCache
+from hypernodes import SeqEngine, DiskCache
 
 # Configure cache at engine level
-engine = SequentialEngine(cache=DiskCache(path=".cache"))
+engine = SeqEngine(cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
@@ -216,11 +216,11 @@ Lifecycle hooks for observability. All callbacks inherit from `PipelineCallback`
 **NEW ARCHITECTURE:** Callbacks are configured at the engine level.
 
 ```python
-from hypernodes import SequentialEngine
+from hypernodes import SeqEngine
 from hypernodes.telemetry import ProgressCallback
 
 # Configure callbacks at engine level
-engine = SequentialEngine(callbacks=[ProgressCallback()])
+engine = SeqEngine(callbacks=[ProgressCallback()])
 pipeline = Pipeline(nodes=[...], engine=engine)
 ```
 
@@ -242,10 +242,10 @@ Callbacks can declare which engines they support:
 class DaftOnlyCallback(PipelineCallback):
     @property
     def supported_engines(self):
-        return ["DaftEngine"]  # Fails early if used with SequentialEngine
+        return ["DaftEngine"]  # Fails early if used with SeqEngine
 
 # Usage
-engine = SequentialEngine(callbacks=[DaftOnlyCallback()])  # ❌ ValueError!
+engine = SeqEngine(callbacks=[DaftOnlyCallback()])  # ❌ ValueError!
 ```
 
 Validation happens at execution time via `ExecutionOrchestrator.validate_callbacks()`.
@@ -416,11 +416,11 @@ result = pipeline.run(inputs={"x": 5})  # {"doubled": 10}
 
 ### With Caching + Progress
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Configure engine with cache and callbacks
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )

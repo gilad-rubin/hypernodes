@@ -44,7 +44,7 @@ The engine includes a sophisticated heuristic (based on empirical benchmarking) 
 Added DaskEngine to the unified engines module with proper import handling:
 
 ```python
-from hypernodes.engines import DaskEngine, SequentialEngine, DaftEngine
+from hypernodes.engines import DaskEngine, SeqEngine, DaftEngine
 ```
 
 ### 4. Documentation
@@ -224,7 +224,7 @@ All tests pass successfully:
    - ✅ Works with nested pipelines
 
 3. **Benchmark Tests** (`notebooks/map_benchmark_io_cpu.ipynb`):
-   - ✅ Compared against SequentialEngine
+   - ✅ Compared against SeqEngine
    - ✅ Compared against Daft
    - ✅ Compared against manual Dask Bag
    - ✅ Verified heuristic accuracy
@@ -316,7 +316,7 @@ def map(self, pipeline, inputs, map_over):
 
 ## 🎯 When to Use Each Engine
 
-### SequentialEngine
+### SeqEngine
 - Single pipeline runs
 - Small datasets (<50 items)
 - Debugging
@@ -363,7 +363,7 @@ If you're using Jupyter and get an `ImportError` after installing DaskEngine, **
 ### When NOT to Use
 
 - Very small datasets (<10 items) - overhead outweighs benefit
-- Already-optimized single runs - stick with SequentialEngine
+- Already-optimized single runs - stick with SeqEngine
 - Need distributed cluster - use DaftEngine instead
 
 ## ✨ Summary

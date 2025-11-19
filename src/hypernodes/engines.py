@@ -2,19 +2,19 @@
 
 This module provides a unified import location for all execution engines:
 - Engine: Protocol for pipeline execution engines
-- SequentialEngine: Simple sequential execution (default)
+- SeqEngine: Simple sequential execution (default)
 - DaskEngine: Parallel execution using Dask Bag (optional)
 - DaftEngine: Distributed DataFrame-based execution (optional)
 
 Example:
     >>> from hypernodes import Pipeline
-    >>> from hypernodes.engines import SequentialEngine, DaskEngine, DaftEngine
+    >>> from hypernodes.engines import SeqEngine, DaskEngine, DaftEngine
     >>>
-    >>> # Use SequentialEngine (default - no need to specify)
+    >>> # Use SeqEngine (default - no need to specify)
     >>> pipeline = Pipeline(nodes=[...])
     >>>
     >>> # Or explicitly:
-    >>> engine = SequentialEngine()
+    >>> engine = SeqEngine()
     >>> pipeline = Pipeline(nodes=[...], engine=engine)
     >>>
     >>> # Use DaskEngine for parallel map operations
@@ -26,11 +26,11 @@ Example:
     >>> pipeline = Pipeline(nodes=[...], engine=daft_engine)
 """
 
-from .sequential_engine import SequentialEngine
+from .sequential_engine import SeqEngine
 
 # Build __all__ dynamically
 __all__ = [
-    "SequentialEngine",
+    "SeqEngine",
 ]
 
 # Optional engines

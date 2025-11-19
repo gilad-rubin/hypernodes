@@ -2,7 +2,7 @@
 
 ## Overview
 
-A comprehensive benchmark suite has been created to compare the **SequentialEngine** and **DaftEngine** execution engines across various pipeline patterns and workload types.
+A comprehensive benchmark suite has been created to compare the **SeqEngine** and **DaftEngine** execution engines across various pipeline patterns and workload types.
 
 ## Files Created
 
@@ -230,7 +230,7 @@ Average Speedup:        0.85x
 
 ## Decision Guide
 
-**Use SequentialEngine when:**
+**Use SeqEngine when:**
 - ✓ Batch size < 50 items
 - ✓ Operation < 10ms per item
 - ✓ Using nested pipelines
@@ -317,7 +317,7 @@ def test_benchmarks_my_scenario(self):
         return x * 2
     
     # Run benchmarks
-    seq_engine = SequentialEngine()
+    seq_engine = SeqEngine()
     seq_pipeline = Pipeline(nodes=[my_operation], engine=seq_engine)
     seq_time = self.run_benchmark(test_name, seq_engine, seq_pipeline, {"x": 5})
 ```

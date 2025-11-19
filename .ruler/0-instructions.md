@@ -11,7 +11,7 @@
 ## Architecture (IMPORTANT)
 - **Pipeline = Pure Definition**: Pipeline class only defines DAG structure. NO cache or callbacks.
 - **Engine = Execution Runtime**: Engines own cache, callbacks, and execution strategy.
-- **Current API**: `engine = SequentialEngine(cache=..., callbacks=...); Pipeline(nodes=[...], engine=engine)`
+- **Current API**: `engine = SeqEngine(cache=..., callbacks=...); Pipeline(nodes=[...], engine=engine)`
 - See guides/API_MIGRATION.md for complete migration guide.
 
 ## Coding Principles

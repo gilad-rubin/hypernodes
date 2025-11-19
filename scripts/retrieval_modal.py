@@ -169,9 +169,9 @@ def run_retrieval_pipeline(
         )
         pipeline = pipeline.with_engine(engine)
     else:
-        from hypernodes.engines import SequentialEngine
+        from hypernodes.engines import SeqEngine
 
-        pipeline = pipeline.with_engine(SequentialEngine())
+        pipeline = pipeline.with_engine(SeqEngine())
         pipeline = pipeline.with_cache(DiskCache(path="/cache"))
 
     # Add progress callback

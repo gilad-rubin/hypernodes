@@ -4,7 +4,7 @@ import time
 
 from hypernodes import Pipeline, node
 from hypernodes.integrations.daft.engine import DaftEngine
-from hypernodes.sequential_engine import SequentialEngine
+from hypernodes.sequential_engine import SeqEngine
 from hypernodes.telemetry import ProgressCallback
 
 
@@ -40,10 +40,10 @@ def _build_inputs(items: int) -> dict:
 
 def run_sequential(items: int) -> None:
     print("\n" + "=" * 50)
-    print("DEMO: SequentialEngine (Baseline)")
+    print("DEMO: SeqEngine (Baseline)")
     print("=" * 50)
 
-    seq_engine = SequentialEngine()
+    seq_engine = SeqEngine()
     callback = ProgressCallback()
     pipeline = _build_pipeline(callback)
     seq_engine.map(

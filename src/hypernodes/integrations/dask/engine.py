@@ -22,8 +22,8 @@ from ...node_execution import execute_single_node
 from ...orchestrator import ExecutionOrchestrator
 
 if TYPE_CHECKING:
-    from ...pipeline import Pipeline
     from ...cache import Cache
+    from ...pipeline import Pipeline
 
 
 class DaskEngine:
@@ -125,7 +125,7 @@ class DaskEngine:
             orchestrator.validate_callbacks("DaskEngine")
             orchestrator.notify_start(inputs)
 
-            # Execute nodes sequentially (same as SequentialEngine)
+            # Execute nodes sequentially (same as SeqEngine)
             available_values = dict(inputs)
             outputs = {}
             node_signatures = {}
@@ -138,8 +138,13 @@ class DaskEngine:
 
                 # Execute the node
                 result, signature = execute_single_node(
-                    node, node_inputs, pipeline, self.cache, self.callbacks, 
-                    orchestrator.ctx, node_signatures
+                    node,
+                    node_inputs,
+                    pipeline,
+                    self.cache,
+                    self.callbacks,
+                    orchestrator.ctx,
+                    node_signatures,
                 )
 
                 # Store outputs
@@ -269,7 +274,9 @@ class DaskEngine:
 
         # Clamp to reasonable bounds
         recommended = max(min_partitions, min(recommended, max_partitions))
-        recommended = max(granularity_based_min, min(recommended, granularity_based_max))
+        recommended = max(
+            granularity_based_min, min(recommended, granularity_based_max)
+        )
 
         # Prefer power of 2 for better distribution
         power_of_2 = 2 ** round(np.log2(recommended))

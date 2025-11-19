@@ -32,7 +32,7 @@ Implemented automatic output pruning for nested pipelines. When a pipeline is us
 - Passes the optimization info to `pipeline_node(required_outputs=...)` call
 - No mutation of the node instance - clean functional design
 
-### 5. **SequentialEngine** (`sequential_engine.py`)
+### 5. **SeqEngine** (`sequential_engine.py`)
 - Updated `_store_node_outputs()` to store only outputs present in the result
 - Works correctly with pruned outputs from PipelineNodes
 

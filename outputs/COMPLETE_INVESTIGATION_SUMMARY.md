@@ -31,7 +31,7 @@ All measurements are from **actual running code**, not theoretical!
 |----------|----------|---------|----------|
 | Sequential | 2.565 | 1.0x | Never |
 | DaskEngine (parallel) | 0.361 | 7.1x | Simple sync |
-| **Batch (SequentialEngine)** | **0.026** | **96.9x** ⚡⚡⚡ | **ALWAYS** |
+| **Batch (SeqEngine)** | **0.026** | **96.9x** ⚡⚡⚡ | **ALWAYS** |
 
 **Key Finding:** Batch encoding is 97x faster than sequential, **13.8x faster than parallelized DaskEngine!**
 
@@ -226,7 +226,7 @@ Change:
 ```python
 engine = DaftEngine(use_batch_udf=True)  # Auto-configured!
 # Or:
-engine = SequentialEngine()  # Simple for batch ops
+engine = SeqEngine()  # Simple for batch ops
 ```
 
 ---

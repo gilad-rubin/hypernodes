@@ -95,7 +95,7 @@ engine = DaskEngine(
 ### ❌ Not Ideal For
 
 - Very small datasets (<10 items) - overhead outweighs benefit
-- Single pipeline runs - use SequentialEngine
+- Single pipeline runs - use SeqEngine
 - Distributed clusters - consider DaftEngine
 - Heavy inter-task communication
 
@@ -210,9 +210,9 @@ results2 = pipeline.map(inputs={"data": items}, map_over="data")
 
 ### Slow for Small Datasets
 
-**Problem**: DaskEngine is slower than SequentialEngine for small datasets.
+**Problem**: DaskEngine is slower than SeqEngine for small datasets.
 
-**Solution**: This is expected. Dask has overhead. For <50 items, use `SequentialEngine`.
+**Solution**: This is expected. Dask has overhead. For <50 items, use `SeqEngine`.
 
 ### Serialization Errors
 
@@ -234,7 +234,7 @@ engine = DaskEngine(npartitions=32)
 
 See the comprehensive benchmark in [`notebooks/map_benchmark_io_cpu.ipynb`](../../notebooks/map_benchmark_io_cpu.ipynb) which compares:
 
-- HyperNodes SequentialEngine (baseline)
+- HyperNodes SeqEngine (baseline)
 - HyperNodes DaskEngine (this engine)
 - Daft
 - Dask Bag (manual configuration)

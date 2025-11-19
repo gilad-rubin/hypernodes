@@ -2,13 +2,11 @@
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from .cache import Cache
-from .callbacks import PipelineCallback
 from .graph_builder import SimpleGraphBuilder
 from .hypernode import HyperNode
 from .pipeline_node import PipelineNode
 from .protocols import Engine
-from .sequential_engine import SequentialEngine
+from .sequential_engine import SeqEngine
 
 
 class Pipeline:
@@ -18,8 +16,8 @@ class Pipeline:
         engine: Optional[Engine] = None,
         name: Optional[str] = None,
     ):
-        # Set engine with default fallback to SequentialEngine
-        self.engine = engine if engine is not None else SequentialEngine()
+        # Set engine with default fallback to SeqEngine
+        self.engine = engine if engine is not None else SeqEngine()
         self.name = name
         self.nodes = nodes
 
@@ -126,7 +124,7 @@ class Pipeline:
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute the pipeline.
-        
+
         Args:
             inputs: Input parameters
             output_name: Optional output(s) to compute
@@ -135,7 +133,7 @@ class Pipeline:
         """
         self._validate_output_names(output_name)
         self._validate_inputs(inputs, output_name=output_name)
-        
+
         exec_engine = engine if engine is not None else self.engine
         return exec_engine.run(self, inputs, output_name=output_name, **kwargs)
 
@@ -149,7 +147,7 @@ class Pipeline:
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
         """Execute the pipeline over multiple items.
-        
+
         Args:
             inputs: Input parameters
             map_over: Parameter(s) to map over

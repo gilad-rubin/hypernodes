@@ -210,7 +210,7 @@ pipeline = Pipeline(
         encode_queries_batch,   # ← Changed from encode_queries_mapped
         # ... rest of pipeline ...
     ],
-    engine=SequentialEngine(),  # or DaftEngine(use_batch_udf=False)
+    engine=SeqEngine(),  # or DaftEngine(use_batch_udf=False)
 )
 ```
 

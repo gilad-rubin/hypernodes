@@ -222,8 +222,8 @@ Sequential:               █                                      1x
 | I/O-bound + sync functions | **DaftEngine** + `use_batch_udf=True` | **9-12x** ⚡⚡ |
 | Simple sync functions | **DaskEngine** | **7-8x** ⚡ |
 | CPU-bound heavy work | **DaskEngine** + `scheduler="processes"` | **4-6x** ⚡ |
-| Very small datasets (<10) | **SequentialEngine** | 1x |
-| Debugging | **SequentialEngine** | 1x |
+| Very small datasets (<10) | **SeqEngine** | 1x |
+| Debugging | **SeqEngine** | 1x |
 
 ---
 

@@ -26,7 +26,7 @@ import pytrec_eval
 import torch
 
 from hypernodes import node
-from hypernodes.engines import SequentialEngine
+from hypernodes.engines import SeqEngine
 
 # Import data models and protocols from models.py (importable module)
 # This avoids serialization issues with classes defined in scripts
@@ -806,7 +806,7 @@ def run_pipeline(pipeline: Pipeline, inputs: dict, daft: bool = False) -> Any:
     if daft:
         engine = DaftEngine(debug=False)
     else:
-        engine = SequentialEngine(map_executor="sequential", node_executor="sequential")
+        engine = SeqEngine(map_executor="sequential", node_executor="sequential")
         pipeline = pipeline.with_cache(DiskCache(path="/cache"))
         pipeline = pipeline.with_callbacks([ProgressCallback()])
     pipeline = pipeline.with_engine(engine)

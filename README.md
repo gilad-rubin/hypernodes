@@ -90,10 +90,10 @@ results = pipeline.map(
 ### With Caching
 
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 
 # Enable caching at engine level
-engine = SequentialEngine(cache=DiskCache(path=".cache"))
+engine = SeqEngine(cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[clean_text, count_words], engine=engine)
 
 # First run: executes all nodes
@@ -268,7 +268,7 @@ Engines determine **how** (execution strategy) and **where** (infrastructure) no
 For high-performance distributed execution using [Daft](https://www.getdaft.io/):
 
 ```python
-from hypernodes import Pipeline, DiskCache, SequentialEngine
+from hypernodes import Pipeline, DiskCache, SeqEngine
 from hypernodes.engines import DaftEngine
 
 # Requires: pip install getdaft
@@ -298,23 +298,23 @@ results = pipeline.map(
 - **Per-Item Caching**: Even in batch mode, individual items are cached and reused
 - **Seamless Scaling**: Works on your laptop or a Ray/K8s cluster
 
-### SequentialEngine (Default)
+### SeqEngine (Default)
 
 The default engine for simple, predictable execution:
 
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Configure engine with cache and callbacks
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )
 pipeline = Pipeline(nodes=[...], engine=engine)
 
 # Or use default (no cache, no callbacks)
-pipeline = Pipeline(nodes=[...])  # Uses SequentialEngine() by default
+pipeline = Pipeline(nodes=[...])  # Uses SeqEngine() by default
 ```
 
 **Features:**
@@ -354,11 +354,11 @@ results = pipeline.map(
 ### Progress Tracking
 
 ```python
-from hypernodes import Pipeline, SequentialEngine
+from hypernodes import Pipeline, SeqEngine
 from hypernodes.telemetry import ProgressCallback
 
 # Configure engine with callbacks
-engine = SequentialEngine(callbacks=[ProgressCallback()])
+engine = SeqEngine(callbacks=[ProgressCallback()])
 pipeline = Pipeline(nodes=[...], engine=engine)
 
 result = pipeline.run(inputs={"data": "..."})
@@ -376,11 +376,11 @@ Processing Pipeline ━━━━━━━━━━━━━━━━━━━━
 ### Distributed Tracing
 
 ```python
-from hypernodes import Pipeline, SequentialEngine
+from hypernodes import Pipeline, SeqEngine
 from hypernodes.telemetry import TelemetryCallback
 
 # Configure engine with telemetry callbacks
-engine = SequentialEngine(callbacks=[TelemetryCallback()])
+engine = SeqEngine(callbacks=[TelemetryCallback()])
 pipeline = Pipeline(nodes=[...], engine=engine)
 
 # Traces are automatically sent to OpenTelemetry-compatible systems
@@ -434,7 +434,7 @@ Nested pipelines inherit configuration from parents but can override:
 
 ```python
 # Parent defines defaults
-from hypernodes import Pipeline, DiskCache, SequentialEngine
+from hypernodes import Pipeline, DiskCache, SeqEngine
 from hypernodes.engines import DaskEngine
 from hypernodes.telemetry import ProgressCallback
 
@@ -480,9 +480,9 @@ def test_single_node():
     assert result["result"] == "HELLO"
 
 def test_with_cache():
-    from hypernodes import SequentialEngine, DiskCache
+    from hypernodes import SeqEngine, DiskCache
     
-    engine = SequentialEngine(cache=DiskCache(path="/tmp/test_cache"))
+    engine = SeqEngine(cache=DiskCache(path="/tmp/test_cache"))
     pipeline = Pipeline(nodes=[my_function], engine=engine)
     
     # First run
@@ -503,11 +503,11 @@ def test_with_cache():
 Execution configuration (cache, callbacks, execution strategy) lives at the **engine level**, not the pipeline:
 
 ```python
-from hypernodes import Pipeline, SequentialEngine, DiskCache
+from hypernodes import Pipeline, SeqEngine, DiskCache
 from hypernodes.telemetry import ProgressCallback
 
 # Configure execution runtime
-engine = SequentialEngine(
+engine = SeqEngine(
     cache=DiskCache(path=".cache"),
     callbacks=[ProgressCallback()]
 )

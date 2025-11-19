@@ -17,7 +17,7 @@ The `@stateful` decorator provides:
 - **Lazy Initialization**: `__init__` is not called when creating the instance, only on first use
 - **Efficient Serialization**: Only init arguments are pickled, not heavy state (models, connections)
 - **Automatic Cache Keys**: Generated from init arguments for correct caching
-- **Engine Optimization**: SequentialEngine caches instances, DaftEngine handles per-worker init
+- **Engine Optimization**: SeqEngine caches instances, DaftEngine handles per-worker init
 
 ## Basic Usage
 
@@ -65,7 +65,7 @@ This enables:
 - **Efficient serialization**: Only init args pickled (not 10GB model weights!)
 - **Cache-friendly**: Cache keys based on init args, not instance state
 - **Engine optimization**: 
-  - **SequentialEngine**: One instance for entire `.map()` operation
+  - **SeqEngine**: One instance for entire `.map()` operation
   - **DaftEngine**: Daft calls `__init__` once per worker (future work)
 
 ## Caching with Stateful Objects
@@ -261,12 +261,12 @@ results = pipeline.map(
 
 ## Engine-Specific Behavior
 
-### SequentialEngine
+### SeqEngine
 
-In `SequentialEngine`, stateful objects are **cached for the entire `.map()` operation**:
+In `SeqEngine`, stateful objects are **cached for the entire `.map()` operation**:
 
 ```python
-# Object lifecycle in SequentialEngine.map()
+# Object lifecycle in SeqEngine.map()
 model = ExpensiveModel("path.pkl")  # ← __init__ called here
 
 results = pipeline.map(
@@ -446,7 +446,7 @@ assert obj.__class__.__hypernode_stateful__ is True
 ### Verify Caching Behavior
 
 ```python
-from hypernodes import SequentialEngine, DiskCache
+from hypernodes import SeqEngine, DiskCache
 
 @stateful
 class Model:
@@ -466,7 +466,7 @@ def process(x: int, model: Model) -> int:
     return x * 2
 
 model = Model("test.pkl")
-engine = SequentialEngine(cache=DiskCache(path=".cache"))
+engine = SeqEngine(cache=DiskCache(path=".cache"))
 pipeline = Pipeline(nodes=[process], engine=engine)
 
 # First run

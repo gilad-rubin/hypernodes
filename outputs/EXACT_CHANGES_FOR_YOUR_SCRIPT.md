@@ -185,7 +185,7 @@ pipeline = Pipeline(
         compute_recall,
         combine_evaluation_results,
     ],
-    engine=SequentialEngine(),  # Simple for batch ops
+    engine=SeqEngine(),  # Simple for batch ops
     name="hebrew_retrieval_optimized",
 )
 ```
@@ -291,7 +291,7 @@ pipeline_optimized = Pipeline(
         compute_recall,
         combine_evaluation_results,
     ],
-    engine=SequentialEngine(),  # Or DaftEngine(use_batch_udf=False)
+    engine=SeqEngine(),  # Or DaftEngine(use_batch_udf=False)
     name="hebrew_retrieval_optimized"
 )
 ```

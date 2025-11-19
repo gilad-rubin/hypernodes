@@ -1,7 +1,8 @@
-"""Tests for callback behavior with SequentialEngine."""
+"""Tests for callback behavior with SeqEngine."""
 
 import tempfile
-from hypernodes import Pipeline, PipelineCallback, SequentialEngine, node, DiskCache
+
+from hypernodes import DiskCache, Pipeline, PipelineCallback, SeqEngine, node
 from hypernodes.callbacks import CallbackContext
 
 
@@ -71,7 +72,7 @@ def test_basic_callbacks():
         return x * 2
 
     callback = TrackingCallback()
-    engine = SequentialEngine(callbacks=[callback])
+    engine = SeqEngine(callbacks=[callback])
     pipeline = Pipeline(nodes=[process], engine=engine)
 
     pipeline.run(inputs={"x": 5})
@@ -96,7 +97,7 @@ def test_callbacks_with_multiple_nodes():
         return doubled + 1
 
     callback = TrackingCallback()
-    engine = SequentialEngine(callbacks=[callback])
+    engine = SeqEngine(callbacks=[callback])
     pipeline = Pipeline(nodes=[double, add_one], engine=engine)
 
     pipeline.run(inputs={"x": 5})
@@ -116,7 +117,7 @@ def test_callbacks_with_map():
         return x * 2
 
     callback = TrackingCallback()
-    engine = SequentialEngine(callbacks=[callback])
+    engine = SeqEngine(callbacks=[callback])
     pipeline = Pipeline(nodes=[process], engine=engine)
 
     pipeline.map(inputs={"x": [1, 2, 3]}, map_over="x")
@@ -150,7 +151,7 @@ def test_nested_pipeline_callback_inheritance():
     callback = TrackingCallback()
 
     # Outer pipeline with callback - inner should inherit
-    engine = SequentialEngine(callbacks=[callback])
+    engine = SeqEngine(callbacks=[callback])
     outer = Pipeline(nodes=[inner.as_node(), add_one], engine=engine)
 
     outer.run(inputs={"x": 5})
@@ -176,7 +177,7 @@ def test_multiple_callbacks():
     callback1 = TrackingCallback()
     callback2 = TrackingCallback()
 
-    engine = SequentialEngine(callbacks=[callback1, callback2])
+    engine = SeqEngine(callbacks=[callback1, callback2])
     pipeline = Pipeline(nodes=[process], engine=engine)
 
     pipeline.run(inputs={"x": 5})
@@ -221,7 +222,7 @@ def test_callback_context_state_sharing():
     span_tracker = SpanTracker()
     metrics_tracker = MetricsTracker()
 
-    engine = SequentialEngine(callbacks=[span_tracker, metrics_tracker])
+    engine = SeqEngine(callbacks=[span_tracker, metrics_tracker])
     pipeline = Pipeline(nodes=[compute], engine=engine)
 
     result = pipeline.run(inputs={"x": 10})
@@ -253,9 +254,7 @@ def test_cache_hit_callback():
         return x**2
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        engine = SequentialEngine(
-            cache=DiskCache(path=tmpdir), callbacks=[CacheTracker()]
-        )
+        engine = SeqEngine(cache=DiskCache(path=tmpdir), callbacks=[CacheTracker()])
         pipeline = Pipeline(nodes=[expensive_compute], engine=engine)
 
         # First run - should execute
@@ -296,7 +295,7 @@ def test_error_handling_callback():
     def failing_node(x: int) -> int:
         raise ValueError("Intentional failure")
 
-    engine = SequentialEngine(callbacks=[ErrorTracker()])
+    engine = SeqEngine(callbacks=[ErrorTracker()])
     pipeline = Pipeline(nodes=[failing_node], engine=engine)
 
     try:
@@ -340,9 +339,7 @@ def test_map_operation_with_cache():
         return item * 2
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        engine = SequentialEngine(
-            cache=DiskCache(path=tmpdir), callbacks=[MapCacheTracker()]
-        )
+        engine = SeqEngine(cache=DiskCache(path=tmpdir), callbacks=[MapCacheTracker()])
         pipeline = Pipeline(nodes=[double_cached], engine=engine)
 
         # First run - all items execute
@@ -382,16 +379,17 @@ def test_map_operation_with_cache():
 
 def test_incompatible_callback_error():
     """Test that an incompatible callback raises an error."""
+
     class DaftOnlyCallback(PipelineCallback):
         @property
         def supported_engines(self):
             return ["DaftEngine"]
 
-    engine = SequentialEngine(callbacks=[DaftOnlyCallback()])
+    engine = SeqEngine(callbacks=[DaftOnlyCallback()])
     pipeline = Pipeline(nodes=[], engine=engine)
 
     try:
         pipeline.run(inputs={})
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "is not compatible with engine SequentialEngine" in str(e)
+        assert "is not compatible with engine SeqEngine" in str(e)

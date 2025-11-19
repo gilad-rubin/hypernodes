@@ -2,9 +2,9 @@
 
 ## Overview
 
-This folder contains the refined test suite for Hypernodes with the new `SequentialEngine` architecture.
+This folder contains the refined test suite for Hypernodes with the new `SeqEngine` architecture.
 
-All tests use the default `SequentialEngine` (no need to specify engine parameter).
+All tests use the default `SeqEngine` (no need to specify engine parameter).
 
 ---
 
@@ -108,7 +108,7 @@ Each test follows this pattern:
 3. **Assert**: Verify expected outputs
 
 ### **Key Principles**
-- ✅ **No engine specified** - uses `SequentialEngine` by default
+- ✅ **No engine specified** - uses `SeqEngine` by default
 - ✅ **Self-contained** - each test is independent
 - ✅ **Clear intent** - test names describe what they test
 - ✅ **Minimal** - tests focus on one thing

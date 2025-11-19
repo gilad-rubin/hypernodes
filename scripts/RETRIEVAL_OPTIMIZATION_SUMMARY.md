@@ -6,7 +6,7 @@ After extensive testing and optimization, here are the findings for the Hebrew r
 
 ### ✅ What Works (RECOMMENDED)
 
-**Use `retrieval_super_optimized.py` with SequentialEngine:**
+**Use `retrieval_super_optimized.py` with SeqEngine:**
 ```bash
 uv run scripts/retrieval_super_optimized.py
 ```
@@ -17,7 +17,7 @@ uv run scripts/retrieval_super_optimized.py
 1. ✅ **Batch encoding** - THE killer optimization (97x faster than one-by-one)
 2. ✅ **@daft.cls** - Lazy initialization (instant startup, better serialization)
 3. ✅ **Clean code** - No unnecessary `_ensure_loaded` patterns
-4. ✅ **Dual-mode support** - Works with both SequentialEngine and DaftEngine
+4. ✅ **Dual-mode support** - Works with both SeqEngine and DaftEngine
 
 ---
 
@@ -81,10 +81,10 @@ uv run scripts/retrieval_super_optimized.py
 **File**: `scripts/retrieval_super_optimized.py`
 
 **Results**:
-- SequentialEngine: ✅ Works perfectly - 15.70s
+- SeqEngine: ✅ Works perfectly - 15.70s
 - DaftEngine: ❌ Type inference issues with Pydantic models
 
-**Key Insight**: SequentialEngine is the reliable choice for complex pipelines
+**Key Insight**: SeqEngine is the reliable choice for complex pipelines
 
 ---
 
@@ -202,7 +202,7 @@ class Model2VecEncoder:
 
 ### Workaround
 
-Use **SequentialEngine** for complex pipelines:
+Use **SeqEngine** for complex pipelines:
 - Works perfectly with any Python type
 - Simpler to debug
 - Reliable and predictable
@@ -218,7 +218,7 @@ Use **DaftEngine** for:
 
 ### For This Retrieval Pipeline
 
-**Use**: `retrieval_super_optimized.py` with **SequentialEngine**
+**Use**: `retrieval_super_optimized.py` with **SeqEngine**
 
 ```bash
 uv run scripts/retrieval_super_optimized.py
@@ -238,7 +238,7 @@ uv run scripts/retrieval_super_optimized.py
 - I/O-bound operations
 - Need distributed execution
 
-**Use SequentialEngine when**:
+**Use SeqEngine when**:
 - Complex types (Pydantic models, custom classes)
 - CPU-bound batch operations (already fast)
 - Simplicity and reliability are priorities
@@ -291,7 +291,7 @@ uv run scripts/retrieval_super_optimized.py
 ### What You Should Use
 
 **File**: `retrieval_super_optimized.py`
-**Engine**: SequentialEngine (default)
+**Engine**: SeqEngine (default)
 **Command**: `uv run scripts/retrieval_super_optimized.py`
 
 ### What You Get

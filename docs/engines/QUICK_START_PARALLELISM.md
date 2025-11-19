@@ -95,8 +95,8 @@ results = pipeline.map(inputs={"x": numbers}, map_over="x")
 | Sync I/O | `DaftEngine(use_batch_udf=True)` | `def func()` + time.sleep | **11x** ⚡⚡ |
 | Simple sync | `DaskEngine()` | `def func()` | **7x** ⚡ |
 | Heavy CPU | `DaskEngine(scheduler="processes")` | `def func()` | **4-6x** ⚡ |
-| <10 items | `SequentialEngine()` | Any | 1x |
-| Debugging | `SequentialEngine()` | Any | 1x |
+| <10 items | `SeqEngine()` | Any | 1x |
+| Debugging | `SeqEngine()` | Any | 1x |
 
 ---
 

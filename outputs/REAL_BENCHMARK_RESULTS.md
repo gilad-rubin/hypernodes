@@ -27,7 +27,7 @@ We measured REAL performance with actual running code. Here's what we found:
 |----------|----------|---------|
 | Sequential baseline | 0.614 | 1.0x |
 | DaskEngine (one-by-one) | 0.180 | 3.4x |
-| **Batch (SequentialEngine)** | **0.007** | **91.5x** ⚡⚡⚡ |
+| **Batch (SeqEngine)** | **0.007** | **91.5x** ⚡⚡⚡ |
 
 ### Scale: 100 Passages
 
@@ -35,7 +35,7 @@ We measured REAL performance with actual running code. Here's what we found:
 |----------|----------|---------|
 | Sequential baseline | 1.268 | 1.0x |
 | DaskEngine (one-by-one) | 0.197 | 6.4x |
-| **Batch (SequentialEngine)** | **0.013** | **96.5x** ⚡⚡⚡ |
+| **Batch (SeqEngine)** | **0.013** | **96.5x** ⚡⚡⚡ |
 
 ### Scale: 200 Passages
 
@@ -43,7 +43,7 @@ We measured REAL performance with actual running code. Here's what we found:
 |----------|----------|---------|
 | Sequential baseline | 2.565 | 1.0x |
 | DaskEngine (one-by-one) | 0.361 | 7.1x |
-| **Batch (SequentialEngine)** | **0.026** | **96.9x** ⚡⚡⚡ |
+| **Batch (SeqEngine)** | **0.026** | **96.9x** ⚡⚡⚡ |
 
 ### Key Finding: Batch Encoding DOMINATES
 
@@ -221,10 +221,10 @@ def encode_queries_batch(queries: List[dict], encoder: ColBERTEncoder) -> List[d
 ### Change 3: Engine Selection
 
 ```python
-# Use SequentialEngine or DaftEngine for batch operations
+# Use SeqEngine or DaftEngine for batch operations
 pipeline = Pipeline(
     nodes=[...],
-    engine=SequentialEngine(),  # Simple and fast for batch ops
+    engine=SeqEngine(),  # Simple and fast for batch ops
     name="hebrew_retrieval_optimized"
 )
 

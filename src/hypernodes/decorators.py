@@ -10,7 +10,7 @@ def stateful(cls: type) -> type:
     This enables:
     - Lazy initialization: __init__ args stored, not called until needed
     - Efficient serialization: only init args pickled, not heavy state
-    - Engine optimization: SequentialEngine caches, DaftEngine uses @daft.cls
+    - Engine optimization: SeqEngine caches, DaftEngine uses @daft.cls
 
     Example:
         >>> from hypernodes import stateful, node, Pipeline

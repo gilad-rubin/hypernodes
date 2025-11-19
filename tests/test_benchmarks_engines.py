@@ -12,17 +12,19 @@ Run with: pytest tests/test_benchmarks_engines.py -v -s
 """
 
 import time
-import pytest
 from dataclasses import dataclass
 from typing import Dict, List
 
+import pytest
+
 from hypernodes import Pipeline, node
-from hypernodes.sequential_engine import SequentialEngine
 from hypernodes.pipeline_node import PipelineNode
+from hypernodes.sequential_engine import SeqEngine
 
 # Try to import DaftEngine
 try:
     from hypernodes.integrations.daft.engine import DaftEngine
+
     DAFT_AVAILABLE = True
 except ImportError:
     DAFT_AVAILABLE = False
@@ -31,6 +33,7 @@ except ImportError:
 @dataclass
 class BenchmarkResult:
     """Result of a single benchmark run."""
+
     test_name: str
     engine_name: str
     duration: float
@@ -88,9 +91,7 @@ class BenchmarkSuite:
             test_groups[result.test_name].append(result)
 
         # Print headers
-        print(
-            f"{'Test Name':<40} {'Engine':<20} {'Duration (s)':<15} {'Speedup':<10}"
-        )
+        print(f"{'Test Name':<40} {'Engine':<20} {'Duration (s)':<15} {'Speedup':<10}")
         print("-" * 100)
 
         # Print results grouped by test
@@ -98,7 +99,9 @@ class BenchmarkSuite:
             results = test_groups[test_name]
             for i, result in enumerate(results):
                 test_display = test_name if i == 0 else ""
-                speedup_str = f"{result.speedup:.2f}x" if result.speedup > 1 else "1.00x"
+                speedup_str = (
+                    f"{result.speedup:.2f}x" if result.speedup > 1 else "1.00x"
+                )
                 print(
                     f"{test_display:<40} {result.engine_name:<20} "
                     f"{result.duration:<15.4f} {speedup_str:<10}"
@@ -122,18 +125,22 @@ class BenchmarkSuite:
             return add_result * 2
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(nodes=[add_one, multiply_by_two], engine=seq_engine)
         seq_time = self.run_benchmark(test_name, seq_engine, seq_pipeline, {"x": 5})
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
         if DAFT_AVAILABLE:
             daft_engine = DaftEngine()
-            daft_pipeline = Pipeline(nodes=[add_one, multiply_by_two], engine=daft_engine)
-            daft_time = self.run_benchmark(test_name, daft_engine, daft_pipeline, {"x": 5})
+            daft_pipeline = Pipeline(
+                nodes=[add_one, multiply_by_two], engine=daft_engine
+            )
+            daft_time = self.run_benchmark(
+                test_name, daft_engine, daft_pipeline, {"x": 5}
+            )
             self.results.append(self.create_result(test_name, "DaftEngine", daft_time))
             assert daft_time >= 0
 
@@ -152,19 +159,21 @@ class BenchmarkSuite:
         inputs = {"x": list(range(10))}
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(nodes=[add_one, multiply_by_two], engine=seq_engine)
         seq_time = self.run_benchmark(
             test_name, seq_engine, seq_pipeline, inputs, map_over="x"
         )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
         if DAFT_AVAILABLE:
             daft_engine = DaftEngine()
-            daft_pipeline = Pipeline(nodes=[add_one, multiply_by_two], engine=daft_engine)
+            daft_pipeline = Pipeline(
+                nodes=[add_one, multiply_by_two], engine=daft_engine
+            )
             daft_time = self.run_benchmark(
                 test_name, daft_engine, daft_pipeline, inputs, map_over="x"
             )
@@ -184,13 +193,13 @@ class BenchmarkSuite:
         inputs = {"x": list(range(3))}  # Reduced from 5
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(nodes=[io_operation], engine=seq_engine)
         seq_time = self.run_benchmark(
             test_name, seq_engine, seq_pipeline, inputs, map_over="x"
         )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
@@ -218,13 +227,13 @@ class BenchmarkSuite:
         inputs = {"x": list(range(3))}  # Reduced from 5
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(nodes=[cpu_operation], engine=seq_engine)
         seq_time = self.run_benchmark(
             test_name, seq_engine, seq_pipeline, inputs, map_over="x"
         )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
@@ -257,13 +266,15 @@ class BenchmarkSuite:
 
         # Sequential engine
         pipeline_node_seq = PipelineNode(pipeline=inner_pipeline)
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         outer_pipeline_seq = Pipeline(
             nodes=[pipeline_node_seq, outer_transform], engine=seq_engine
         )
-        seq_time = self.run_benchmark(test_name, seq_engine, outer_pipeline_seq, {"x": 5})
+        seq_time = self.run_benchmark(
+            test_name, seq_engine, outer_pipeline_seq, {"x": 5}
+        )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
@@ -273,7 +284,9 @@ class BenchmarkSuite:
             outer_pipeline_daft = Pipeline(
                 nodes=[pipeline_node_daft, outer_transform], engine=daft_engine
             )
-            daft_time = self.run_benchmark(test_name, daft_engine, outer_pipeline_daft, {"x": 5})
+            daft_time = self.run_benchmark(
+                test_name, daft_engine, outer_pipeline_daft, {"x": 5}
+            )
             self.results.append(self.create_result(test_name, "DaftEngine", daft_time))
             assert daft_time >= 0
 
@@ -299,7 +312,7 @@ class BenchmarkSuite:
 
         # Sequential engine
         pipeline_node_seq = PipelineNode(pipeline=inner_pipeline)
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         outer_pipeline_seq = Pipeline(
             nodes=[pipeline_node_seq, outer_transform], engine=seq_engine
         )
@@ -307,7 +320,7 @@ class BenchmarkSuite:
             test_name, seq_engine, outer_pipeline_seq, inputs, map_over="x"
         )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
@@ -344,22 +357,25 @@ class BenchmarkSuite:
             return a + b + c
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(
             nodes=[compute_a, compute_b, compute_c, compute_result], engine=seq_engine
         )
         seq_time = self.run_benchmark(test_name, seq_engine, seq_pipeline, {"x": 5})
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
         if DAFT_AVAILABLE:
             daft_engine = DaftEngine()
             daft_pipeline = Pipeline(
-                nodes=[compute_a, compute_b, compute_c, compute_result], engine=daft_engine
+                nodes=[compute_a, compute_b, compute_c, compute_result],
+                engine=daft_engine,
             )
-            daft_time = self.run_benchmark(test_name, daft_engine, daft_pipeline, {"x": 5})
+            daft_time = self.run_benchmark(
+                test_name, daft_engine, daft_pipeline, {"x": 5}
+            )
             self.results.append(self.create_result(test_name, "DaftEngine", daft_time))
             assert daft_time >= 0
 
@@ -378,7 +394,7 @@ class BenchmarkSuite:
         inputs = {"x": list(range(10)), "y": list(range(10, 20))}
 
         # Sequential engine
-        seq_engine = SequentialEngine()
+        seq_engine = SeqEngine()
         seq_pipeline = Pipeline(nodes=[add_two, multiply], engine=seq_engine)
         seq_time = self.run_benchmark(
             test_name,
@@ -389,7 +405,7 @@ class BenchmarkSuite:
             map_mode="zip",
         )
         self.sequential_times[test_name] = seq_time
-        self.results.append(self.create_result(test_name, "SequentialEngine", seq_time))
+        self.results.append(self.create_result(test_name, "SeqEngine", seq_time))
         assert seq_time >= 0
 
         # Daft engine
@@ -409,6 +425,7 @@ class BenchmarkSuite:
 
 
 # ===== Pytest Fixtures and Tests =====
+
 
 @pytest.fixture(scope="session")
 def benchmark_suite():
@@ -461,4 +478,3 @@ def test_benchmarks_results_summary(benchmark_suite):
     """Print final benchmark results table."""
     benchmark_suite.print_table()
     print(f"\nTotal benchmarks: {len(benchmark_suite.results)}")
-

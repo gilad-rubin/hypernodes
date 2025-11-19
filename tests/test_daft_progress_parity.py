@@ -3,7 +3,7 @@ from typing import Dict
 from hypernodes import Pipeline, node
 from hypernodes.callbacks import CallbackContext, PipelineCallback
 from hypernodes.integrations.daft.engine import DaftEngine
-from hypernodes.sequential_engine import SequentialEngine
+from hypernodes.sequential_engine import SeqEngine
 
 
 class EventRecorder(PipelineCallback):
@@ -71,12 +71,12 @@ def multiply_two(y: int) -> int:
 
 
 def test_daft_sequential_parity_run():
-    """Test that DaftEngine.run emits same events as SequentialEngine.run"""
+    """Test that DaftEngine.run emits same events as SeqEngine.run"""
     inputs = {"x": 1}
 
     # Sequential
     seq_recorder = EventRecorder()
-    engine_seq = SequentialEngine(callbacks=[seq_recorder])
+    engine_seq = SeqEngine(callbacks=[seq_recorder])
     pipeline_seq = Pipeline(nodes=[add_one, multiply_two], engine=engine_seq)
     pipeline_seq.run(inputs)
 
@@ -103,7 +103,7 @@ def test_daft_sequential_parity_map():
 
     # Sequential
     seq_recorder = EventRecorder()
-    engine_seq = SequentialEngine(callbacks=[seq_recorder])
+    engine_seq = SeqEngine(callbacks=[seq_recorder])
     pipeline_seq = Pipeline(nodes=[add_one], engine=engine_seq)
     pipeline_seq.map(inputs, map_over="x")
 

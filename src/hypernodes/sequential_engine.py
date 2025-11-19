@@ -10,14 +10,13 @@ from .callbacks import CallbackContext, PipelineCallback
 from .map_planner import MapPlanner
 from .node_execution import execute_single_node
 from .orchestrator import ExecutionOrchestrator
-from .protocols import Engine
 
 if TYPE_CHECKING:
-    from .pipeline import Pipeline
     from .cache import Cache
+    from .pipeline import Pipeline
 
 
-class SequentialEngine:
+class SeqEngine:
     """Sequential execution engine.
 
     Executes nodes one by one in topological order.
@@ -42,20 +41,17 @@ class SequentialEngine:
         """Execute pipeline sequentially."""
         # Use orchestrator for lifecycle management
         with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
-            orchestrator.validate_callbacks("SequentialEngine")
+            orchestrator.validate_callbacks("SeqEngine")
             orchestrator.notify_start(inputs)
-            
+
             # Plan
             execution_nodes = self._determine_execution_nodes(pipeline, output_name)
-            
+
             # Execute
             outputs = self._execute_nodes(
-                execution_nodes, 
-                inputs, 
-                pipeline, 
-                orchestrator.ctx
+                execution_nodes, inputs, pipeline, orchestrator.ctx
             )
-            
+
             orchestrator.notify_end(outputs)
             return self._filter_outputs(outputs, output_name)
 
@@ -71,18 +67,18 @@ class SequentialEngine:
     ) -> List[Dict[str, Any]]:
         """Execute pipeline for each item sequentially."""
         with ExecutionOrchestrator(pipeline, self.callbacks, _ctx) as orchestrator:
-            orchestrator.validate_callbacks("SequentialEngine")
-            
+            orchestrator.validate_callbacks("SeqEngine")
+
             # Plan
             items, stateful_cache = self._plan_map(inputs, map_over, map_mode, pipeline)
-            
+
             # Execute
             orchestrator.notify_map_start(len(items))
-            
+
             results = self._execute_map_loop(
                 items, stateful_cache, pipeline, output_name, orchestrator
             )
-            
+
             orchestrator.notify_map_end()
             return results
 
@@ -104,30 +100,32 @@ class SequentialEngine:
         available_values = dict(inputs)
         outputs = {}
         node_signatures = {}
-        
+
         for node in nodes:
             node_inputs = {param: available_values[param] for param in node.root_args}
             result, signature = execute_single_node(
-                node, 
-                node_inputs, 
+                node,
+                node_inputs,
                 pipeline,  # Still needed for now, but cache/callbacks are explicit
                 self.cache,
                 self.callbacks,
-                ctx, 
-                node_signatures
+                ctx,
+                node_signatures,
             )
-            self._store_node_result(node, result, signature, available_values, outputs, node_signatures)
-            
+            self._store_node_result(
+                node, result, signature, available_values, outputs, node_signatures
+            )
+
         return outputs
 
     def _store_node_result(
-        self, 
-        node: Any, 
-        result: Any, 
-        signature: str, 
+        self,
+        node: Any,
+        result: Any,
+        signature: str,
         available_values: Dict[str, Any],
         outputs: Dict[str, Any],
-        node_signatures: Dict[str, str]
+        node_signatures: Dict[str, str],
     ) -> None:
         if hasattr(node, "pipeline"):
             # PipelineNode - result is dict of outputs
@@ -156,20 +154,20 @@ class SequentialEngine:
         return {k: outputs[k] for k in names}
 
     def _plan_map(
-        self, 
-        inputs: Dict[str, Any], 
-        map_over: Union[str, List[str]], 
+        self,
+        inputs: Dict[str, Any],
+        map_over: Union[str, List[str]],
         map_mode: str,
-        pipeline: "Pipeline"
+        pipeline: "Pipeline",
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         stateful_cache = {
             k: v for k, v in inputs.items() if self._is_stateful_object(v)
         }
-        
+
         map_over_list = [map_over] if isinstance(map_over, str) else map_over
         planner = MapPlanner()
         items = planner.plan_execution(inputs, map_over_list, map_mode)
-        
+
         return items, stateful_cache
 
     def _execute_map_loop(
@@ -183,23 +181,23 @@ class SequentialEngine:
         ctx = orchestrator.ctx
         ctx.set("_in_map", True)
         ctx.set("_map_total_items", len(items))
-        
+
         results = []
         for idx, item_inputs in enumerate(items):
             item_start_time = __import__("time").time()
             ctx.set("_map_item_index", idx)
             ctx.set("_map_item_start_time", item_start_time)
-            
+
             orchestrator.notify_map_item_start(idx)
-            
+
             merged_inputs = {**item_inputs, **stateful_cache}
             # Recursively call run, passing the existing context
             result = self.run(pipeline, merged_inputs, output_name, _ctx=ctx)
             results.append(result)
-            
+
             duration = __import__("time").time() - item_start_time
             orchestrator.notify_map_item_end(idx, duration)
-            
+
         ctx.set("_in_map", False)
         return results
 

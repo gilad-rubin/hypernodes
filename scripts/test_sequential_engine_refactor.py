@@ -1,28 +1,31 @@
-
-import time
 import unittest
-from typing import Any, Dict, List
 
 from hypernodes import Pipeline, node
-from hypernodes.sequential_engine import SequentialEngine
+from hypernodes.sequential_engine import SeqEngine
+
 
 # Test nodes
 @node(output_name="doubled")
 def double_node(x: int) -> int:
     return x * 2
 
+
 @node(output_name="added")
 def add_node(doubled: int, y: int) -> int:
     return doubled + y
+
 
 @node(output_name="result")
 def result_node(added: int) -> int:
     return added
 
-class TestSequentialEngine(unittest.TestCase):
+
+class TestSeqEngine(unittest.TestCase):
     def setUp(self):
-        self.engine = SequentialEngine()
-        self.pipeline = Pipeline(nodes=[double_node, add_node, result_node], engine=self.engine)
+        self.engine = SeqEngine()
+        self.pipeline = Pipeline(
+            nodes=[double_node, add_node, result_node], engine=self.engine
+        )
 
     def test_run(self):
         inputs = {"x": 5, "y": 3}
@@ -55,6 +58,7 @@ class TestSequentialEngine(unittest.TestCase):
         # Order depends on implementation, but let's check values
         values = sorted([r["result"] for r in results])
         self.assertEqual(values, [12, 14, 22, 24])
+
 
 if __name__ == "__main__":
     unittest.main()

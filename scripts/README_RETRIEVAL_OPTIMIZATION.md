@@ -143,7 +143,7 @@ class Model2VecEncoder:
             batch_embeddings = self._model.encode(text_list)
             return Series.from_pylist([...])
         else:
-            # SequentialEngine path
+            # SeqEngine path
             batch_embeddings = self._model.encode(texts)
             return [...]
 ```
@@ -179,7 +179,7 @@ DaftEngine currently has type inference issues with complex Pydantic models, so:
 
 **Status**: ⚠️ Not recommended for this pipeline
 
-**Use SequentialEngine instead** (default) - it's fast and reliable!
+**Use SeqEngine instead** (default) - it's fast and reliable!
 
 ## 📊 Performance Summary
 
@@ -199,7 +199,7 @@ DaftEngine currently has type inference issues with complex Pydantic models, so:
 
 **Error**: `ValueError: Daft functions require either a return type hint or the return_dtype argument`
 
-**Solution**: Use SequentialEngine instead
+**Solution**: Use SeqEngine instead
 
 ```python
 # Don't pass --daft flag
@@ -228,7 +228,7 @@ model = StaticModel.from_pretrained("minishlab/potion-retrieval-32M")
 
 1. **Batch encoding is THE optimization** - 97x speedup
 2. **@daft.cls provides lazy init** - Better for serialization
-3. **SequentialEngine is reliable** - Use for complex types
+3. **SeqEngine is reliable** - Use for complex types
 4. **DaftEngine has limitations** - Type inference issues with Pydantic
 5. **Clean code matters** - Remove unnecessary patterns
 

@@ -108,7 +108,7 @@ Only if **ALL** true:
 
 ```python
 from hypernodes import Pipeline, node
-from hypernodes.sequential_engine import SequentialEngine
+from hypernodes.sequential_engine import SeqEngine
 from hypernodes.integrations.daft.engine import DaftEngine
 
 @node(output_name="result")
@@ -121,7 +121,7 @@ def process(x: int) -> int:
 
 # Scenario 1: Small batch (10 items) → Use Sequential
 items = list(range(10))
-seq_engine = SequentialEngine()
+seq_engine = SeqEngine()
 pipeline = Pipeline(nodes=[process], engine=seq_engine)
 results = pipeline.map(inputs={"x": items}, map_over="x")
 # Sequential: ~0.3s, DAFT: ~0.3s → Sequential wins (no startup overhead)

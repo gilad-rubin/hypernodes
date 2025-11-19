@@ -7,7 +7,7 @@ using the DaskEngine - just one line of configuration!
 import time
 
 from hypernodes import Pipeline, node
-from hypernodes.engines import DaskEngine, SequentialEngine
+from hypernodes.engines import DaskEngine, SeqEngine
 from hypernodes.telemetry import ProgressCallback
 
 
@@ -50,13 +50,11 @@ def main():
 
     sequential_pipeline = Pipeline(
         nodes=[fibonacci, square, format_message],
-        engine=SequentialEngine(),
+        engine=SeqEngine(),
     )
 
     start = time.perf_counter()
-    sequential_results = sequential_pipeline.map(
-        inputs={"n": numbers}, map_over="n"
-    )
+    sequential_results = sequential_pipeline.map(inputs={"n": numbers}, map_over="n")
     sequential_time = (time.perf_counter() - start) * 1000
 
     print(f"Time: {sequential_time:.2f}ms")
@@ -105,8 +103,12 @@ def main():
     print("PERFORMANCE SUMMARY")
     print("=" * 80)
     print(f"Sequential Engine:      {sequential_time:.2f}ms")
-    print(f"DaskEngine (auto):      {dask_time:.2f}ms (speedup: {sequential_time / dask_time:.2f}x)")
-    print(f"DaskEngine (CPU-opt):   {cpu_time:.2f}ms (speedup: {sequential_time / cpu_time:.2f}x)")
+    print(
+        f"DaskEngine (auto):      {dask_time:.2f}ms (speedup: {sequential_time / dask_time:.2f}x)"
+    )
+    print(
+        f"DaskEngine (CPU-opt):   {cpu_time:.2f}ms (speedup: {sequential_time / cpu_time:.2f}x)"
+    )
 
     print("\n" + "=" * 80)
     print("KEY TAKEAWAYS:")

@@ -8,7 +8,7 @@
 
 ### Approach 1: Simple Classes (Recommended for HyperNodes)
 
-**Best for:** SequentialEngine, DaskEngine, or simple DaftEngine usage
+**Best for:** SeqEngine, DaskEngine, or simple DaftEngine usage
 
 ```python
 class ColBERTEncoder:
@@ -44,7 +44,7 @@ def encode_passages_batch(passages: List[dict], encoder: ColBERTEncoder) -> List
 # Use with ANY engine
 pipeline = Pipeline(
     nodes=[encode_passages_batch],
-    engine=SequentialEngine(),  # Simple and fast!
+    engine=SeqEngine(),  # Simple and fast!
 )
 ```
 
@@ -208,7 +208,7 @@ pipeline = Pipeline(
         compute_recall,
         combine_evaluation_results,
     ],
-    engine=SequentialEngine(),  # or DaftEngine(use_batch_udf=False)
+    engine=SeqEngine(),  # or DaftEngine(use_batch_udf=False)
 )
 ```
 
@@ -282,7 +282,7 @@ TESTED and WORKING with real benchmarks!
 
 from typing import List
 from hypernodes import Pipeline, node
-from hypernodes.engines import SequentialEngine
+from hypernodes.engines import SeqEngine
 
 
 # ==================== Simple Classes with Manual Lazy Loading ====================
@@ -374,7 +374,7 @@ pipeline = Pipeline(
         compute_recall,
         combine_evaluation_results,
     ],
-    engine=SequentialEngine(),  # Simple and fast for batch!
+    engine=SeqEngine(),  # Simple and fast for batch!
 )
 
 # Create encoder (instant!)
@@ -442,7 +442,7 @@ class ColBERTEncoder:
 **Implementation:**
 1. Add `_model = None` and `_ensure_loaded()` to classes
 2. Replace mapped encoding with batch functions
-3. Use SequentialEngine (simple!)
+3. Use SeqEngine (simple!)
 
 **Total effort:** 30 minutes  
 **Total speedup:** 100x for encoding! 🚀

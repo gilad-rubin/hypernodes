@@ -72,11 +72,11 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 #### 1. `scripts/dual_node_example.py`
 - Demonstrates stateless and stateful DualNode
 - Shows lazy initialization
-- Tests with SequentialEngine
+- Tests with SeqEngine
 
 #### 2. `scripts/dual_node_daft_test.py`
 - Integration tests with DaftEngine
-- Verifies singular used by SequentialEngine
+- Verifies singular used by SeqEngine
 - Verifies batch used by DaftEngine
 - Includes instrumented encoder to track calls
 
@@ -87,7 +87,7 @@ Successfully implemented `DualNode` - a new node type that supports both singula
 
 ## Execution Flow
 
-### SequentialEngine
+### SeqEngine
 ```
 .run()  → execute_single_node() → node.singular(**inputs)
 .map()  → execute_single_node() → node.singular(**inputs)  [called N times]
@@ -138,7 +138,7 @@ Cache invalidates when *either* implementation changes.
 
 ## Test Results
 
-### SequentialEngine (3 items)
+### SeqEngine (3 items)
 ```
 ✅ Singular calls: 3
 ✅ Batch calls: 0

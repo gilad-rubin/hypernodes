@@ -319,7 +319,7 @@ pipeline = Pipeline(
 )
 ```
 
-#### Option B: Simple batch function (if using SequentialEngine)
+#### Option B: Simple batch function (if using SeqEngine)
 
 ```python
 # Regular class (no @daft.cls)
@@ -344,10 +344,10 @@ def encode_passages(passages: List[dict], encoder: SimpleEncoder) -> List[dict]:
         for p, emb in zip(passages, embeddings)
     ]
 
-# Use with SequentialEngine (simple and fast for batch ops)
+# Use with SeqEngine (simple and fast for batch ops)
 pipeline = Pipeline(
     nodes=[load_passages, encode_passages, ...],
-    engine=SequentialEngine(),
+    engine=SeqEngine(),
 )
 ```
 
@@ -373,7 +373,7 @@ from daft import DataType, Series
 from typing import List, Any
 
 from hypernodes import Pipeline, node
-from hypernodes.engines import DaftEngine, SequentialEngine
+from hypernodes.engines import DaftEngine, SeqEngine
 
 
 # ==================== CORRECT: @daft.cls with Automatic Lazy Init ====================
@@ -457,7 +457,7 @@ def encode_passages_batch(passages: List[dict], encoder: ColBERTEncoder) -> List
     
     # Call the batch method (it's a regular method call in HyperNodes context)
     # If using DaftEngine, it could leverage @daft.cls behavior
-    # If using SequentialEngine, it just calls the method normally
+    # If using SeqEngine, it just calls the method normally
     embeddings = [encoder.encode(t, is_query=False) for t in texts]
     
     return [
@@ -508,10 +508,10 @@ def encode_passages_batch(passages: List[dict], encoder: ColBERTEncoder) -> List
     embeddings = encoder.encode_batch(texts)  # Regular method call
     return [{"uuid": p["uuid"], "embedding": e} for p, e in zip(passages, embeddings)]
 
-# Works with SequentialEngine, DaskEngine, or DaftEngine!
+# Works with SeqEngine, DaskEngine, or DaftEngine!
 pipeline = Pipeline(
     nodes=[encode_passages_batch],
-    engine=SequentialEngine(),  # Simple!
+    engine=SeqEngine(),  # Simple!
 )
 ```
 
@@ -577,12 +577,12 @@ def encode_passages_batch(passages: List[dict], encoder: ColBERTEncoder) -> List
 # Use with ANY engine!
 pipeline = Pipeline(
     nodes=[encode_passages_batch],
-    engine=SequentialEngine(),  # Simple and fast!
+    engine=SeqEngine(),  # Simple and fast!
 )
 ```
 
 **Why this approach:**
-- ✅ Works with SequentialEngine, DaskEngine, DaftEngine
+- ✅ Works with SeqEngine, DaskEngine, DaftEngine
 - ✅ Simple to understand
 - ✅ Easy to debug
 - ✅ Manual lazy loading is explicit and clear
@@ -606,7 +606,7 @@ pipeline = Pipeline(
    - Call it in HyperNodes nodes
    - 100x speedup measured!
 
-3. **Use SequentialEngine for batch operations**
+3. **Use SeqEngine for batch operations**
    - Simple and fast
    - Batch operations already give 100x speedup
    - No additional complexity needed
@@ -643,7 +643,7 @@ def encode_passages_batch(passages, encoder):
 
 pipeline = Pipeline(
     nodes=[load_passages, encode_passages_batch, ...],
-    engine=SequentialEngine(),
+    engine=SeqEngine(),
 )
 ```
 
