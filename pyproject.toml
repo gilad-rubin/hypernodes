@@ -1,6 +1,6 @@
 [project]
 name = "hypernodes"
-version = "0.3.0"
+version = "0.4.0"
 description = "A hierarchical, modular pipeline system for ML/AI workflows"
 authors = [
     {name = "Gilad Rubin", email = "me@giladrubin.com"}

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **BREAKING**: Renamed `SequentialEngine` to `SeqEngine` for consistency and brevity
+- **BREAKING**: Moved `cache` and `callbacks` parameters from `Pipeline` to `Engine` classes
+  - Old: `Pipeline(nodes=[...], cache=..., callbacks=[...])`
+  - New: `engine = SeqEngine(cache=..., callbacks=[...]); Pipeline(nodes=[...], engine=engine)`
+  - This separates execution concerns from pipeline definition
+  - All engines (SeqEngine, DaskEngine, DaftEngine) now support cache and callbacks uniformly
+
+### Added
+- `API_MIGRATION.md` guide to help migrate from old API to engine-centric architecture
+- Shared execution orchestrator across all engines for consistency
+- Engine compatibility checking for callbacks
+
+### Deprecated
+- `Pipeline.with_cache()` method (use `engine` parameter instead)
+- `Pipeline.with_callbacks()` method (use `engine` parameter instead)
+
 ## [0.3.0] - 2025-11-19
 
 ### Added
