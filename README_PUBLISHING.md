@@ -34,8 +34,8 @@ Your HyperNodes package has been fully prepared for PyPI publication using **uv*
 ### 4. Validated Build
 
 - ✅ Successfully built with `uv build`
-- ✅ Wheel: `hypernodes-0.1.0-py3-none-any.whl` (76 KB)
-- ✅ Sdist: `hypernodes-0.1.0.tar.gz` (64 KB)
+- ✅ Wheel: `hypernodes-0.3.0-py3-none-any.whl` (76 KB)
+- ✅ Sdist: `hypernodes-0.3.0.tar.gz` (64 KB)
 - ✅ No warnings or errors
 - ✅ Old code properly excluded
 - ✅ All core functionality tested
@@ -122,7 +122,7 @@ uv publish --token pypi-TOKEN
 ## 📦 Package Details
 
 **Name:** `hypernodes`  
-**Version:** `0.1.0`  
+**Version:** `0.3.0`  
 **Author:** Gilad Rubin  
 **License:** MIT  
 **Python:** >=3.12  

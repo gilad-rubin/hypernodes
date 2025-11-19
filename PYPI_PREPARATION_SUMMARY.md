@@ -57,7 +57,7 @@ This document summarizes the changes made to prepare HyperNodes for PyPI distrib
 ## 📦 Package Information
 
 **Name:** hypernodes  
-**Version:** 0.1.0  
+**Version:** 0.3.0  
 **License:** MIT  
 **Python:** >=3.12  
 **Build Backend:** Hatchling  
