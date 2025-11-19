@@ -1,8 +1,76 @@
-.DS_Store
-*.pyc
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
 .env
-dist/*
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project specific
 mlruns/*
+.*cache*
+*.svg
+*.html
+daft_grid_search_results.json
+data/*
+cache/*
 
 # START Ruler Generated Files
 *.bak
@@ -19,10 +87,3 @@ AGENTS.md.bak
 CLAUDE.md
 CLAUDE.md.bak
 # END Ruler Generated Files
-
-.*cache*
-*.svg
-*.html
-daft_grid_search_results.json
-data/*
-cache/*

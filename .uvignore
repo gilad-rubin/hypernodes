@@ -1,0 +1,11 @@
+# Ignore old/deprecated code
+src/hypernodes/old/
+
+# Test artifacts
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Build artifacts (handled by hatchling config)
+build/
+*.egg-info/
