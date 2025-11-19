@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-11-19
+
+### Changed
+- **DualNode batch functions now enforce strict PyArrow input contract**
+  - Batch functions MUST accept `pyarrow.Array` for mapped parameters
+  - Constant parameters continue to receive scalar values
+  - Output contract remains relaxed (can return `pa.Array`, `list`, or `numpy.ndarray`)
+  - This ensures true vectorization performance with PyArrow compute functions
+
+### Improved
+- **SeqEngine batch optimization for DualNode**
+  - Single-DualNode pipelines now use batch execution in `.map()` operations
+  - Results in 1 batch call instead of N individual calls
+  - Significant performance improvement even without DaftEngine
+- **Error messages for DualNode**
+  - Clear guidance when trying to batch non-convertible types (dataclasses, custom objects)
+  - Recommends using regular `@node` decorator for complex types
+
+### Removed
+- Fallback logic that passed lists when PyArrow conversion failed
+- This was causing inconsistent behavior between SeqEngine and DaftEngine
+
+### Documentation
+- Updated `docs/essentials/nodes.mdx` with comprehensive DualNode contract documentation
+- Updated `docs/scaling/daft-engine.mdx` with PyArrow examples and requirements
+- Updated `guides/DUAL_NODE_IMPLEMENTATION.md` with anti-patterns and best practices
+- Added clear "When to Use" guidance: ✅ primitive types with vectorization, ❌ complex types
+
+## [0.4.0] - 2025-11-19
+
 ### Changed
 - **BREAKING**: Renamed `SequentialEngine` to `SeqEngine` for consistency and brevity
 - **BREAKING**: Moved `cache` and `callbacks` parameters from `Pipeline` to `Engine` classes
