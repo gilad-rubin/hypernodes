@@ -17,7 +17,8 @@
             "pages": [
                 "docs/introduction",
                 "docs/get-started/installation",
-                "docs/get-started/quickstart"
+                "docs/get-started/quickstart",
+                "docs/best-practices"
             ]
         },
         {

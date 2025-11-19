@@ -5,33 +5,51 @@
 
 <p align="center">
   <a href="#installation">[Installation]</a> |
-  <a href="docs/00-introduction.md">[Documentation]</a> |
+  <a href="docs/introduction.mdx">[Documentation]</a> |
   <a href="#license">[License]</a>
 </p>
 
 # HyperNodes
 
-**Build once, cache intelligently, run anywhere.**
+**Hierarchical, Modular Data Pipelines for AI/ML**
 
-HyperNodes is a hierarchical, modular pipeline system with intelligent caching designed for ML/AI development workflows. It treats caching as a first-class citizen, enabling developers to iterate rapidly without re-running expensive computations.
+HyperNodes is designed to make building complex data pipelines intuitive and scalable. It starts with a simple premise: **define your logic on single items**, then compose and scale.
 
 ## ✨ Key Features
 
-**🧪 Test with One, Scale to Many**
+**Simplicity First: Think Singular**
 
-Build and test your pipeline with a single input, then run it over thousands of inputs without changing a line of code. Keep your code simple, unit-testable, and debuggable while enabling production-scale batch processing.
+Define your functions and pipelines as if they are processing a single item (e.g., one PDF, one audio file, one text string). This makes your code:
+- **Easy to grasp**: No complex loops or batch logic cluttering your business logic.
+- **Testable**: Write standard unit tests for individual functions.
+- **Debuggable**: Step through your code easily.
 
-**💾 Intelligent Caching**
+**🪆 Hierarchical Composition**
 
-During development, we run pipelines dozens of times with minor tweaks. HyperNodes automatically caches at node and example granularity and only re-runs what changed.
+Once you have your building blocks, compose them into progressively more complex pipelines.
+- **Nesting**: Pipelines are nodes. You can use a pipeline as a node inside another pipeline.
+- **Mapping**: Seamlessly apply a pipeline over a list of inputs using `.map()`.
+- **Visual**: Always keep one level of understanding. Look at the high-level flow, then dive deeper into specific sub-pipelines as needed.
 
-**🪆 Hierarchical Modularity**
+**Structured Data & Protocols**
 
-Functions are nodes. Pipelines are made out of nodes, and Pipelines are nodes themselves. Build complex workflows from simple, reusable pieces.
+HyperNodes integrates deeply with **Pydantic** and **dataclasses**. Define reusable protocols and data structures to ensure type safety and clarity throughout your pipeline. This leads to a codebase that is easy to maintain and extend.
 
-**⚡ Flexible Execution**
+**🚀 Powered by Daft: Performance & Caching**
 
-Run pipelines with different execution strategies: sequential for debugging, async for I/O-bound workloads, or **distributed parallel execution with [Daft](https://www.getdaft.io/)** for high-performance data processing.
+When you're ready to scale, HyperNodes leverages **[Daft](https://www.getdaft.io/)** as its computation engine.
+- **Distributed Execution**: Run on your laptop or a cluster without changing code.
+- **Intelligent Caching**: Caching is a first-class citizen. Daft handles distributed caching, ensuring you only recompute what's necessary.
+
+---
+
+## 💡 Inspiration
+
+HyperNodes stands on the shoulders of giants. It was inspired by and grew from working with:
+- **[Pipefunc](https://github.com/pipefunc/pipefunc)**: For its elegant approach to function composition.
+- **[Apache Hamilton](https://github.com/dagworks-inc/hamilton)**: For its paradigm of defining dataflows using standard Python functions.
+
+HyperNodes aims to bring native support for hierarchical pipelines and advanced caching to this ecosystem.
 
 ---
 
@@ -39,7 +57,7 @@ Run pipelines with different execution strategies: sequential for debugging, asy
 
 The full documentation is available in the `docs/` directory:
 
-- **[Introduction & Quick Start](docs/00-introduction.md)**
+- **[Introduction & Quick Start](docs/introduction.mdx)**
 - **Core Concepts**
     - [Nodes](docs/01-core-concepts/01-nodes.md)
     - [Pipelines](docs/01-core-concepts/02-pipelines.md)
@@ -73,7 +91,7 @@ uv add hypernodes
 ```python
 from hypernodes import Pipeline, node
 
-# Define functions as nodes
+# 1. Define functions on a single item
 @node(output_name="cleaned_text")
 def clean_text(passage: str) -> str:
     return passage.strip().lower()
@@ -82,14 +100,14 @@ def clean_text(passage: str) -> str:
 def count_words(cleaned_text: str) -> int:
     return len(cleaned_text.split())
 
-# Build pipeline - dependencies are automatically resolved
+# 2. Build pipeline
 pipeline = Pipeline(nodes=[clean_text, count_words])
 
-# Test with single input
+# 3. Test with single input
 result = pipeline.run(inputs={"passage": "Hello World"})
 print(result)  # {'cleaned_text': 'hello world', 'word_count': 2}
 
-# Scale to many inputs - each item cached independently
+# 4. Scale with .map()
 results = pipeline.map(
     inputs={"passage": ["Hello", "World", "Foo", "Bar"]},
     map_over="passage",

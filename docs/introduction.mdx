@@ -1,6 +1,6 @@
 ---
 title: Introduction
-description: 'Build once, cache intelligently, run anywhere.'
+description: 'Hierarchical, Modular Data Pipelines for AI/ML'
 ---
 
 <img
@@ -14,24 +14,24 @@ description: 'Build once, cache intelligently, run anywhere.'
   alt="Hero Dark"
 />
 
-HyperNodes is a **hierarchical, modular pipeline system** designed for ML/AI development. It solves the "re-run problem" by treating caching as a first-class citizen.
+HyperNodes is a **hierarchical, modular pipeline system** designed for ML/AI development. It enables you to **define your logic on a single item**, then compose and scale seamlessly.
 
 ![Pipeline Overview](/docs/assets/pipeline_overview.svg)
 
 ## Why HyperNodes?
 
 <CardGroup cols={2}>
-  <Card title="Smart Caching" icon="database">
-    Only re-run what changed. HyperNodes hashes your code and data to skip redundant computation.
+  <Card title="Simplicity First" icon="cube">
+    Define functions on a single item (e.g., one PDF). Easy to test, debug, and reason about.
   </Card>
   <Card title="Hierarchical Modularity" icon="sitemap">
-    Functions are nodes. Pipelines are nodes. Nest pipelines infinitely to compose complex systems from simple, testable blocks.
+    Functions are nodes. Pipelines are nodes. Nest pipelines infinitely to compose complex systems.
   </Card>
-  <Card title="Flexible Execution" icon="server">
-    Debug locally with standard Python. Scale to the cloud with Daft or Dask without changing your code.
+  <Card title="Structured Data" icon="code">
+    Built-in support for Pydantic and dataclasses. Keep your data structured and type-safe.
   </Card>
-  <Card title="Observability" icon="chart-line">
-    Built-in progress bars, visualization, and OpenTelemetry tracing.
+  <Card title="Daft Integration" icon="rocket">
+    Scale effortlessly. Distributed execution and intelligent caching powered by Daft.
   </Card>
 </CardGroup>
 
@@ -60,6 +60,7 @@ Define nodes and build a pipeline in just a few lines:
 ```python
 from hypernodes import node, Pipeline
 
+# 1. Define functions on a single item
 @node(output_name="cleaned_text")
 def clean_text(passage: str) -> str:
     return passage.strip().lower()
@@ -68,8 +69,10 @@ def clean_text(passage: str) -> str:
 def count_words(cleaned_text: str) -> int:
     return len(cleaned_text.split())
 
-# Build and run
+# 2. Build pipeline
 pipeline = Pipeline(nodes=[clean_text, count_words])
+
+# 3. Test with single input
 result = pipeline.run(inputs={"passage": "  Hello World  "})
 # {'cleaned_text': 'hello world', 'word_count': 2}
 ```
@@ -82,13 +85,13 @@ HyperNodes automatically resolves dependencies by matching parameter names to ou
 
 <CardGroup cols={2}>
   <Card title="Core Concepts" icon="book" href="/docs/core/nodes">
-    Learn about Nodes, Pipelines, and Caching.
+    Learn about Nodes, Pipelines, and Execution.
   </Card>
-  <Card title="Scaling" icon="layer-group" href="/docs/scaling/map-operations">
-    Scale from one item to millions with `.map()`.
+  <Card title="Data Processing" icon="layer-group" href="/docs/composition/nesting">
+    Master composition with Nesting and Mapping.
   </Card>
-  <Card title="Engines" icon="rocket" href="/docs/engines/overview">
-    Run locally or distributed with Daft.
+  <Card title="Scaling" icon="server" href="/docs/scaling/daft-engine">
+    Scale from one item to millions with Daft.
   </Card>
   <Card title="Observability" icon="chart-line" href="/docs/observability/visualization">
     Visualize and monitor your pipelines.

@@ -1,0 +1,95 @@
+---
+title: Best Practices
+description: 'Design patterns for robust and scalable pipelines'
+---
+
+To get the most out of HyperNodes, we recommend following these design patterns. They will help you write code that is testable, maintainable, and ready to scale.
+
+## 1. Structured Data
+
+Avoid passing around raw dictionaries or unstructured strings. Use **Pydantic models** or **dataclasses** to define clear interfaces between your nodes.
+
+### Why?
+- **Type Safety**: Catch errors early.
+- **Autocompletion**: IDEs can help you.
+- **Clarity**: It's obvious what data a node expects and returns.
+
+```python
+from dataclasses import dataclass
+from hypernodes import node
+
+@dataclass
+class Document:
+    text: str
+    metadata: dict
+
+@node(output_name="processed_doc")
+def process_document(doc: Document) -> Document:
+    # Clear what 'doc' is and what attributes it has
+    return Document(text=doc.text.lower(), metadata=doc.metadata)
+```
+
+## 2. Dependency Injection
+
+Pass external services (databases, API clients) as arguments to your nodes, rather than instantiating them inside the node or using globals.
+
+### Why?
+- **Testability**: You can easily pass mock objects during testing.
+- **Flexibility**: Swap out implementations (e.g., `MockVectorDB` vs `ProdVectorDB`) without changing node logic.
+
+```python
+class VectorDB:
+    def search(self, query): ...
+
+@node(output_name="results")
+def retrieve(query: str, db: VectorDB) -> list:
+    return db.search(query)
+
+# In tests:
+# pipeline.run(inputs={"query": "...", "db": MockVectorDB()})
+```
+
+## 3. Granularity: Think Small
+
+Keep your nodes small and focused on a single task.
+
+### Why?
+- **Caching**: Smaller nodes mean more granular caching. If you change one step, you don't re-run the whole chain.
+- **Reusability**: Small utility nodes can be reused across different pipelines.
+- **Debugging**: It's easier to isolate issues in a 5-line function than a 50-line one.
+
+**Bad:** One giant node that downloads, cleans, and embeds data.
+**Good:** Three separate nodes: `download` -> `clean` -> `embed`.
+
+## 4. State Management
+
+Use `@stateful` for objects that are expensive to initialize, like ML models or database connections.
+
+### Why?
+- **Performance**: Initialize once per worker, reuse many times.
+- **Resource Management**: Cleanly handle setup and teardown.
+
+```python
+from hypernodes import stateful
+
+@stateful
+class LLMModel:
+    def __init__(self):
+        self.model = load_heavy_model() # Done once
+
+    def predict(self, x):
+        return self.model(x)
+
+@node(output_name="prediction")
+def predict_node(text: str, model: LLMModel) -> str:
+    return model.predict(text)
+```
+
+## 5. Composition over Complexity
+
+Start simple. Build pipelines that handle a single item. Then use **Nesting** and **Mapping** to handle complexity and scale.
+
+- **Nesting**: Wrap a logical group of nodes into a sub-pipeline. Treat it as a black box.
+- **Mapping**: Use `.map()` to apply your single-item pipeline over a dataset.
+
+This keeps your mental model simple: you're always just looking at a few nodes interacting, even if the system is processing millions of items.
