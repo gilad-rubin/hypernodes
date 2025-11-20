@@ -62,23 +62,16 @@ class PipelineNode(HyperNode):
 
     @property
     def root_args(self) -> tuple:
-        """Get outer parameter names (after applying reverse input mapping).
+        """Get outer parameter names not satisfied by inner pipeline bindings.
+
+        Returns only the parameters that must be provided by the outer pipeline,
+        excluding any that are already bound in the inner pipeline.
 
         Returns:
             Tuple of parameter names from outer pipeline's perspective
         """
-        # Get inner pipeline's root parameters and apply reverse mapping
-        inner_params = self._pipeline.graph.root_args
-        reverse_mapping = self._create_reverse_input_mapping()
-        outer_params = [reverse_mapping.get(p, p) for p in inner_params]
-
-        # Add any map_over params that aren't already included
-        if self.map_over:
-            for param in self.map_over:
-                if param not in outer_params:
-                    outer_params.append(param)
-
-        return tuple(outer_params)
+        # Use unfulfilled_args to get only params that aren't bound
+        return self.unfulfilled_args
 
     @property
     def output_name(self) -> Union[str, tuple]:
@@ -132,6 +125,47 @@ class PipelineNode(HyperNode):
             The Pipeline instance wrapped by this PipelineNode
         """
         return self._pipeline
+
+    @property
+    def bound_inputs(self) -> Dict:
+        """Get inputs bound in the wrapped pipeline.
+
+        Returns:
+            Copy of bound inputs from wrapped pipeline
+        """
+        return self._pipeline.bound_inputs
+
+    @property
+    def unfulfilled_args(self) -> tuple:
+        """Get outer parameter names not satisfied by inner pipeline bindings.
+
+        This is what the outer pipeline actually needs to provide.
+        Accounts for:
+        - Inner pipeline's bound inputs (excluded)
+        - Input mapping (reversed to outer names)
+        - map_over parameters (included if not already present)
+
+        Returns:
+            Tuple of unfulfilled parameter names from outer perspective
+        """
+        # Get inner pipeline's bound inputs
+        inner_bound = set(getattr(self._pipeline, "_bound_inputs", {}).keys())
+
+        # Get unfulfilled inner parameters
+        inner_params = self._pipeline.graph.root_args
+        unfulfilled_inner = [p for p in inner_params if p not in inner_bound]
+
+        # Apply reverse mapping to get outer parameter names
+        reverse_mapping = self._create_reverse_input_mapping()
+        outer_params = [reverse_mapping.get(p, p) for p in unfulfilled_inner]
+
+        # Add map_over params that aren't already included
+        if self.map_over:
+            for param in self.map_over:
+                if param not in outer_params:
+                    outer_params.append(param)
+
+        return tuple(outer_params)
 
     def _create_reverse_input_mapping(self) -> Dict[str, str]:
         """Create reverse mapping from inner to outer parameter names.
@@ -306,6 +340,20 @@ class PipelineNode(HyperNode):
 
     def __repr__(self) -> str:
         """Return string representation."""
+        bound = self.bound_inputs
+        unfulfilled = self.unfulfilled_args
+
+        if bound or unfulfilled:
+            parts = []
+            if bound:
+                bound_keys = ", ".join(bound.keys())
+                parts.append(f"bound=[{bound_keys}]")
+            if unfulfilled:
+                unfulfilled_str = ", ".join(unfulfilled)
+                parts.append(f"needs=[{unfulfilled_str}]")
+            pipeline_name = self._pipeline.name or "unnamed"
+            return f"PipelineNode({pipeline_name}, {', '.join(parts)})"
+
         return f"PipelineNode({self._pipeline})"
 
     def __hash__(self) -> int:

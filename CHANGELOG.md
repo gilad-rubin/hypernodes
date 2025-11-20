@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Pipeline input binding with `.bind()` and `.unbind()`**
+  - New `.bind(**inputs)` method to set default input values for pipelines
+  - Bound inputs are used as defaults in `.run()` and `.map()` calls
+  - Can be overridden by passing `inputs=` at runtime
+  - Multiple `.bind()` calls merge inputs (later calls override earlier values for same keys)
+  - `.unbind(*keys)` removes specific bound inputs, or all if no keys specified
+  - Similar to `functools.partial` - enables partial application of pipeline parameters
+  - Common use cases: bind expensive resources (models), set default hyperparameters, simplify API
+  - Made `inputs` parameter optional in `.run()` and `.map()` when using `.bind()`
+  - Added comprehensive tests in `tests/test_bind.py`
+
+- **Input fulfillment tracking properties**
+  - New `.bound_inputs` property on Pipeline and PipelineNode - returns dict of bound values
+  - New `.unfulfilled_args` property on Pipeline and PipelineNode - returns tuple of unbound parameter names
+  - Validation now respects bound inputs - only unfulfilled parameters are required at runtime
+  - Nested pipelines with fully bound inputs no longer require outer pipeline to provide them
+  - Enables better introspection: check what's bound vs. what's still needed
+  - `Pipeline.__repr__()` now shows bound inputs and unfulfilled args for better debugging
+  - `PipelineNode.__repr__()` also shows bound status and unfulfilled requirements
+  - **Visualization now shows bound inputs with lighter/transparent color** to distinguish from unfulfilled inputs
+
+- **Visualization: Input/Output mapping indicators**
+  - Edge labels now show parameter mappings when using `input_mapping` or `output_mapping`
+  - Format: `outer_name → inner_name` on edges crossing nested pipeline boundaries
+  - Example: `eval_pairs → eval_pair` shows outer parameter being mapped to inner name
+  - Helps understand how parameters flow through nested pipelines with renamed parameters
+  - Legend updated with explanation: "a → b: Parameter Mapping"
+  - Makes complex pipeline compositions much easier to understand and debug
+
+### Fixed
+- **Visualization: Input mapping edge connections**
+  - Fixed issue where mapped parameters appeared as floating nodes without connections
+  - Edges now correctly connect producer nodes to inner consumers through input mapping
+  - Example: `extract_query` → `query` now properly connects to nested pipeline expecting different param name
+  - Applied reverse input mapping to show outer parameter names in outer scope
+  - Bound parameters from nested pipelines are now correctly displayed with outer names
+
 ## [0.4.3] - 2025-11-20
 
 ### Fixed

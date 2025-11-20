@@ -364,15 +364,44 @@ class VisualizationGraph:
 
     Attributes:
         nodes: Set of nodes to display
-        edges: List of (source, target) tuples where source is Node or str
+        edges: List of (source, target, label) tuples where source is Node or str
         root_args: Set of external input parameter names
         output_to_node: Mapping from output names to nodes
     """
 
     nodes: Set[Node]
-    edges: List[tuple[Union[Node, str], Node]]
+    edges: List[tuple[Union[Node, str], Node, Optional[str]]]  # (source, target, label)
     root_args: Set[str]
     output_to_node: Dict[str, Node]
+
+
+def _collect_all_parameters_from_nodes(nodes: List[Node]) -> Set[str]:
+    """Collect all input parameters from nodes, including bound ones.
+    
+    This gets the original parameters from each node's function signature,
+    not just the unfulfilled root_args.
+    
+    Args:
+        nodes: List of nodes to collect parameters from
+    
+    Returns:
+        Set of all parameter names
+    """
+    all_params = set()
+    for node in nodes:
+        if hasattr(node, 'func') and hasattr(node.func, '__code__'):
+            # Get all parameter names from function signature
+            func_params = node.func.__code__.co_varnames[:node.func.__code__.co_argcount]
+            all_params.update(func_params)
+        elif hasattr(node, 'pipeline'):
+            # For PipelineNode, get params from inner pipeline
+            # This includes both bound and unbound
+            inner_pipeline = node.pipeline
+            all_params.update(inner_pipeline.graph.root_args)
+            # Also add bound inputs
+            all_params.update(inner_pipeline.bound_inputs.keys())
+    
+    return all_params
 
 
 def _collect_visualization_data(
@@ -392,8 +421,13 @@ def _collect_visualization_data(
     graph_result = pipeline.graph
 
     nodes_to_display: Set[Node] = set()
-    edges: List[tuple[Union[Node, str], Node]] = []
+    edges: List[tuple[Union[Node, str], Node, Optional[str]]] = []  # (source, target, label)
     all_root_args: Set[str] = set(graph_result.root_args)
+    
+    # Also include bound parameters from this pipeline level
+    # This ensures they show up in visualization even if bound
+    all_root_args.update(pipeline.bound_inputs.keys())
+    
     output_to_node = dict(graph_result.output_to_node)
 
     # Track expanded PipelineNodes to handle their dependencies later
@@ -406,7 +440,7 @@ def _collect_visualization_data(
             # Check if we should expand this nested pipeline
             should_expand = depth is None or depth > 1
 
-            if should_expand and depth is not None:
+            if should_expand:
                 # Recursively expand nested pipeline
                 nested_depth = None if depth is None else depth - 1
                 nested_viz = _collect_visualization_data(node.pipeline, nested_depth)
@@ -414,8 +448,53 @@ def _collect_visualization_data(
                 # Add nested nodes
                 nodes_to_display.update(nested_viz.nodes)
 
-                # Add nested edges
-                edges.extend(nested_viz.edges)
+                # Create reverse input mapping (inner -> outer)
+                reverse_input_mapping = {inner: outer for outer, inner in node.input_mapping.items()}
+
+                # Process nested edges, applying input mapping where needed
+                for edge_data in nested_viz.edges:
+                    if len(edge_data) == 3:
+                        source, target, existing_label = edge_data
+                    else:
+                        source, target = edge_data
+                        existing_label = None
+                    
+                    # If source is a string (parameter name), it might need mapping
+                    if isinstance(source, str):
+                        # Check if this inner parameter name should be mapped to outer name
+                        outer_param = reverse_input_mapping.get(source, source)
+                        
+                        # Create label if there's a mapping
+                        edge_label = None
+                        if source in reverse_input_mapping:
+                            # Input mapping: outer → inner
+                            edge_label = f"{outer_param} → {source}"
+                        
+                        # Check if the outer param is produced by a node in the outer scope
+                        if outer_param in output_to_node:
+                            # Replace string edge with node edge
+                            # The producer node is in the outer scope
+                            producer_node = output_to_node[outer_param]
+                            edges.append((producer_node, target, edge_label))
+                        else:
+                            # It's still an external parameter (use outer name)
+                            edges.append((outer_param, target, edge_label))
+                    else:
+                        # Node-to-node edge within nested pipeline
+                        # Check if this crosses an output mapping boundary
+                        edge_label = existing_label
+                        
+                        # If source node produces an output that's mapped, add label
+                        if hasattr(source, 'output_name'):
+                            source_outputs = source.output_name if isinstance(source.output_name, tuple) else (source.output_name,)
+                            for inner_output in source_outputs:
+                                if inner_output in node.output_mapping:
+                                    outer_output = node.output_mapping[inner_output]
+                                    if edge_label is None:
+                                        edge_label = f"{inner_output} → {outer_output}"
+                                    break
+                        
+                        edges.append((source, target, edge_label))
 
                 # Update output mapping for inner nodes
                 # Map the PipelineNode's output names to the actual inner nodes
@@ -424,8 +503,22 @@ def _collect_visualization_data(
                     outer_output = node.output_mapping.get(inner_output, inner_output)
                     output_to_node[outer_output] = inner_node
 
-                # Add root args from nested pipeline
-                all_root_args.update(nested_viz.root_args)
+                # Add root args from nested pipeline that aren't produced at this level
+                # Apply reverse mapping to get outer names
+                for inner_param in nested_viz.root_args:
+                    outer_param = reverse_input_mapping.get(inner_param, inner_param)
+                    # Only add if not produced by other nodes
+                    if outer_param not in output_to_node:
+                        all_root_args.add(outer_param)
+                
+                # Also add bound parameters from the nested pipeline at THIS level
+                # Apply reverse mapping to get outer names (for display)
+                inner_bound = node.pipeline.bound_inputs.keys()
+                for inner_param in inner_bound:
+                    outer_param = reverse_input_mapping.get(inner_param, inner_param)
+                    # Only add if not produced by other nodes
+                    if outer_param not in output_to_node:
+                        all_root_args.add(outer_param)
 
                 # Track this expanded node for later dependency resolution
                 expanded_pipeline_nodes[node] = nested_viz
@@ -435,12 +528,12 @@ def _collect_visualization_data(
 
                 # Add edges for this node's dependencies
                 for dep_node in graph_result.dependencies.get(node, []):
-                    edges.append((dep_node, node))
+                    edges.append((dep_node, node, None))
 
                 # Add edges for root args
                 for param in node.root_args:
                     if param not in output_to_node:
-                        edges.append((param, node))
+                        edges.append((param, node, None))
                         all_root_args.add(param)
         else:
             # Regular node
@@ -462,15 +555,23 @@ def _collect_visualization_data(
                             inner_producer = output_to_node[param]
                             # Only add edge if the producer is from the nested pipeline
                             if inner_producer in nested_viz.nodes:
-                                edges.append((inner_producer, node))
+                                # Check if there's an output mapping
+                                edge_label = None
+                                if dep_node.output_mapping:
+                                    # Find the inner name for this outer param
+                                    reverse_output_mapping = {outer: inner for inner, outer in dep_node.output_mapping.items()}
+                                    if param in reverse_output_mapping:
+                                        inner_name = reverse_output_mapping[param]
+                                        edge_label = f"{inner_name} → {param}"
+                                edges.append((inner_producer, node, edge_label))
                 else:
                     # Regular dependency
-                    edges.append((dep_node, node))
+                    edges.append((dep_node, node, None))
 
             # Add edges for root args (string -> node)
             for param in node.root_args:
                 if param not in output_to_node:
-                    edges.append((param, node))
+                    edges.append((param, node, None))
                     all_root_args.add(param)
 
     return VisualizationGraph(
@@ -484,14 +585,17 @@ def _collect_visualization_data(
 def _identify_grouped_inputs(
     viz_graph: VisualizationGraph,
     min_group_size: Optional[int] = 2,
+    bound_inputs: Optional[Set[str]] = None,
 ) -> Dict[Node, List[str]]:
     """Identify input parameters that should be grouped together.
 
     Groups inputs that are used exclusively by a single function.
+    Bound and unbound inputs are NOT grouped together.
 
     Args:
         viz_graph: VisualizationGraph with nodes and edges
         min_group_size: Minimum number of inputs to create a group (None = no grouping)
+        bound_inputs: Set of bound input parameter names (to prevent mixing bound/unbound)
 
     Returns:
         Dictionary mapping nodes to lists of input parameters to group
@@ -499,30 +603,62 @@ def _identify_grouped_inputs(
     if min_group_size is None:
         return {}
 
+    if bound_inputs is None:
+        bound_inputs = set()
+
     # Map each input parameter (string) to its consumers
     input_consumers: Dict[str, List[Node]] = {}
-    for source, target in viz_graph.edges:
+    for edge_data in viz_graph.edges:
+        # Handle both old and new format
+        if len(edge_data) == 3:
+            source, target, _ = edge_data
+        else:
+            source, target = edge_data
+        
         if isinstance(source, str):  # Input parameter
             if source not in input_consumers:
                 input_consumers[source] = []
             input_consumers[source].append(target)
 
-    # Group inputs by their consumer
-    consumer_inputs: Dict[Node, List[str]] = {}
+    # Group inputs by their consumer, separating bound and unbound
+    consumer_bound_inputs: Dict[Node, List[str]] = {}
+    consumer_unbound_inputs: Dict[Node, List[str]] = {}
+    
     for input_param, consumers in input_consumers.items():
         # Only group if used by exactly one consumer
         if len(consumers) == 1:
             consumer = consumers[0]
-            if consumer not in consumer_inputs:
-                consumer_inputs[consumer] = []
-            consumer_inputs[consumer].append(input_param)
+            is_bound = input_param in bound_inputs
+            
+            # Separate bound and unbound inputs
+            if is_bound:
+                if consumer not in consumer_bound_inputs:
+                    consumer_bound_inputs[consumer] = []
+                consumer_bound_inputs[consumer].append(input_param)
+            else:
+                if consumer not in consumer_unbound_inputs:
+                    consumer_unbound_inputs[consumer] = []
+                consumer_unbound_inputs[consumer].append(input_param)
 
     # Filter to only groups that meet min_group_size
-    grouped = {
-        node: inputs
-        for node, inputs in consumer_inputs.items()
-        if len(inputs) >= min_group_size
-    }
+    # Combine bound and unbound groups (they're separate)
+    grouped = {}
+    
+    for node, inputs in consumer_bound_inputs.items():
+        if len(inputs) >= min_group_size:
+            grouped[node] = inputs
+    
+    for node, inputs in consumer_unbound_inputs.items():
+        if len(inputs) >= min_group_size:
+            # If node already has a bound group, create a different key
+            # Actually, we can't have the same node twice in the dict
+            # So we'll use a tuple (node, 'bound') or (node, 'unbound') as key
+            # Wait, that won't work with the current code structure
+            # Better solution: just add to the same node if not already there
+            if node not in grouped:
+                grouped[node] = inputs
+            # If node already in grouped (has bound inputs), don't mix them
+            # Leave the bound inputs grouped, and the unbound ungrouped
 
     return grouped
 
@@ -652,6 +788,37 @@ def _create_grouped_inputs_label(
     return label
 
 
+def _compute_grouped_input_transparency(
+    grouped_params: Set[str],
+    bound_inputs: Set[str],
+    base_color: str,
+) -> tuple[str, str]:
+    """Compute fillcolor and style for grouped inputs based on bound status.
+    
+    All groups have the same color/opacity, only border style differs.
+    
+    Args:
+        grouped_params: Set of parameter names in this group
+        bound_inputs: Set of parameter names that are bound
+        base_color: Base color (e.g., "#90EE90")
+    
+    Returns:
+        Tuple of (fillcolor, border style)
+    """
+    if not grouped_params:
+        return base_color, "filled"
+    
+    all_bound = grouped_params.issubset(bound_inputs)
+    
+    if all_bound:
+        # All bound - dashed border
+        return base_color, "dashed,filled"
+    else:
+        # None or some bound - solid border
+        # (We shouldn't have mixed groups due to separation logic)
+        return base_color, "filled"
+
+
 def _create_pipeline_label(
     pipeline: Pipeline,
     style: GraphvizStyle,
@@ -687,6 +854,38 @@ def _create_pipeline_label(
 </TABLE>>'''
 
     return label
+
+
+def _collect_all_bound_inputs(pipeline: Pipeline, depth: Optional[int] = 1) -> Dict[str, Any]:
+    """Collect bound inputs from pipeline and all nested pipelines.
+    
+    Args:
+        pipeline: Root pipeline to collect from
+        depth: Expansion depth (None = all levels)
+    
+    Returns:
+        Dictionary of all bound inputs from this pipeline and nested ones
+    """
+    all_bound = dict(pipeline.bound_inputs)
+    
+    # If not expanding, we're done
+    if depth is not None and depth <= 1:
+        return all_bound
+    
+    # Recursively collect from nested pipelines
+    for node in pipeline.nodes:
+        inner_pipeline = None
+        if isinstance(node, Pipeline):
+            inner_pipeline = node
+        elif isinstance(node, PipelineNode):
+            inner_pipeline = node.pipeline
+        
+        if inner_pipeline is not None:
+            nested_depth = None if depth is None else depth - 1
+            nested_bound = _collect_all_bound_inputs(inner_pipeline, nested_depth)
+            all_bound.update(nested_bound)
+    
+    return all_bound
 
 
 def visualize(
@@ -736,8 +935,14 @@ def visualize(
     # Collect visualization data from pipeline's graph
     viz_graph = _collect_visualization_data(pipeline, depth=depth)
 
-    # Identify grouped inputs
-    grouped_inputs = _identify_grouped_inputs(viz_graph, min_arg_group_size)
+    # Collect bound inputs from all levels (root + nested pipelines if expanded)
+    all_bound_inputs = _collect_all_bound_inputs(pipeline, depth)
+    bound_inputs_for_grouping = set(all_bound_inputs.keys())
+
+    # Identify grouped inputs (excluding mixed bound/unbound groups)
+    grouped_inputs = _identify_grouped_inputs(
+        viz_graph, min_arg_group_size, bound_inputs=bound_inputs_for_grouping
+    )
 
     # Create graphviz digraph
     dot = graphviz.Digraph(comment="Pipeline")
@@ -865,6 +1070,7 @@ def visualize(
                         penwidth=str(style_obj.node_border_width),
                         margin=style_obj.node_padding,
                     )
+                    # Add grouped inputs for collapsed nested pipeline
                     if item in grouped_inputs:
                         grp_label = _create_grouped_inputs_label(
                             grouped_inputs[item],
@@ -872,12 +1078,27 @@ def visualize(
                             style_obj,
                             show_types=False,
                         )
+                        
+                        # Determine which pipeline's bound inputs to check
+                        # For PipelineNode, check the inner pipeline's bound inputs
+                        if isinstance(item, PipelineNode):
+                            pipeline_to_check = item.pipeline
+                        else:
+                            pipeline_to_check = inner_pipeline
+                        
+                        # Compute transparency and style based on bound status
+                        bound_set = set(pipeline_to_check.bound_inputs.keys())
+                        grouped_params = set(grouped_inputs[item])
+                        grp_fillcolor, grp_style = _compute_grouped_input_transparency(
+                            grouped_params, bound_set, style_obj.grouped_args_node_color
+                        )
+                        
                         container.node(
                             f"group_{id(item)}",
                             label=grp_label,
                             shape="box",
-                            style="filled",
-                            fillcolor=style_obj.grouped_args_node_color,
+                            style=grp_style,
+                            fillcolor=grp_fillcolor,
                             fontname=style_obj.font_name,
                             fontsize=str(style_obj.font_size),
                             penwidth=str(style_obj.node_border_width),
@@ -904,17 +1125,25 @@ def visualize(
                     penwidth=str(style_obj.node_border_width),
                     margin=style_obj.node_padding,
                 )
-                # Add grouped inputs node inside same container if applicable
+                # Add grouped inputs node for function nodes
                 if item in grouped_inputs:
                     grp_label = _create_grouped_inputs_label(
                         grouped_inputs[item], item, style_obj, show_types
                     )
+                    
+                    # Compute transparency and style based on bound status
+                    bound_set = set(pl.bound_inputs.keys())
+                    grouped_params = set(grouped_inputs[item])
+                    grp_fillcolor, grp_style = _compute_grouped_input_transparency(
+                        grouped_params, bound_set, style_obj.grouped_args_node_color
+                    )
+                    
                     container.node(
                         f"group_{id(item)}",
                         label=grp_label,
                         shape="box",
-                        style="filled",
-                        fillcolor=style_obj.grouped_args_node_color,
+                        style=grp_style,
+                        fillcolor=grp_fillcolor,
                         fontname=style_obj.font_name,
                         fontsize=str(style_obj.font_size),
                         penwidth=str(style_obj.node_border_width),
@@ -926,12 +1155,24 @@ def visualize(
     # Only nested pipelines get clusters
     add_nodes_in_container(dot, pipeline, current_depth=1)
 
-    # Add remaining input nodes (not grouped) at top level
+    # Collect bound inputs from all levels (root + nested pipelines if expanded)
+    all_bound_inputs = _collect_all_bound_inputs(pipeline, depth)
+    bound_inputs_set = set(all_bound_inputs.keys())
+    
     for input_param in viz_graph.root_args:
         if input_param not in added_grouped_inputs:
+            # Check if this input is bound (in any level of nesting)
+            is_bound = input_param in bound_inputs_set
+            
             # Find a consumer node for type hints
             consumer_node = None
-            for source, target in viz_graph.edges:
+            for edge_data in viz_graph.edges:
+                # Handle both old and new format
+                if len(edge_data) == 3:
+                    source, target, _ = edge_data
+                else:
+                    source, target = edge_data
+                    
                 if source == input_param:
                     consumer_node = target
                     break
@@ -939,11 +1180,20 @@ def visualize(
             label = _create_input_label(
                 input_param, consumer_node, style_obj, show_types
             )
+            
+            # Bound inputs: dashed border (no transparency)
+            # Unbound inputs: solid border
+            # All inputs have same color and opacity
+            if is_bound:
+                node_style = "dashed,filled"
+            else:
+                node_style = "filled"
+            
             dot.node(
                 str(id(input_param)),
                 label=label,
                 shape="box",
-                style="dashed,filled",
+                style=node_style,
                 fillcolor=style_obj.arg_node_color,
                 fontname=style_obj.font_name,
                 fontsize=str(style_obj.font_size),
@@ -952,7 +1202,14 @@ def visualize(
             )
 
     # Add edges
-    for source, target in viz_graph.edges:
+    for edge_data in viz_graph.edges:
+        # Unpack edge data (handle both old and new format)
+        if len(edge_data) == 3:
+            source, target, edge_label = edge_data
+        else:
+            source, target = edge_data
+            edge_label = None
+        
         # Handle grouped inputs
         if target in grouped_inputs:
             # Check if source is one of the grouped inputs
@@ -970,12 +1227,17 @@ def visualize(
 
         target_id = str(id(target))
 
+        # Use edge label if provided, otherwise empty
+        label_str = edge_label if edge_label else ""
+        
         dot.edge(
             source_id,
             target_id,
-            label="",
+            label=label_str,
             color=edge_color,
             penwidth=str(style_obj.edge_width),
+            fontsize=str(style_obj.edge_font_size),
+            fontname=style_obj.font_name,
         )
 
     # Add edges from grouped inputs to consumers
@@ -995,15 +1257,28 @@ def visualize(
             legend.attr(style="filled", fillcolor=style_obj.legend_background_color)
             legend.attr(fontname=style_obj.font_name)
 
+            # Unbound input (solid border)
             legend.node(
-                "legend_input",
-                label="Input",
+                "legend_input_unbound",
+                label="Input (Unbound)",
+                shape="box",
+                style="filled",
+                fillcolor=style_obj.arg_node_color,
+                fontname=style_obj.font_name,
+                fontsize=str(style_obj.legend_font_size),
+            )
+            
+            # Bound input (dashed border)
+            legend.node(
+                "legend_input_bound",
+                label="Input (Bound)",
                 shape="box",
                 style="dashed,filled",
                 fillcolor=style_obj.arg_node_color,
                 fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )
+            
             legend.node(
                 "legend_function",
                 label="Function",
@@ -1037,6 +1312,15 @@ def visualize(
                 shape="box",
                 style="rounded,filled",
                 fillcolor=style_obj.pipeline_node_color,
+                fontname=style_obj.font_name,
+                fontsize=str(style_obj.legend_font_size),
+            )
+            
+            # Add explanation for mapping arrows
+            legend.node(
+                "legend_mapping",
+                label="a → b: Parameter Mapping",
+                shape="plaintext",
                 fontname=style_obj.font_name,
                 fontsize=str(style_obj.legend_font_size),
             )

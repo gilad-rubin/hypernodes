@@ -57,9 +57,10 @@ class Pipeline:
     def _validate_inputs(
         self, inputs: Dict[str, Any], output_name: Union[str, List[str], None] = None
     ) -> None:
-        """Validate that provided inputs satisfy pipeline's root_args.
+        """Validate that provided inputs satisfy pipeline's unfulfilled requirements.
 
         When output_name is specified, only validates inputs needed for those specific outputs.
+        Bound inputs (via .bind()) are excluded from validation.
 
         Args:
             inputs: Input dictionary to validate
@@ -70,19 +71,23 @@ class Pipeline:
         """
         provided = set(inputs.keys())
 
+        # Get bound inputs to exclude from required
+        bound_keys = set(getattr(self, "_bound_inputs", {}).keys())
+
         # Compute required inputs based on output_name
         if output_name is not None:
             # Get only the nodes needed for requested outputs
             required_nodes = self.graph.get_required_nodes(output_name)
             if required_nodes is None:
                 # All nodes needed (shouldn't happen since output_name is not None)
-                required = set(self.graph.root_args)
+                required = set(self.graph.root_args) - bound_keys
             else:
-                # Compute root args needed for these specific nodes
-                required = self._compute_root_args_for_nodes(required_nodes)
+                # Compute root args needed for these nodes, excluding bound
+                all_required = self._compute_root_args_for_nodes(required_nodes)
+                required = all_required - bound_keys
         else:
-            # No output_name specified - need all root args
-            required = set(self.graph.root_args)
+            # No output_name specified - need all unfulfilled root args
+            required = set(self.graph.root_args) - bound_keys
 
         missing = required - provided
         if missing:
@@ -118,7 +123,7 @@ class Pipeline:
 
     def run(
         self,
-        inputs: Dict[str, Any],
+        inputs: Optional[Dict[str, Any]] = None,
         output_name: Union[str, List[str], None] = None,
         engine: Optional[Engine] = None,
         **kwargs: Any,
@@ -126,21 +131,24 @@ class Pipeline:
         """Execute the pipeline.
 
         Args:
-            inputs: Input parameters
+            inputs: Input parameters (optional if bound via .bind())
             output_name: Optional output(s) to compute
             engine: Optional engine override for this execution
             **kwargs: Additional args passed to engine
         """
+        # Merge bound inputs with provided inputs (provided takes precedence)
+        merged_inputs = {**getattr(self, "_bound_inputs", {}), **(inputs or {})}
+
         self._validate_output_names(output_name)
-        self._validate_inputs(inputs, output_name=output_name)
+        self._validate_inputs(merged_inputs, output_name=output_name)
 
         exec_engine = engine if engine is not None else self.engine
-        return exec_engine.run(self, inputs, output_name=output_name, **kwargs)
+        return exec_engine.run(self, merged_inputs, output_name=output_name, **kwargs)
 
     def map(
         self,
-        inputs: Dict[str, Any],
-        map_over: Union[str, List[str]],
+        inputs: Optional[Dict[str, Any]] = None,
+        map_over: Union[str, List[str]] = None,
         map_mode: Literal["zip", "product"] = "zip",
         output_name: Union[str, List[str], None] = None,
         engine: Optional[Engine] = None,
@@ -149,21 +157,24 @@ class Pipeline:
         """Execute the pipeline over multiple items.
 
         Args:
-            inputs: Input parameters
+            inputs: Input parameters (optional if bound via .bind())
             map_over: Parameter(s) to map over
             map_mode: "zip" or "product"
             output_name: Optional output(s) to compute
             engine: Optional engine override for this execution
             **kwargs: Additional args passed to engine
         """
+        # Merge bound inputs with provided inputs (provided takes precedence)
+        merged_inputs = {**getattr(self, "_bound_inputs", {}), **(inputs or {})}
+
         self._validate_output_names(output_name)
-        self._validate_inputs(inputs, output_name=output_name)
+        self._validate_inputs(merged_inputs, output_name=output_name)
 
         if isinstance(map_over, str):
             map_over = [map_over]
 
         exec_engine = engine if engine is not None else self.engine
-        return exec_engine.map(self, inputs, map_over, map_mode, output_name, **kwargs)
+        return exec_engine.map(self, merged_inputs, map_over, map_mode, output_name, **kwargs)
 
     def as_node(
         self,
@@ -285,11 +296,99 @@ class Pipeline:
         self.name = name
         return self
 
+    def bind(self, **inputs: Any) -> "Pipeline":
+        """Bind input values to pipeline parameters.
+
+        Bound inputs are used as defaults in run()/map() calls and can be
+        overridden by passing inputs= arguments. Multiple bind() calls merge.
+
+        This is similar to functools.partial - binding arguments to a callable.
+
+        Args:
+            **inputs: Input parameters to bind
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            >>> pipeline = Pipeline(nodes=[...]).bind(model=expensive_model, threshold=0.9)
+            >>> pipeline.run()  # Uses bound values
+            >>> pipeline.run(inputs={"threshold": 0.8})  # Overrides threshold
+            >>> pipeline.map(inputs={"texts": [...], "threshold": [...]})  # Override with lists
+        """
+        if not hasattr(self, "_bound_inputs"):
+            self._bound_inputs = {}
+        self._bound_inputs.update(inputs)
+        return self
+
+    def unbind(self, *keys: str) -> "Pipeline":
+        """Remove specific bound inputs, or all if no keys specified.
+
+        Args:
+            *keys: Specific keys to unbind. If empty, clears all bindings.
+
+        Returns:
+            Self for method chaining
+        """
+        if not hasattr(self, "_bound_inputs"):
+            return self
+        if not keys:
+            self._bound_inputs = {}
+        else:
+            for key in keys:
+                self._bound_inputs.pop(key, None)
+        return self
+
+    @property
+    def bound_inputs(self) -> Dict[str, Any]:
+        """Get currently bound input values.
+
+        Returns the dictionary of inputs set via .bind() that will be used
+        as defaults in .run() and .map() calls.
+
+        Returns:
+            Copy of bound inputs dictionary (safe to modify)
+        """
+        return getattr(self, "_bound_inputs", {}).copy()
+
+    @property
+    def unfulfilled_args(self) -> tuple:
+        """Get parameter names that are not yet satisfied by bindings.
+
+        This is a subset of root_args, excluding any parameters that
+        have been bound via .bind().
+
+        Useful for validation: these are the parameters that MUST be
+        provided in .run() or .map() calls.
+
+        Returns:
+            Tuple of unfulfilled parameter names
+        """
+        bound_keys = set(getattr(self, "_bound_inputs", {}).keys())
+        return tuple(arg for arg in self.graph.root_args if arg not in bound_keys)
+
     def __repr__(self) -> str:
         """Return string representation of the Pipeline."""
+        parts = []
+        
         if self.name:
-            return f"Pipeline(name={self.name!r}, nodes={len(self.nodes)})"
-        return f"Pipeline({len(self.nodes)} nodes)"
+            parts.append(f"name={self.name!r}")
+        
+        parts.append(f"nodes={len(self.nodes)}")
+        
+        # Show bound inputs if any
+        bound = getattr(self, "_bound_inputs", {})
+        if bound:
+            bound_str = ", ".join(f"{k}={v!r}" for k, v in bound.items())
+            parts.append(f"bound=[{bound_str}]")
+        
+        # Show unfulfilled args
+        unfulfilled = self.unfulfilled_args
+        if unfulfilled:
+            unfulfilled_str = ", ".join(unfulfilled)
+            parts.append(f"needs=[{unfulfilled_str}]")
+        
+        return f"Pipeline({', '.join(parts)})"
 
     def __hash__(self) -> int:
         """Make Pipeline hashable for use in networkx graphs."""

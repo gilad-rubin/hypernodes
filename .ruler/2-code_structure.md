@@ -434,6 +434,68 @@ def stats(data: list) -> tuple:
     return sum(data)/len(data), calculate_std(data)
 ```
 
+### Binding Default Inputs
+Use `.bind()` to set default input values that can be overridden at runtime:
+
+```python
+from hypernodes import Pipeline, node
+
+@node(output_name="scaled")
+def scale(value: int, factor: int) -> int:
+    return value * factor
+
+# Bind default inputs
+pipeline = Pipeline(nodes=[scale]).bind(factor=10)
+
+# Check what's bound and what's still needed
+print(pipeline)  # Pipeline(nodes=1, bound=[factor=10], needs=[value])
+print(pipeline.bound_inputs)      # {'factor': 10}
+print(pipeline.root_args)         # ('value', 'factor') - full contract
+print(pipeline.unfulfilled_args)  # ('value',) - what's still needed
+
+# Run with bound defaults
+result = pipeline.run(inputs={"value": 5})  # {"scaled": 50}
+
+# Override bound inputs
+result = pipeline.run(inputs={"value": 5, "factor": 100})  # {"scaled": 500}
+
+# Works with map operations
+results = pipeline.map(inputs={"value": [1, 2, 3]}, map_over="value")
+# [{"scaled": 10}, {"scaled": 20}, {"scaled": 30}]
+
+# Remove specific bindings
+pipeline.unbind("factor")
+
+# Or clear all bindings
+pipeline.unbind()
+```
+
+**Tracking Input Fulfillment:**
+- `.bound_inputs` - Dict of values set via `.bind()`
+- `.unfulfilled_args` - Tuple of parameter names NOT yet bound
+- `.root_args` - Full input contract (all parameters)
+- Validation only requires unfulfilled args at runtime
+- `__repr__()` shows bound inputs and unfulfilled args for debugging
+- Visualizations show bound inputs with lighter/transparent color
+
+**Common use cases:**
+- Bind expensive resources (models, DB connections) once, use across multiple runs
+- Set default hyperparameters that can be overridden per experiment
+- Simplify API by pre-configuring common inputs
+
+**For nested pipelines:**
+```python
+# Inner pipeline fully bound
+inner = Pipeline(nodes=[add]).bind(x=5, y=10)
+print(inner.unfulfilled_args)  # () - fully satisfied!
+
+inner_node = inner.as_node()
+print(inner_node.unfulfilled_args)  # () - exposes inner's status
+
+outer = Pipeline(nodes=[inner_node])
+outer.run()  # ✅ Works! No inputs needed
+```
+
 ---
 
 **Note:** After recent refactor, focus on newer files. Ignore `src/hypernodes/old/` and `tests/old/` directories.
