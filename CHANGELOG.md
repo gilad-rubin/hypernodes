@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2025-11-20
+
+### Fixed
+- **PipelineNode output mapping optimization**
+  - Fixed selective output execution for nested pipelines with `output_mapping`
+  - Inner pipelines now only compute outputs that are explicitly exposed via `output_mapping`
+  - This avoids unnecessary computation for unmapped outputs
+  - Added comprehensive tests in `tests/test_output_mapping.py`
+
 ## [0.4.2] - 2025-11-20
 
 ### Fixed

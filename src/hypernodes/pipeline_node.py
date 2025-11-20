@@ -84,15 +84,27 @@ class PipelineNode(HyperNode):
     def output_name(self) -> Union[str, tuple]:
         """Get outer output names (after output mapping).
 
-        Returns all possible outputs. The actual required outputs are determined
-        at the parent pipeline level (stored in pipeline.graph.required_outputs).
+        Returns only the outputs that are explicitly mapped (or all if no mapping is provided).
+        The actual required outputs are determined at the parent pipeline level
+        (stored in pipeline.graph.required_outputs).
 
         Returns:
             Output name(s) from outer pipeline's perspective
         """
-        # Get inner pipeline outputs and apply output mapping
+        # Get inner pipeline outputs
         inner_outputs = self._pipeline.graph.available_output_names
-        outer_outputs = self._map_names(inner_outputs, self.output_mapping)
+
+        # If output_mapping is provided, only expose the mapped outputs
+        if self.output_mapping:
+            # Only include outputs that are explicitly mapped
+            outer_outputs = [
+                self.output_mapping[inner_name]
+                for inner_name in inner_outputs
+                if inner_name in self.output_mapping
+            ]
+        else:
+            # No mapping - expose all outputs with their original names
+            outer_outputs = inner_outputs
 
         # Return single string or tuple (matching Node convention)
         if len(outer_outputs) == 1:
@@ -175,16 +187,24 @@ class PipelineNode(HyperNode):
     def _apply_output_mapping(self, result: Dict) -> Dict:
         """Map inner output names to outer names for a single result.
 
+        Only includes outputs that are explicitly mapped (or all if no mapping is provided).
+
         Args:
             result: Output dictionary from inner pipeline
 
         Returns:
             Mapped output ready for outer perspective
         """
+        if not self.output_mapping:
+            # No mapping - return all outputs as-is
+            return result
+
+        # Only include outputs that are explicitly mapped
         outer_result = {}
         for inner_name, value in result.items():
-            outer_name = self.output_mapping.get(inner_name, inner_name)
-            outer_result[outer_name] = value
+            if inner_name in self.output_mapping:
+                outer_name = self.output_mapping[inner_name]
+                outer_result[outer_name] = value
         return outer_result
 
     def _collect_mapped_results(self, results: List[Dict]) -> Dict[str, List]:
@@ -216,9 +236,21 @@ class PipelineNode(HyperNode):
         Returns:
             Inner output name(s) to pass to inner pipeline, or None for all outputs
         """
+        # If no output_mapping is defined, pass through the required_outputs as-is
+        if not self.output_mapping:
+            return required_outputs
+
+        # If required_outputs is None but we have output_mapping,
+        # we should request only the mapped outputs (not all inner outputs)
         if required_outputs is None:
-            # No pruning - request all outputs
-            return None
+            # Return only the inner outputs that are mapped
+            mapped_inner_outputs = list(self.output_mapping.keys())
+            if len(mapped_inner_outputs) == 1:
+                return mapped_inner_outputs[0]
+            elif len(mapped_inner_outputs) > 1:
+                return mapped_inner_outputs
+            else:
+                return None
 
         # Map outer required outputs back to inner output names
         reverse_output_mapping = {
