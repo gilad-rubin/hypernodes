@@ -45,6 +45,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Applied reverse input mapping to show outer parameter names in outer scope
   - Bound parameters from nested pipelines are now correctly displayed with outer names
 
+## [0.4.4] - 2025-11-20
+
+### Fixed
+- **DaftEngine: Bound inputs support in nested pipelines**
+  - Fixed critical bug where DaftEngine failed to execute nested pipelines with bound inputs
+  - `SimplePipelineOperation` and `PipelineNodeOperation` now properly propagate bound inputs to execution context
+  - Bound inputs are added to `stateful_inputs` when executing inner nodes, then restored after execution
+  - This enables patterns like binding expensive resources (vector stores, LLMs) to inner pipelines
+  - Added comprehensive tests in `tests/test_daft_bound_inputs.py`
+  - Issue: `ValueError: Parameter 'X' not found for node 'Y'` when using DaftEngine with bound nested pipelines
+  
+- **DaftEngine: Multi-output node handling in nested pipelines**
+  - Fixed handling of tuple output names when updating available columns
+  - Both `SimplePipelineOperation` and `PipelineNodeOperation` now properly handle nodes with multiple outputs
+  - Fixed aggregation logic in `PipelineNodeOperation` to flatten tuple outputs before creating Daft expressions
+  - Prevents `TypeError: 'tuple' object cannot be cast as 'str'` in nested map operations
+
 ## [0.4.3] - 2025-11-20
 
 ### Fixed

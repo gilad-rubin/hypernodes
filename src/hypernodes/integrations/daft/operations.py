@@ -624,16 +624,52 @@ class PipelineNodeOperation(DaftOperation):
         # Recursively use engine to get operations for inner nodes
         # We need to access the engine's logic to select operations
         # This is where the refactor pays off - we just use the same factory logic
-
-        for inner_node in inner_pipeline.graph.execution_order:
-            # Factory logic (should be in a factory, but for now inline or via engine method)
-            op = context.engine._create_operation(inner_node)
-            df = op.execute(df, inner_available, context)
-            if hasattr(inner_node, "output_name"):
-                inner_available.add(inner_node.output_name)
+        
+        # Add bound inputs from the nested pipeline to stateful_inputs
+        # so they're available to inner nodes
+        bound_inputs = self.node.bound_inputs
+        if bound_inputs:
+            # Save original stateful_inputs to restore later
+            original_stateful = context.stateful_inputs.copy()
+            # Add bound inputs to context
+            context.stateful_inputs.update(bound_inputs)
+            try:
+                for inner_node in inner_pipeline.graph.execution_order:
+                    # Factory logic (should be in a factory, but for now inline or via engine method)
+                    op = context.engine._create_operation(inner_node)
+                    df = op.execute(df, inner_available, context)
+                    if hasattr(inner_node, "output_name"):
+                        out = inner_node.output_name
+                        if isinstance(out, (list, tuple)):
+                            inner_available.update(out)
+                        else:
+                            inner_available.add(out)
+            finally:
+                # Restore original stateful_inputs
+                context.stateful_inputs = original_stateful
+        else:
+            # No bound inputs, execute normally
+            for inner_node in inner_pipeline.graph.execution_order:
+                # Factory logic (should be in a factory, but for now inline or via engine method)
+                op = context.engine._create_operation(inner_node)
+                df = op.execute(df, inner_available, context)
+                if hasattr(inner_node, "output_name"):
+                    out = inner_node.output_name
+                    if isinstance(out, (list, tuple)):
+                        inner_available.update(out)
+                    else:
+                        inner_available.add(out)
 
         # 5. Output Mapping & Aggregation
-        inner_outputs = [n.output_name for n in inner_pipeline.graph.execution_order]
+        # Flatten inner_outputs (handle tuple outputs)
+        inner_outputs = []
+        for n in inner_pipeline.graph.execution_order:
+            out = n.output_name
+            if isinstance(out, (list, tuple)):
+                inner_outputs.extend(out)
+            else:
+                inner_outputs.append(out)
+        
         final_outputs = [output_mapping.get(n, n) for n in inner_outputs]
 
         # Rename outputs
@@ -714,12 +750,39 @@ class SimplePipelineOperation(DaftOperation):
         # In a full implementation we might need to handle scoping more carefully
 
         inner_available = available_columns.copy()
-
-        for inner_node in inner_pipeline.graph.execution_order:
-            op = context.engine._create_operation(inner_node)
-            df = op.execute(df, inner_available, context)
-            if hasattr(inner_node, "output_name"):
-                inner_available.add(inner_node.output_name)
+        
+        # Add bound inputs from the nested pipeline to stateful_inputs
+        # so they're available to inner nodes
+        bound_inputs = self.node.bound_inputs
+        if bound_inputs:
+            # Save original stateful_inputs to restore later
+            original_stateful = context.stateful_inputs.copy()
+            # Add bound inputs to context
+            context.stateful_inputs.update(bound_inputs)
+            try:
+                for inner_node in inner_pipeline.graph.execution_order:
+                    op = context.engine._create_operation(inner_node)
+                    df = op.execute(df, inner_available, context)
+                    if hasattr(inner_node, "output_name"):
+                        out = inner_node.output_name
+                        if isinstance(out, (list, tuple)):
+                            inner_available.update(out)
+                        else:
+                            inner_available.add(out)
+            finally:
+                # Restore original stateful_inputs
+                context.stateful_inputs = original_stateful
+        else:
+            # No bound inputs, execute normally
+            for inner_node in inner_pipeline.graph.execution_order:
+                op = context.engine._create_operation(inner_node)
+                df = op.execute(df, inner_available, context)
+                if hasattr(inner_node, "output_name"):
+                    out = inner_node.output_name
+                    if isinstance(out, (list, tuple)):
+                        inner_available.update(out)
+                    else:
+                        inner_available.add(out)
 
         return df
 
