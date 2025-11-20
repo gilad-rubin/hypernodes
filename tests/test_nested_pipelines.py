@@ -151,6 +151,35 @@ def test_nested_pipeline_with_map_over():
     assert result == {"results": [2, 4, 6]}
 
 
+def test_nested_pipeline_with_map_over_and_shared_inputs():
+    """Test nested pipeline with map_over AND shared inputs (broadcast).
+    
+    Regression test for issue where shared inputs were dropped when using map_over.
+    """
+    @node(output_name="result")
+    def process_item(item: str, prefix: str) -> str:
+        return f"{prefix}: {item}"
+
+    inner_pipeline = Pipeline(nodes=[process_item])
+
+    # Adapt to process a list of items, but 'prefix' is shared
+    batch_process = inner_pipeline.as_node(
+        map_over="items",
+        input_mapping={"items": "item"}, # map outer 'items' to inner 'item'
+        # 'prefix' is not mapped, so it should be passed through as-is (shared)
+        output_mapping={"result": "results"}
+    )
+    
+    outer = Pipeline(nodes=[batch_process])
+    
+    result = outer.run(inputs={
+        "items": ["apple", "banana"],
+        "prefix": "FRUIT"
+    })
+    
+    assert result["results"] == ["FRUIT: apple", "FRUIT: banana"]
+
+
 def test_nested_map_in_outer_pipeline():
     """Test map operation on outer pipeline with nested pipeline."""
     
@@ -201,4 +230,3 @@ def test_namespace_collision_avoidance():
     
     result = outer.run(inputs={"input": 5})
     assert result == {"result_a": 10, "result_b": 15, "combined": 25}
-

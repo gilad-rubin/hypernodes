@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2025-11-20
+
+### Fixed
+- **PipelineNode input broadcasting bug**
+  - Fixed an issue where shared/constant inputs were dropped when using `as_node(map_over=...)` without explicit `input_mapping`.
+  - This ensures correct behavior for nested pipelines that map over one input while preserving others as shared context.
+  - Verified with regression tests in `tests/test_nested_pipelines.py`.
+
 ## [0.4.1] - 2025-11-19
 
 ### Changed

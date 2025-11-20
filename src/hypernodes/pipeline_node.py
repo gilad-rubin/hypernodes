@@ -67,10 +67,6 @@ class PipelineNode(HyperNode):
         Returns:
             Tuple of parameter names from outer pipeline's perspective
         """
-        # Special case: map_over without input_mapping exposes only map_over params
-        if self.map_over and not self.input_mapping:
-            return tuple(self.map_over)
-
         # Get inner pipeline's root parameters and apply reverse mapping
         inner_params = self._pipeline.graph.root_args
         reverse_mapping = self._create_reverse_input_mapping()
