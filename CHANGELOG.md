@@ -5,7 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.4] - 2025-11-20
+
+### Fixed
+- **DaftEngine: Bound inputs support in nested pipelines**
+  - Fixed critical bug where DaftEngine failed to execute nested pipelines with bound inputs
+  - `SimplePipelineOperation` and `PipelineNodeOperation` now properly propagate bound inputs to execution context
+  - Bound inputs are added to `stateful_inputs` when executing inner nodes, then restored after execution
+  - This enables patterns like binding expensive resources (vector stores, LLMs) to inner pipelines
+  - Added comprehensive tests in `tests/test_daft_bound_inputs.py`
+  - Issue: `ValueError: Parameter 'X' not found for node 'Y'` when using DaftEngine with bound nested pipelines
+  
+- **DaftEngine: Multi-output node handling in nested pipelines**
+  - Fixed handling of tuple output names when updating available columns
+  - Both `SimplePipelineOperation` and `PipelineNodeOperation` now properly handle nodes with multiple outputs
+  - Fixed aggregation logic in `PipelineNodeOperation` to flatten tuple outputs before creating Daft expressions
+  - Prevents `TypeError: 'tuple' object cannot be cast as 'str'` in nested map operations
+
+## [0.4.3] - 2025-11-20
+
+### Fixed
+- **PipelineNode output mapping optimization**
+  - Fixed selective output execution for nested pipelines with `output_mapping`
+  - Inner pipelines now only compute outputs that are explicitly exposed via `output_mapping`
+  - This avoids unnecessary computation for unmapped outputs
+  - Added comprehensive tests in `tests/test_output_mapping.py`
+
+- **Visualization: Input mapping edge connections**
+  - Fixed issue where mapped parameters appeared as floating nodes without connections
+  - Edges now correctly connect producer nodes to inner consumers through input mapping
+  - Example: `extract_query` → `query` now properly connects to nested pipeline expecting different param name
+  - Applied reverse input mapping to show outer parameter names in outer scope
+  - Bound parameters from nested pipelines are now correctly displayed with outer names
 
 ### Added
 - **Pipeline input binding with `.bind()` and `.unbind()`**
@@ -36,40 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Helps understand how parameters flow through nested pipelines with renamed parameters
   - Legend updated with explanation: "a → b: Parameter Mapping"
   - Makes complex pipeline compositions much easier to understand and debug
-
-### Fixed
-- **Visualization: Input mapping edge connections**
-  - Fixed issue where mapped parameters appeared as floating nodes without connections
-  - Edges now correctly connect producer nodes to inner consumers through input mapping
-  - Example: `extract_query` → `query` now properly connects to nested pipeline expecting different param name
-  - Applied reverse input mapping to show outer parameter names in outer scope
-  - Bound parameters from nested pipelines are now correctly displayed with outer names
-
-## [0.4.4] - 2025-11-20
-
-### Fixed
-- **DaftEngine: Bound inputs support in nested pipelines**
-  - Fixed critical bug where DaftEngine failed to execute nested pipelines with bound inputs
-  - `SimplePipelineOperation` and `PipelineNodeOperation` now properly propagate bound inputs to execution context
-  - Bound inputs are added to `stateful_inputs` when executing inner nodes, then restored after execution
-  - This enables patterns like binding expensive resources (vector stores, LLMs) to inner pipelines
-  - Added comprehensive tests in `tests/test_daft_bound_inputs.py`
-  - Issue: `ValueError: Parameter 'X' not found for node 'Y'` when using DaftEngine with bound nested pipelines
-  
-- **DaftEngine: Multi-output node handling in nested pipelines**
-  - Fixed handling of tuple output names when updating available columns
-  - Both `SimplePipelineOperation` and `PipelineNodeOperation` now properly handle nodes with multiple outputs
-  - Fixed aggregation logic in `PipelineNodeOperation` to flatten tuple outputs before creating Daft expressions
-  - Prevents `TypeError: 'tuple' object cannot be cast as 'str'` in nested map operations
-
-## [0.4.3] - 2025-11-20
-
-### Fixed
-- **PipelineNode output mapping optimization**
-  - Fixed selective output execution for nested pipelines with `output_mapping`
-  - Inner pipelines now only compute outputs that are explicitly exposed via `output_mapping`
-  - This avoids unnecessary computation for unmapped outputs
-  - Added comprehensive tests in `tests/test_output_mapping.py`
 
 ## [0.4.2] - 2025-11-20
 
