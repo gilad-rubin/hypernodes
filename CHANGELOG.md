@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2025-11-21
+
+### Changed
+- **Visualization module reorganization**
+  - Created dedicated `src/hypernodes/viz/` package for all visualization code
+  - Moved visualization files:
+    - `visualization.py` → `viz/visualization.py` (Graphviz rendering and legacy functions)
+    - `graph_serializer.py` → `viz/graph_serializer.py` (frontend-agnostic graph serialization)
+    - `visualization_engines.py` → `viz/visualization_engines.py` (pluggable rendering engines)
+    - `visualization_widget.py` → `viz/visualization_widget.py` (IPyWidget React Flow components)
+  - Created `viz/__init__.py` that exports public API for backwards compatibility
+  - Updated all imports throughout codebase (core, tests, scripts)
+  - Cleaner separation of concerns: serialization, rendering engines, and widgets
+  
 ## [0.4.4] - 2025-11-20
 
 ### Fixed
