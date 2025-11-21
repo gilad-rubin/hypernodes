@@ -1,0 +1,171 @@
+import json
+import os
+
+notebook_content = {
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import ipywidgets as widgets\n",
+    "import html\n",
+    "\n",
+    "def create_test_widget(js_code, title):\n",
+    "    html_content = f\"\"\"\n",
+    "    <html>\n",
+    "    <head>\n",
+    "        <style>body {{ font-family: sans-serif; padding: 20px; }}</style>\n",
+    "    </head>\n",
+    "    <body>\n",
+    "        <h3>{title}</h3>\n",
+    "        <div id=\"result\">Running...</div>\n",
+    "        <script>\n",
+    "            try {{\n",
+    "                {js_code}\n",
+    "            }} catch (e) {{\n",
+    "                document.getElementById('result').innerText = 'Error: ' + e.message;\n",
+    "            }}\n",
+    "        </script>\n",
+    "    </body>\n",
+    "    </html>\n",
+    "    \"\"\"\n",
+    "    escaped_html = html.escape(html_content)\n",
+    "    iframe_html = (\n",
+    "        f'<iframe srcdoc=\"{escaped_html}\" '\n",
+    "        f'width=\"100%\" height=\"150\" frameborder=\"1\" '\n",
+    "        f'sandbox=\"allow-scripts allow-same-origin allow-popups\" '\n",
+    "        f'></iframe>'\n",
+    "    )\n",
+    "    return widgets.HTML(value=iframe_html)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Theme Detection Trials\n",
+    "Run the cells below to see which method correctly identifies the theme or environment details."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 1: matchMedia\n",
+    "# Checks if the browser/webview prefers dark mode.\n",
+    "js = \"\"\"\n",
+    "const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;\n",
+    "document.getElementById('result').innerText = 'Prefers Dark: ' + isDark;\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 1: matchMedia\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 2: Parent Body Classes\n",
+    "# Attempts to access the parent document (VS Code host) and read body classes.\n",
+    "js = \"\"\"\n",
+    "const parentClasses = window.parent.document.body.className;\n",
+    "document.getElementById('result').innerText = 'Parent Body Classes: ' + parentClasses;\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 2: Parent Body Classes\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 3: Parent HTML Classes\n",
+    "# Attempts to access the parent document's <html> tag classes.\n",
+    "js = \"\"\"\n",
+    "const parentHtmlClasses = window.parent.document.documentElement.className;\n",
+    "document.getElementById('result').innerText = 'Parent HTML Classes: ' + parentHtmlClasses;\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 3: Parent HTML Classes\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 4: CSS Variables (Current Frame)\n",
+    "# Checks if VS Code CSS variables are inherited by the iframe.\n",
+    "js = \"\"\"\n",
+    "const style = getComputedStyle(document.documentElement);\n",
+    "const bg = style.getPropertyValue('--vscode-editor-background');\n",
+    "document.getElementById('result').innerText = 'VS Code Bg Var (Iframe): ' + (bg || 'Not found');\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 4: CSS Variables (Current Frame)\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 5: Parent CSS Variables\n",
+    "# Checks if we can read CSS variables from the parent document.\n",
+    "js = \"\"\"\n",
+    "const style = getComputedStyle(window.parent.document.documentElement);\n",
+    "const bg = style.getPropertyValue('--vscode-editor-background');\n",
+    "document.getElementById('result').innerText = 'VS Code Bg Var (Parent): ' + (bg || 'Not found');\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 5: Parent CSS Variables\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Trial 6: Body Attribute\n",
+    "# Checks for data-vscode-theme-kind attribute on parent body.\n",
+    "js = \"\"\"\n",
+    "const kind = window.parent.document.body.getAttribute('data-vscode-theme-kind');\n",
+    "document.getElementById('result').innerText = 'Theme Kind Attr: ' + (kind || 'Not found');\n",
+    "\"\"\"\n",
+    "create_test_widget(js, \"Trial 6: Body Attribute\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
+
+with open('notebooks/theme_test.ipynb', 'w') as f:
+    json.dump(notebook_content, f, indent=1)
+
+print("Generated notebooks/theme_test.ipynb")

@@ -270,7 +270,8 @@ class Pipeline:
         """
         # Handle legacy interactive parameter
         if interactive:
-            engine = "ipywidget"
+            from .viz.visualization_widget import PipelineWidget
+            return PipelineWidget(self, **engine_options)
         
         # For backward compatibility, pass legacy parameters as engine_options
         # if engine is graphviz (default)
