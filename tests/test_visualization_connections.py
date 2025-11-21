@@ -68,7 +68,7 @@ class TestOutputConnectionsInViz:
         
         # Check the graph structure
         # query should be produced by extract_query and consumed by retrieve
-        from hypernodes.visualization import _collect_visualization_data
+        from hypernodes.viz.visualization import _collect_visualization_data
         viz_data = _collect_visualization_data(evaluation, depth=2)
         
         # Find edges: should have extract_query -> query and query -> retrieve
@@ -100,7 +100,7 @@ class TestOutputConnectionsInViz:
         )
         
         # Get visualization data
-        from hypernodes.visualization import _collect_visualization_data
+        from hypernodes.viz.visualization import _collect_visualization_data
         viz_data = _collect_visualization_data(evaluation, depth=2)
         
         # Count edges - should not have duplicates
@@ -230,7 +230,7 @@ class TestRenamedInputsOutputsInViz:
         viz_str = str(viz)
         
         # Check visualization data
-        from hypernodes.visualization import _collect_visualization_data
+        from hypernodes.viz.visualization import _collect_visualization_data
         viz_data = _collect_visualization_data(outer, depth=2)
         
         # 'input_data' should not be a floating node
@@ -276,7 +276,7 @@ class TestRenamedInputsOutputsInViz:
         viz = outer.visualize(depth=2, min_arg_group_size=None)
         
         # Check visualization data
-        from hypernodes.visualization import _collect_visualization_data
+        from hypernodes.viz.visualization import _collect_visualization_data
         viz_data = _collect_visualization_data(outer, depth=2)
         
         # final_value should connect compute to format_result

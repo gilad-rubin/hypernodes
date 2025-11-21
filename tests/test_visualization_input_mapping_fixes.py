@@ -2,7 +2,7 @@
 
 import pytest
 from hypernodes import Pipeline, node
-from hypernodes.visualization import _collect_visualization_data
+from hypernodes.viz.visualization import _collect_visualization_data
 
 
 @node(output_name="cleaned")

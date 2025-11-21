@@ -38,7 +38,7 @@ from .exceptions import (
 from .hypernode import HyperNode
 from .node import Node, node
 from .pipeline import Pipeline
-from .visualization import (
+from .viz import (
     DESIGN_STYLES,
     GraphvizStyle,
     visualize,

@@ -381,7 +381,12 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `map_planner.py`: Map operation planning (zip vs product)
 - `cache.py`: Caching system with signature computation
 - `callbacks.py`: Callback protocol + context + dispatcher
-- `visualization.py`: Graphviz rendering (optional, requires graphviz package)
+
+### Visualization (`src/hypernodes/viz/`)
+- `visualization.py`: Graphviz rendering and legacy visualization functions
+- `graph_serializer.py`: Frontend-agnostic graph serialization
+- `visualization_engines.py`: Pluggable rendering engines (Graphviz, IPyWidget)
+- `visualization_widget.py`: Interactive IPyWidget visualization components
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine facade
@@ -500,3 +505,42 @@ outer.run()  # ✅ Works! No inputs needed
 
 **Note:** After recent refactor, focus on newer files. Ignore `src/hypernodes/old/` and `tests/old/` directories.
 
+- **Debug notebook:** `notebooks/verify_ipywidget.ipynb` contains a minimal ipywidget rendering sanity check (runs a tiny pipeline, decodes the iframe HTML, and surfaces any client-side errors for troubleshooting).
+
+---
+
+## Visualization System Details
+
+The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
+- **Graph Serialization** (`graph_serializer.py`): Frontend-agnostic semantic graph data
+- **Rendering Engines** (`visualization_engines.py`): Pluggable backends (Graphviz, IPyWidget, etc.)
+- **Legacy Visualization** (`visualization.py`): Backwards-compatible Graphviz rendering
+- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations
+
+### GraphSerializer (`viz/graph_serializer.py`)
+
+**Key Fix (Nov 2025):** Proper handling of cross-level connections and input/output mappings.
+
+**Critical features:**
+- **Cross-level edge resolution**: When a nested pipeline is expanded, edges connect directly to inner nodes that produce outputs, not to the PipelineNode wrapper
+- **Input/output mapping labels**: Adds edge labels like `"outer_param → inner_param"` when parameters are renamed across boundaries
+- **Global output tracking**: `_output_to_node_id` maps output names to actual producer node IDs across all nesting levels
+- **Expanded pipeline detection**: Detects when dependencies are on expanded PipelineNodes and replaces them with inner producer nodes
+
+**Edge creation logic:**
+1. For node dependencies: Check if dependency is an expanded PipelineNode
+   - If yes: Find actual inner nodes that produce needed outputs, create edges to those
+   - If no: Create regular node→node edge
+2. For parameter edges: Check if parameter is produced by node in outer scope
+   - If yes: Create node→node edge with mapping label if names differ
+   - If no: Create parameter→node edge using outer parameter name
+
+**Example scenario:**
+```python
+# Inner pipeline outputs "evaluation_result"
+# Outer expects "evaluation_results" via output_mapping
+# GraphSerializer creates edge: evaluate_answer → compute_metrics
+# With label: "evaluation_result → evaluation_results"
+```
+
+**Test coverage:** `tests/test_visualization_mappings.py` - comprehensive tests for all mapping scenarios

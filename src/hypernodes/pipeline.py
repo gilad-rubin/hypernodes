@@ -232,44 +232,68 @@ class Pipeline:
     def visualize(
         self,
         filename: Optional[str] = None,
-        orient: str = "TB",
+        engine: Union[str, Any] = "graphviz",
         depth: Optional[int] = 1,
+        # Legacy parameters (kept for backward compatibility)
+        orient: str = "TB",
         flatten: bool = False,
         min_arg_group_size: Optional[int] = 2,
+        group_inputs: bool = True,
         show_legend: bool = False,
         show_types: bool = True,
         style: Union[str, Any] = "default",
         return_type: str = "auto",
+        interactive: bool = False,
+        **engine_options
     ):
-        """Visualize the pipeline using Graphviz.
-
+        """Visualize the pipeline using pluggable rendering engines.
+        
         Args:
             filename: Output filename (e.g., "pipeline.svg"). If None, returns object
-            orient: Graph orientation ("TB", "LR", "BT", "RL")
+            engine: Visualization engine - "graphviz", "ipywidget", or custom engine
             depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
+            
+            Legacy graphviz-specific parameters (will be deprecated):
+            orient: Graph orientation ("TB", "LR", "BT", "RL")
             flatten: If True, render nested pipelines inline without containers
             min_arg_group_size: Minimum inputs to group together (None=no grouping)
+            group_inputs: Whether to group inputs in the frontend (graphviz)
             show_legend: Whether to show a legend explaining node types
             show_types: Whether to show type hints and default values
             style: Style name from DESIGN_STYLES or GraphvizStyle object
             return_type: "auto", "graphviz", or "html"
-
+            interactive: If True, uses ipywidget engine
+            **engine_options: Additional engine-specific options
+        
         Returns:
-            graphviz.Digraph object (or HTML in Jupyter if return_type="html")
+            Engine-specific output (graphviz.Digraph, HTML, or widget)
         """
-        from . import visualization as viz
-
+        # Handle legacy interactive parameter
+        if interactive:
+            engine = "ipywidget"
+        
+        # For backward compatibility, pass legacy parameters as engine_options
+        # if engine is graphviz (default)
+        if engine == "graphviz":
+            engine_options.update({
+                "orient": orient,
+                "flatten": flatten,
+                "min_arg_group_size": min_arg_group_size,
+                "group_inputs": group_inputs,
+                "show_legend": show_legend,
+                "show_types": show_types,
+                "style": style,
+                "return_type": return_type,
+            })
+        
+        from . import viz
+        
         return viz.visualize(
             self,
             filename=filename,
-            orient=orient,
+            engine=engine,
             depth=depth,
-            flatten=flatten,
-            min_arg_group_size=min_arg_group_size,
-            show_legend=show_legend,
-            show_types=show_types,
-            style=style,
-            return_type=return_type,
+            **engine_options
         )
 
     def with_engine(self, engine: Engine) -> "Pipeline":

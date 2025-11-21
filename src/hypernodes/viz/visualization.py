@@ -12,8 +12,8 @@ try:
 except ImportError:
     GRAPHVIZ_AVAILABLE = False
 
-from .node import Node
-from .pipeline import Pipeline, PipelineNode
+from ..node import Node
+from ..pipeline import Pipeline, PipelineNode
 
 # Maximum label length before truncation
 MAX_LABEL_LENGTH = 30
@@ -888,7 +888,7 @@ def _collect_all_bound_inputs(pipeline: Pipeline, depth: Optional[int] = 1) -> D
     return all_bound
 
 
-def visualize(
+def visualize_legacy(
     pipeline: Pipeline,
     filename: Optional[str] = None,
     orient: Literal["TB", "LR", "BT", "RL"] = "TB",
@@ -1361,3 +1361,62 @@ def visualize(
         return dot
     else:
         return dot
+
+
+def visualize(
+    pipeline: Pipeline,
+    filename: Optional[str] = None,
+    engine: Union[str, "VisualizationEngine"] = "graphviz",  # type: ignore
+    depth: Optional[int] = 1,
+    **engine_options
+) -> Any:
+    """Visualize a pipeline using pluggable rendering engines.
+    
+    This is the new frontend-agnostic visualization system that separates
+    graph serialization from rendering.
+    
+    Args:
+        pipeline: Pipeline to visualize
+        filename: Output filename (engine-specific, e.g., "pipeline.svg" for graphviz)
+        engine: Visualization engine - "graphviz", "ipywidget", or custom engine instance
+        depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
+        **engine_options: Engine-specific options
+            For graphviz: orient, style, show_legend, show_types, return_type, flatten
+            For ipywidget: theme
+    
+    Returns:
+        Engine-specific output (e.g., graphviz.Digraph, ipywidgets.HTML, etc.)
+    
+    Examples:
+        # Default graphviz rendering
+        pipeline.visualize()
+        
+        # With specific style
+        pipeline.visualize(style="dark", show_legend=True)
+        
+        # Interactive widget
+        pipeline.visualize(engine="ipywidget", theme="CYBERPUNK")
+        
+        # Fully expanded
+        pipeline.visualize(depth=None)
+        
+        # Custom engine
+        from my_viz import CustomEngine
+        pipeline.visualize(engine=CustomEngine())
+    """
+    from .graph_serializer import GraphSerializer
+    from .visualization_engines import get_engine
+    
+    # Step 1: Serialize the pipeline into frontend-agnostic data
+    serializer = GraphSerializer(pipeline)
+    graph_data = serializer.serialize(depth=depth)
+    
+    # Step 2: Resolve engine
+    if isinstance(engine, str):
+        engine_instance = get_engine(engine)
+    else:
+        engine_instance = engine
+    
+    # Step 3: Render using the engine
+    return engine_instance.render(graph_data, filename=filename, **engine_options)
+
