@@ -18,78 +18,39 @@ def transform_to_react_flow(
     nodes = []
     edges = []
 
-    # 1. Create Group Nodes for Levels (Nested Pipelines)
-    # We need to map level_ids to React Flow nodes
-    # The 'root' level is the canvas, so we skip it.
-    # Nested levels (e.g. "root__nested_123") become Group nodes.
-    
-    level_map = {lvl["level_id"]: lvl for lvl in serialized_graph.get("levels", [])}
-    
-    # We need to create group nodes for all non-root levels
-    # The ID of the group node should match the level_id so children can reference it as parentNode
-    for level in serialized_graph.get("levels", []):
-        level_id = level["level_id"]
-        if level_id == "root":
-            continue
-            
-        # Find the pipeline node that corresponds to this level to get its label
-        # The parent_pipeline_node_id tells us which node *contains* this level
-        # But we want the visual container for *this* level.
-        # Actually, in React Flow, the "Group" node IS the PipelineNode that was expanded.
-        # So we should check if we already created a node for this level's container.
-        pass
-
-    # Better approach:
-    # 1. Iterate over all nodes.
-    # 2. If a node is a PIPELINE and is_expanded=True, it becomes a Group node.
-    #    Its ID is the node["id"].
-    #    The *contents* of this pipeline will have level_id pointing to a level that corresponds to this node.
-    #    We need to map level_ids to these Group Node IDs.
-    
-    # Map level_id -> Group Node ID
+    # Helper to find group node for a level
     level_to_group_node = {}
     
-    # First pass: Identify expanded pipeline nodes and map their inner levels to them
+    # Map level_id -> Group Node ID
+    # First pass: Identify expanded pipeline nodes
     for node in serialized_graph.get("nodes", []):
         if node.get("node_type") == "PIPELINE" and node.get("is_expanded"):
-            # This node is a container.
-            # We need to find which level_id corresponds to its *interior*.
-            # The serializer doesn't explicitly link node_id -> inner_level_id in the node dict,
-            # but the level dict has 'parent_pipeline_node_id'.
+            # This node is a container
             pass
 
-    # Let's build the map from the levels side
     for level in serialized_graph.get("levels", []):
         pp_node_id = level.get("parent_pipeline_node_id")
         if pp_node_id:
             level_to_group_node[level["level_id"]] = pp_node_id
 
-    # Second pass: Create all nodes
+    # Track created data nodes to avoid duplicates: node_id -> { output_name -> data_node_id }
+    node_output_map = {}
+
+    # Second pass: Create all nodes (Function Nodes + Data Nodes)
     for node in serialized_graph.get("nodes", []):
         node_id = node["id"]
         node_type = node.get("node_type", "STANDARD")
         
-        # Determine initial expansion state based on depth
+        # Determine initial expansion state
         level_id = node.get("level_id", "root")
         level_depth = level_id.count("__nested_")
-        # If the node is a pipeline, should it be expanded?
-        # If we want depth=1, we show root nodes. Pipelines at root (depth 0) are collapsed.
-        # Wait, nodes in root are at depth 1?
-        # Let's say root is depth 0.
-        # Nodes in root are visible.
-        # If a node in root is a PIPELINE, and we want depth=1, it should be COLLAPSED.
-        # If we want depth=2, it should be EXPANDED.
-        # So: is_expanded = (level_depth + 1) < initial_depth
-        
         should_expand = (level_depth + 1) < initial_depth
         is_expanded = (node_type == "PIPELINE" and should_expand)
-
         
         # Determine parent group
-        level_id = node.get("level_id", "root")
         parent_node_id = level_to_group_node.get(level_id)
         
-        # Base node data
+        # 1. Create FUNCTION/PIPELINE Node
         rf_node = {
             "id": node_id,
             "type": "pipelineGroup" if (node_type == "PIPELINE" and is_expanded) else "custom",
@@ -97,11 +58,11 @@ def transform_to_react_flow(
                 "label": node.get("label", ""),
                 "nodeType": node_type,
                 "inputs": node.get("inputs", []),
-                "outputs": node.get("output_names", []),
+                "outputs": node.get("output_names", []), # Kept for metadata
                 "theme": theme,
                 "isExpanded": is_expanded,
             },
-            "position": {"x": 0, "y": 0}, # Layout will handle this
+            "position": {"x": 0, "y": 0},
         }
         
         if parent_node_id:
@@ -109,21 +70,56 @@ def transform_to_react_flow(
             rf_node["extent"] = "parent"
             
         if node_type == "PIPELINE" and is_expanded:
-            rf_node["style"] = {"width": 600, "height": 400} # Initial size, ELK should resize
+            rf_node["style"] = {"width": 600, "height": 400}
             
         nodes.append(rf_node)
 
-    # Add synthetic input nodes for parameter edges
-    # These should also be placed in the correct level/group
+        # 2. Create DATA Nodes for Outputs
+        # Only if not expanded pipeline (expanded pipelines delegate outputs to inner nodes)
+        # Actually, expanded pipelines usually don't have "outputs" visualized on themselves in the graph
+        # The edges go from inner nodes. 
+        # But for collapsed nodes, we need DataNodes.
+        
+        if not is_expanded:
+            output_names = node.get("output_names", [])
+            for out_name in output_names:
+                data_node_id = f"data_{node_id}_{out_name}"
+                
+                # Register
+                if node_id not in node_output_map:
+                    node_output_map[node_id] = {}
+                node_output_map[node_id][out_name] = data_node_id
+                
+                # Create Data Node
+                data_node = {
+                    "id": data_node_id,
+                    "type": "custom",
+                    "data": {
+                        "label": out_name,
+                        "nodeType": "DATA",
+                        "inputs": [], 
+                        "outputs": [],
+                        "theme": theme,
+                    },
+                    "position": {"x": 0, "y": 0},
+                    "parentNode": parent_node_id if parent_node_id else None,
+                }
+                nodes.append(data_node)
+                
+                # Create Edge: Function -> Data
+                edges.append({
+                    "id": f"e_func_data_{node_id}_{out_name}",
+                    "source": node_id,
+                    "target": data_node_id,
+                    "animated": False, # Static link
+                    "style": {"stroke": "#94a3b8", "strokeWidth": 2}, # Lighter stroke
+                    "data": {"isDataLink": True}
+                })
+
+    # 3. Create INPUT Nodes for Pipeline Inputs
     input_levels = serialized_graph.get("input_levels", {})
     
-    # We need to identify unique inputs (param name + level)
-    # The serializer gives us edges starting with "input_X".
-    # We need to create a node for "input_X" but potentially multiple times if they appear in different levels?
-    # Actually, the serializer's 'input_levels' dict tells us the *definition* level.
-    # But edges might originate from 'input_X' in a nested scope.
-    # Let's look at the edges to find all input sources.
-    
+    # We iterate over edges to find input sources
     input_sources = set()
     for edge in serialized_graph.get("edges", []):
         src = edge.get("source")
@@ -135,6 +131,7 @@ def transform_to_react_flow(
         target_level = input_levels.get(input_name, "root")
         parent_node_id = level_to_group_node.get(target_level)
         
+        # Create Input Node
         nodes.append({
             "id": source_id,
             "type": "custom",
@@ -147,14 +144,47 @@ def transform_to_react_flow(
             },
             "position": {"x": 0, "y": 0},
             "parentNode": parent_node_id if parent_node_id else None,
-            # "extent": "parent" if parent_node_id else None
         })
 
+    # 4. Create Edges (routing through DataNodes)
     for edge in serialized_graph.get("edges", []):
+        source = edge["source"]
+        target = edge["target"]
+        edge_id = edge["id"]
+        
+        # Determine if source is a node with DataNode outputs
+        source_data_node = None
+        
+        # Extract param name from edge ID if present
+        # ID format: e_{source}_{target}_{param} or e_{source}_{target}
+        prefix = f"e_{source}_{target}_"
+        param_name = ""
+        if edge_id.startswith(prefix):
+            param_name = edge_id[len(prefix):]
+            
+        # Try to resolve source to a DataNode
+        if source in node_output_map:
+            # Source has outputs. Which one?
+            outputs = node_output_map[source]
+            
+            # 1. Try matching param_name (target input name) to output name
+            if param_name and param_name in outputs:
+                source_data_node = outputs[param_name]
+            
+            # 2. If single output, default to it
+            elif len(outputs) == 1:
+                source_data_node = list(outputs.values())[0]
+                
+            # 3. If mapping label exists, maybe it helps? (Not implemented yet)
+            
+        # Final Source/Target for the visual edge
+        final_source = source_data_node if source_data_node else source
+        final_target = target
+        
         rf_edge = {
-            "id": edge["id"],
-            "source": edge["source"],
-            "target": edge["target"],
+            "id": edge_id,
+            "source": final_source,
+            "target": final_target,
             "animated": True,
             "style": {"stroke": "#64748b", "strokeWidth": 2},
             "data": {}
@@ -180,14 +210,17 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
     def _read_asset(name: str, kind: str) -> Optional[str]:
         """Read an asset file from assets/viz; return None if missing."""
-        path = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "viz" / name
-        if not path.exists():
+        try:
+            path = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "viz" / name
+            if not path.exists():
+                return None
+            text = path.read_text(encoding="utf-8")
+            if kind == "js":
+                return f"<script>{text}</script>"
+            if kind == "css":
+                return f"<style>{text}</style>"
+        except Exception:
             return None
-        text = path.read_text(encoding="utf-8")
-        if kind == "js":
-            return f"<script>{text}</script>"
-        if kind == "css":
-            return f"<style>{text}</style>"
         return None
 
     react_js = _read_asset("react.production.min.js", "js")
@@ -220,6 +253,24 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         .react-flow__attribution {{ display: none; }}
         #root {{ min-height: 100vh; min-width: 100vw; background: #030712; color: #e5e7eb; display: flex; align-items: center; justify-content: center; }}
         #fallback {{ font-size: 13px; letter-spacing: 0.4px; color: #94a3b8; }}
+        
+        /* Light Mode Overrides */
+        body.light-mode {{ background: #f8fafc; color: #1e293b; }}
+        body.light-mode #root {{ background: #f8fafc; color: #1e293b; }}
+        
+        /* Canvas Outline */
+        .canvas-outline {{
+            outline: 1px dashed rgba(148, 163, 184, 0.2);
+            margin: 2px;
+            height: calc(100vh - 4px);
+            width: calc(100vw - 4px);
+            border-radius: 8px;
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 50;
+        }}
     </style>
     <!-- Prefer local vendored assets; fall back to CDN if missing -->
     {react_js or ''}
@@ -231,10 +282,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 </head>"""
 
     # JavaScript body as a raw string (no interpolation needed)
-    html_body = """<body>
+    html_body = r"""<body>
   <div id="root">
     <div id="fallback">Rendering interactive view…</div>
   </div>
+  <div class="canvas-outline"></div>
   <script>
     // Surface JS errors inside the iframe so notebook users can see them.
     window.onerror = function(message, source, lineno, colno, error) {
@@ -269,89 +321,122 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }));
       }
 
-      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, EdgeLabelRenderer, useReactFlow } = RF;
+      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, EdgeLabelRenderer, useReactFlow, Panel } = RF;
       const { useState, useEffect, useMemo, useCallback } = React;
 
       const html = htm.bind(React.createElement);
       const elk = new ELK();
-      const defaultSize = { width: 280, height: 160 };
+      const defaultSize = { width: 240, height: 60 };
 
       // --- Icons ---
       const Icons = {
-        Cube: () => html`
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-indigo-400">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        Moon: () => html`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
           </svg>
         `,
-        CheckCircle: () => html`
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-emerald-400">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        Sun: () => html`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
           </svg>
         `,
-        Play: () => html`
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        ZoomIn: () => html`
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        `,
+        ZoomOut: () => html`
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        `,
+        Center: () => html`
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        `,
+        Function: () => html`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+            <line x1="7" y1="2" x2="7" y2="22"></line>
+            <line x1="17" y1="2" x2="17" y2="22"></line>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
           </svg>
         `,
-        Layers: () => html`
+        Pipeline: () => html`
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
             <polyline points="2 17 12 22 22 17"></polyline>
             <polyline points="2 12 12 17 22 12"></polyline>
           </svg>
         `,
-        Function: () => html`
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-blue-400">
-            <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
-            <line x1="7" y1="2" x2="7" y2="22"></line>
-            <line x1="17" y1="2" x2="17" y2="22"></line>
-            <line x1="2" y1="12" x2="22" y2="12"></line>
-            <line x1="2" y1="7" x2="7" y2="7"></line>
-            <line x1="2" y1="17" x2="7" y2="17"></line>
-            <line x1="17" y1="17" x2="22" y2="17"></line>
-            <line x1="17" y1="7" x2="22" y2="7"></line>
-          </svg>
-        `,
-        Input: () => html`
-           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-cyan-400">
-            <polyline points="4 7 4 4 20 4 20 7"></polyline>
-            <line x1="9" y1="20" x2="15" y2="20"></line>
-            <line x1="12" y1="4" x2="12" y2="20"></line>
-          </svg>
-        `,
         Dual: () => html`
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-fuchsia-400">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
             <path d="M12 2a10 10 0 1 0 10 10H12V2z"></path>
             <path d="M12 12L2 12"></path>
             <path d="M12 12L12 22"></path>
           </svg>
+        `,
+        Input: () => html`
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+        `,
+        Data: () => html`
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <line x1="10" y1="9" x2="8" y2="9"></line>
+          </svg>
+        `,
+        Map: () => html`
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+             <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+             <line x1="8" y1="2" x2="8" y2="18"></line>
+             <line x1="16" y1="6" x2="16" y2="22"></line>
+          </svg>
         `
       };
 
-      // --- Components ---
+      // --- Custom Controls ---
+      const CustomControls = ({ theme, onToggleTheme, showMiniMap, onToggleMiniMap }) => {
+        const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+        
+        const btnClass = `p-2 rounded-lg shadow-lg border transition-all duration-200 ${
+            theme === 'light' 
+            ? 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900' 
+            : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+        }`;
 
-      const Header = ({ theme, onToggleTheme }) => html`
-        <div className="absolute top-4 left-4 z-10 bg-slate-900/90 backdrop-blur border border-slate-700/50 rounded-xl p-3 shadow-xl flex items-center gap-3">
-          <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-            <${Icons.Cube} />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-slate-100 leading-tight">HyperNodes DAG</h1>
-            <p className="text-[10px] text-slate-400 font-medium">Interactive visualization widget</p>
-          </div>
-          <div className="h-8 w-[1px] bg-slate-800 mx-1"></div>
-          <button 
-            onClick=${onToggleTheme}
-            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 font-mono uppercase tracking-wider transition-colors border border-slate-700"
-          >
-            ${theme === 'light' ? 'Light' : 'Dark'}
+        return html`
+            <${Panel} position="bottom-right" className="flex flex-col gap-2 pb-4 pr-4">
+                <button className=${btnClass} onClick=${() => zoomIn()} title="Zoom In">
+                    <${Icons.ZoomIn} />
           </button>
-        </div>
-      `;
+                <button className=${btnClass} onClick=${() => zoomOut()} title="Zoom Out">
+                    <${Icons.ZoomOut} />
+                </button>
+                <button className=${btnClass} onClick=${() => fitView({ padding: 0.2 })} title="Fit View">
+                    <${Icons.Center} />
+                </button>
+                <button className=${`${btnClass} ${showMiniMap ? (theme === 'light' ? 'bg-slate-100 text-indigo-600' : 'bg-slate-800 text-indigo-400') : ''}`} onClick=${onToggleMiniMap} title="Toggle Minimap">
+                    <${Icons.Map} />
+                </button>
+                <div className="h-px bg-slate-200 dark:bg-slate-700 my-1"></div>
+                <button className=${btnClass} onClick=${onToggleTheme} title="Toggle Theme">
+                    ${theme === 'light' ? html`<${Icons.Moon} />` : html`<${Icons.Sun} />`}
+                </button>
+            <//>
+        `;
+      };
 
+      // --- Edge Component ---
       const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label }) => {
         const [edgePath, labelX, labelY] = getBezierPath({
           sourceX,
@@ -373,7 +458,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
                     pointerEvents: 'all',
                   }}
-                  className="px-2 py-1 rounded bg-slate-900/90 border border-slate-700 text-[10px] text-slate-300 font-mono shadow-md"
+                  className="px-2 py-1 rounded bg-slate-900/90 border border-slate-700 text-[10px] text-slate-300 font-mono shadow-md backdrop-blur"
                 >
                   ${label}
                 </div>
@@ -383,39 +468,94 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         `;
       };
 
+      // --- Node Component ---
       const CustomNode = ({ data, id }) => {
-        const inputs = data.inputs || [];
-        const outputs = data.outputs || [];
         const isExpanded = data.isExpanded;
+        const theme = data.theme;
         
-        // Determine node style based on type
-        let typeColor = "blue";
-        let TypeIcon = Icons.Function;
-        let typeLabel = "FUNCTION";
+        // Style Configuration
+        let colors = {
+             bg: "slate", border: "slate", text: "slate", icon: "slate"
+        };
+        let Icon = Icons.Function;
+        let labelType = "NODE";
         
         if (data.nodeType === 'PIPELINE') {
-          typeColor = "amber";
-          TypeIcon = Icons.Layers;
-          typeLabel = "PIPELINE";
+          colors = { bg: "amber", border: "amber", text: "amber", icon: "amber" };
+          Icon = Icons.Pipeline;
+          labelType = "PIPELINE";
         } else if (data.nodeType === 'DUAL') {
-          typeColor = "fuchsia";
-          TypeIcon = Icons.Dual;
-          typeLabel = "DUAL";
+          colors = { bg: "fuchsia", border: "fuchsia", text: "fuchsia", icon: "fuchsia" };
+          Icon = Icons.Dual;
+          labelType = "DUAL NODE";
         } else if (data.nodeType === 'INPUT') {
-          typeColor = "cyan";
-          TypeIcon = Icons.Input;
-          typeLabel = "INPUT";
+          colors = { bg: "cyan", border: "cyan", text: "cyan", icon: "cyan" };
+          Icon = Icons.Input;
+          labelType = "INPUT";
+        } else if (data.nodeType === 'DATA') {
+          colors = { bg: "slate", border: "slate", text: "slate", icon: "slate" };
+          Icon = Icons.Data;
+          labelType = "DATA";
+        } else {
+          // STANDARD Function
+          colors = { bg: "indigo", border: "indigo", text: "indigo", icon: "indigo" };
+          Icon = Icons.Function;
+          labelType = "FUNCTION";
+        }
+        
+        // --- Render Data Node (Compact) ---
+        if (data.nodeType === 'DATA') {
+            const isLight = theme === 'light';
+            return html`
+                <div className=${`px-3 py-1.5 rounded-full border shadow-sm flex items-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                    ${isLight 
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
+                `}>
+                     <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icon} /></span>
+                     <span className="text-xs font-mono font-medium">${data.label}</span>
+                     
+                     <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" />
+                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
+                </div>
+            `;
         }
 
-        // Special rendering for expanded pipeline groups
+        // --- Render Input Node (Compact) ---
+        if (data.nodeType === 'INPUT') {
+             const isLight = theme === 'light';
+             return html`
+                <div className=${`px-3 py-2 rounded-lg border-2 border-dashed flex items-center gap-2
+                    ${isLight
+                        ? 'bg-cyan-50/50 border-cyan-200 text-cyan-800'
+                        : 'bg-cyan-950/20 border-cyan-800/50 text-cyan-200'}
+                `}>
+                    <${Icon} />
+                    <span className="text-xs font-bold tracking-wide">${data.label}</span>
+                    <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
+                </div>
+             `;
+        }
+
+        // --- Render Expanded Pipeline Group ---
         if (data.nodeType === 'PIPELINE' && isExpanded) {
+          const isLight = theme === 'light';
           return html`
-            <div className="relative w-full h-full rounded-2xl border-2 border-dashed border-amber-500/30 bg-amber-500/5 p-4 transition-all duration-300">
-              <div className="absolute -top-3 left-4 px-2 bg-slate-950 text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2 cursor-pointer hover:text-amber-300"
+            <div className=${`relative w-full h-full rounded-2xl border-2 border-dashed p-4 transition-all duration-300
+                ${isLight 
+                    ? 'border-amber-300 bg-amber-50/30' 
+                    : 'border-amber-500/30 bg-amber-500/5'}
+            `} onWheel=${(e) => e.stopPropagation()}>
+              <div 
+                   className=${`absolute -top-3 left-4 px-3 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors
+                        ${isLight
+                            ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200'
+                            : 'bg-slate-950 text-amber-400 hover:text-amber-300 border border-amber-500/50'}
+                   `}
                    onClick=${data.onToggleExpand}>
-                <${Icons.Layers} />
+                <${Icon} />
                 ${data.label}
-                <span className="text-[10px] opacity-70">(Click to collapse)</span>
+                <span className="text-[9px] opacity-60 normal-case ml-1">Click to collapse</span>
               </div>
               <${Handle} type="target" position=${Position.Top} className="!w-0 !h-0 !opacity-0" />
               <${Handle} type="source" position=${Position.Bottom} className="!w-0 !h-0 !opacity-0" />
@@ -423,60 +563,57 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           `;
         }
 
+        // --- Render Standard Node ---
+        const isLight = theme === 'light';
+        const boundInputs = data.inputs.filter(i => i.is_bound).length;
+
         return html`
-          <div className="group relative w-[280px] rounded-xl border border-slate-800 bg-slate-950/80 shadow-2xl backdrop-blur-sm transition-all duration-300 hover:border-${typeColor}-500/50 hover:shadow-${typeColor}-500/10 hover:-translate-y-1 cursor-pointer"
+          <div className=${`group relative w-[240px] rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1
+               ${isLight 
+                 ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200`
+                 : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/10`}
+               `}
                onClick=${data.nodeType === 'PIPELINE' ? data.onToggleExpand : undefined}>
+            
             <!-- Header -->
-            <div className="px-4 py-3 border-b border-slate-800/50 flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="p-1.5 rounded-lg bg-${typeColor}-500/10 border border-${typeColor}-500/20 shrink-0">
-                  <${TypeIcon} />
+            <div className=${`px-3 py-2.5 border-b flex items-center gap-3
+                 ${isLight ? 'border-slate-100' : 'border-slate-800/50'}`}>
+              <div className=${`p-1.5 rounded-md shrink-0
+                   ${isLight 
+                     ? `bg-${colors.bg}-50 text-${colors.text}-600` 
+                     : `bg-${colors.bg}-500/10 text-${colors.text}-400 border border-${colors.border}-500/20`}`}>
+                <${Icon} />
                 </div>
-                <div className="min-w-0">
-                  <div className="text-[10px] font-bold tracking-wider text-${typeColor}-400 uppercase mb-0.5">${typeLabel}</div>
-                  <div className="text-sm font-semibold text-slate-100 truncate" title=${data.label}>${data.label}</div>
-                </div>
-              </div>
-              <div className="text-emerald-400 shrink-0">
-                <${Icons.CheckCircle} />
-              </div>
+              <div className="min-w-0 flex-1">
+                <div className=${`text-[9px] font-bold tracking-wider uppercase mb-0.5
+                     ${isLight ? `text-${colors.text}-600` : `text-${colors.text}-400`}`}>${labelType}</div>
+                <div className=${`text-sm font-semibold truncate
+                     ${isLight ? 'text-slate-800' : 'text-slate-100'}`} title=${data.label}>${data.label}</div>
             </div>
 
-            <!-- Body -->
-            <div className="px-4 py-3 space-y-3">
-              <!-- Batch Progress (Mock) -->
-              <div>
-                <div className="flex justify-between text-[10px] font-medium text-slate-400 mb-1.5">
-                  <span className="uppercase tracking-wider">Batch</span>
-                  <span className="text-slate-300">5 / 5</span>
-                </div>
-                <div className="flex gap-1 h-1">
-                  <div className="flex-1 rounded-full bg-emerald-500"></div>
-                  <div className="flex-1 rounded-full bg-emerald-500"></div>
-                  <div className="flex-1 rounded-full bg-emerald-500"></div>
-                  <div className="flex-1 rounded-full bg-emerald-500"></div>
-                  <div className="flex-1 rounded-full bg-emerald-500"></div>
-                </div>
-              </div>
-
-              <!-- Outputs -->
-              ${outputs.length ? html`
-                <div className="flex flex-wrap gap-2 pt-1">
-                  ${outputs.map(out => html`
-                    <span className="px-2.5 py-1 rounded-md border border-slate-700 bg-slate-800/50 text-xs font-medium text-slate-300 font-mono">
-                      ${out}
-                    </span>
-                  `)}
+              <!-- Bound Input Badge -->
+              ${boundInputs > 0 ? html`
+                  <div className=${`w-2 h-2 rounded-full ring-2 ring-offset-1
+                      ${isLight 
+                          ? 'bg-indigo-400 ring-indigo-100 ring-offset-white' 
+                          : 'bg-indigo-500 ring-indigo-500/30 ring-offset-slate-950'}`}
+                       title="${boundInputs} bound inputs">
                 </div>
               ` : null}
             </div>
 
             <!-- Handles -->
-            <${Handle} type="target" position=${Position.Top} className="!w-3 !h-3 !bg-slate-950 !border-2 !border-slate-600 group-hover:!border-${typeColor}-400 transition-colors" />
-            <${Handle} type="source" position=${Position.Bottom} className="!w-3 !h-3 !bg-slate-950 !border-2 !border-slate-600 group-hover:!border-${typeColor}-400 transition-colors" />
+            <${Handle} type="target" position=${Position.Top} className=${`!w-2 !h-2 !border-2 transition-colors
+                 ${isLight 
+                    ? '!bg-white !border-slate-300 group-hover:!border-slate-400' 
+                    : '!bg-slate-950 !border-slate-600 group-hover:!border-slate-500'}`} />
+            <${Handle} type="source" position=${Position.Bottom} className=${`!w-2 !h-2 !border-2 transition-colors
+                 ${isLight 
+                    ? '!bg-white !border-slate-300 group-hover:!border-slate-400' 
+                    : '!bg-slate-950 !border-slate-600 group-hover:!border-slate-500'}`} />
             
             ${data.nodeType === 'PIPELINE' ? html`
-               <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity">
+               <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                  Click to expand
                </div>
             ` : null}
@@ -492,23 +629,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const [layoutedEdges, setLayoutedEdges] = useState([]);
 
         useEffect(() => {
-          if (!nodes.length) {
-            setLayoutedNodes([]);
-            setLayoutedEdges([]);
-            return;
-          }
+          if (!nodes.length) return;
 
           // Construct ELK graph with hierarchy
           const buildElkHierarchy = (nodes, edges) => {
             const nodeMap = new Map(nodes.map(n => [n.id, { ...n, children: [], edges: [] }]));
             const rootChildren = [];
-            
-            // Assign nodes to parents
-            // Only assign if parent exists and is expanded (handled by visibility logic elsewhere, 
-            // but for layout we need to know structure).
-            // Actually, if a node is hidden, we shouldn't layout it?
-            // Or ELK handles hidden nodes? No.
-            // We should filter nodes passed to ELK.
             
             const visibleNodes = nodes.filter(n => !n.hidden);
             const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
@@ -525,17 +651,37 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               }
             });
             
-            const mapToElk = (n) => ({
+            const mapToElk = (n) => {
+                // Dynamic sizing based on node type
+                let width = 240;
+                let height = 60;
+                
+                if (n.data?.nodeType === 'DATA') {
+                    width = 120;
+                    height = 30;
+                    // Estimate width based on label length roughly
+                    if (n.data.label) width = Math.max(100, n.data.label.length * 8 + 40);
+                } else if (n.data?.nodeType === 'INPUT') {
+                    width = 140;
+                    height = 40;
+                }
+                
+                if (n.style && n.style.width) width = n.style.width;
+                if (n.style && n.style.height) height = n.style.height;
+
+                return {
               id: n.id,
-              width: n.style?.width || defaultSize.width,
-              height: n.style?.height || defaultSize.height,
+                  width: width,
+                  height: height,
               children: n.children.length ? n.children.map(mapToElk) : undefined,
               layoutOptions: {
                  'elk.padding': '[top=50,left=20,bottom=20,right=20]',
-                 'elk.spacing.nodeNode': '60',
+                     'elk.spacing.nodeNode': '60', // Horizontal spacing
+                     'elk.layered.spacing.nodeNodeBetweenLayers': '80', // Vertical spacing
                  'elk.direction': 'DOWN',
               }
-            });
+                };
+            };
 
             const elkGraph = {
               id: 'root',
@@ -545,6 +691,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.layered.spacing.nodeNodeBetweenLayers': '80',
                 'elk.spacing.nodeNode': '60',
                 'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
               },
               children: rootChildren.map(mapToElk),
               edges: visibleEdges.map(e => ({
@@ -599,92 +746,47 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const [nodes, setNodes, onNodesChange] = useNodesState(initialData.nodes);
         const [edges, setEdges, onEdgesChange] = useEdgesState(initialData.edges);
         const [theme, setTheme] = useState('dark');
+        const [showMiniMap, setShowMiniMap] = useState(false); // Default off
 
-        // Theme detection
+        // --- Theme Detection (Preserved from previous version) ---
         useEffect(() => {
           const detectTheme = () => {
              let newTheme = 'dark';
-             let customBg = null;
-
              try {
-                 // Method: Get exact background color from parent (Trial 5 - worked)
                  const parentStyle = getComputedStyle(window.parent.document.documentElement);
                  const parentBg = parentStyle.getPropertyValue('--vscode-editor-background').trim();
-                 
                  if (parentBg) {
-                     customBg = parentBg;
-                     
-                     // Determine theme based on background brightness
-                     // Helper to parse color and get brightness (0-255)
                      const getBrightness = (color) => {
-                        // Handle rgb/rgba
                         const rgb = color.match(/\d+/g);
-                        if (rgb && rgb.length >= 3) {
-                            return (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
-                        }
-                        // Handle hex
-                        if (color.startsWith('#')) {
-                            let hex = color.substring(1);
-                            if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-                            const r = parseInt(hex.substr(0, 2), 16);
-                            const g = parseInt(hex.substr(2, 2), 16);
-                            const b = parseInt(hex.substr(4, 2), 16);
-                            return (r * 299 + g * 587 + b * 114) / 1000;
-                        }
-                        return 128; // Default to medium
+                        if (rgb && rgb.length >= 3) return (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
+                        return 128;
                      };
-
-                     const brightness = getBrightness(parentBg);
-                     newTheme = brightness > 128 ? 'light' : 'dark';
+                     newTheme = getBrightness(parentBg) > 128 ? 'light' : 'dark';
                  } else {
-                     // Fallback to class/attribute check if variable not found
-                     const parentBody = window.parent.document.body;
-                     const themeKind = parentBody.getAttribute('data-vscode-theme-kind');
-                     if (themeKind === 'vscode-light') {
-                         newTheme = 'light';
-                     } else if (themeKind === 'vscode-dark') {
-                         newTheme = 'dark';
-                     } else if (parentBody.className.includes('vscode-light')) {
-                         newTheme = 'light';
-                     }
+                     const themeKind = window.parent.document.body.getAttribute('data-vscode-theme-kind');
+                     if (themeKind === 'vscode-light' || window.parent.document.body.className.includes('vscode-light')) newTheme = 'light';
                  }
-
              } catch (e) {
-                 // Fallback if cross-origin access fails
-                 console.warn('Cannot access parent frame for theme detection', e);
-                 if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-                     newTheme = 'light';
+                 if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) newTheme = 'light';
                  }
-             }
-
              setTheme(newTheme);
-             
-             // Apply custom background if found
-             if (customBg) {
-                 document.documentElement.style.setProperty('--host-bg-color', customBg);
-             }
+             document.body.classList.toggle('light-mode', newTheme === 'light');
           };
-          
           detectTheme();
-          
-          // Observer for changes
-          try {
               const observer = new MutationObserver(detectTheme);
-              observer.observe(window.parent.document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind'] });
+          try { observer.observe(window.parent.document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind'] }); } catch(e) {}
               return () => observer.disconnect();
-          } catch (e) {
-              // Fallback observer
-              const observer = new MutationObserver(detectTheme);
-              observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-              return () => observer.disconnect();
-          }
         }, []);
 
         const toggleTheme = useCallback(() => {
-            setTheme(t => t === 'light' ? 'dark' : 'light');
+            setTheme(t => {
+                const next = t === 'light' ? 'dark' : 'light';
+                document.body.classList.toggle('light-mode', next === 'light');
+                return next;
+            });
         }, []);
 
-        // Interactive Expansion Logic
+        // --- Expansion Logic ---
         const onToggleExpand = useCallback((nodeId) => {
           setNodes((nds) => {
             return nds.map((node) => {
@@ -702,43 +804,37 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           });
         }, [setNodes]);
 
-        // Visibility Logic
+        // Inject toggle handler and theme into nodes
+        useEffect(() => {
+          setNodes((nds) => nds.map(n => ({
+            ...n,
+            data: {
+              ...n.data,
+              theme, // Propagate theme to nodes
+              onToggleExpand: () => onToggleExpand(n.id)
+            }
+          })));
+        }, [onToggleExpand, setNodes, theme]);
+
+        // --- Visibility Logic ---
         useEffect(() => {
            setNodes((nds) => {
              const expansionMap = new Map();
              nds.forEach(n => {
-                if (n.data.nodeType === 'PIPELINE') {
-                   expansionMap.set(n.id, n.data.isExpanded);
-                }
+                if (n.data.nodeType === 'PIPELINE') expansionMap.set(n.id, n.data.isExpanded);
              });
-
              return nds.map(n => {
                 if (n.parentNode) {
                    const parentExpanded = expansionMap.get(n.parentNode);
-                   if (parentExpanded === false) {
-                      return { ...n, hidden: true };
-                   }
-                   return { ...n, hidden: false };
+                   if (parentExpanded === false) return { ...n, hidden: true };
                 }
                 return { ...n, hidden: false };
              });
            });
         }, [nodes.map(n => n.data.isExpanded).join(',')]);
 
-        // Inject toggle handler
-        useEffect(() => {
-          setNodes((nds) => nds.map(n => ({
-            ...n,
-            data: {
-              ...n.data,
-              onToggleExpand: () => onToggleExpand(n.id)
-            }
-          })));
-        }, [onToggleExpand, setNodes]);
-
-        // Edge Hoisting Logic
+        // --- Edge Hoisting Logic ---
         const visibleEdges = useMemo(() => {
-            // Map nodeId -> parentId
             const parentMap = new Map();
             const expansionMap = new Map();
             nodes.forEach(n => {
@@ -749,18 +845,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const getVisibleAncestor = (nodeId) => {
                 let curr = nodeId;
                 let candidate = nodeId;
-                
-                // Traverse up
                 while (curr) {
                     const parent = parentMap.get(curr);
-                    if (!parent) break; // Reached root
-                    
-                    // Check if parent is collapsed
-                    const isParentExpanded = expansionMap.get(parent);
-                    if (isParentExpanded === false) {
-                        // Parent is collapsed, so IT is the visible representative
-                        candidate = parent;
-                    }
+                    if (!parent) break;
+                    if (expansionMap.get(parent) === false) candidate = parent;
                     curr = parent;
                 }
                 return candidate;
@@ -775,14 +863,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
                 if (sourceVis !== targetVis) {
                     const edgeId = `e_${sourceVis}_${targetVis}`;
-                    // Avoid duplicates
                     if (!processedEdges.has(edgeId)) {
-                         newEdges.push({
-                             ...edge,
-                             id: edgeId,
-                             source: sourceVis,
-                             target: targetVis,
-                         });
+                         newEdges.push({ ...edge, id: edgeId, source: sourceVis, target: targetVis });
                          processedEdges.add(edgeId);
                     }
                 }
@@ -795,22 +877,42 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // Custom edge styling
         const edgeOptions = {
             type: 'custom',
-            animated: true,
             style: { stroke: theme === 'light' ? '#94a3b8' : '#64748b', strokeWidth: 2 },
             markerEnd: { type: MarkerType.ArrowClosed, color: theme === 'light' ? '#94a3b8' : '#64748b' },
         };
 
-        const styledEdges = useMemo(() => layoutedEdges.map(e => ({ ...e, ...edgeOptions })), [layoutedEdges, theme]);
+        const styledEdges = useMemo(() => layoutedEdges.map(e => {
+            const isDataLink = e.data && e.data.isDataLink;
+            return { 
+                ...e, 
+                ...edgeOptions,
+                // Make data links (Func->Data) full as per user request
+                style: { 
+                    ...edgeOptions.style, 
+                    strokeWidth: isDataLink ? 1.5 : 2,
+                    // strokeDasharray: isDataLink ? '4 2' : undefined  // Removed dashed
+                },
+                markerEnd: edgeOptions.markerEnd // Always show arrow
+            };
+        }), [layoutedEdges, theme]);
+
+        // --- Resize Observer ---
+        useEffect(() => {
+            const handleResize = () => {
+                // Trigger re-render or fitView if needed
+                // React Flow handles canvas resize automatically, but we might want to re-center
+            };
+            window.addEventListener('resize', handleResize);
+            return () => window.removeEventListener('resize', handleResize);
+        }, []);
 
         return html`
           <div 
-            className=${`w-full h-screen relative overflow-hidden`}
+            className=${`w-full h-screen relative overflow-hidden transition-colors duration-300`}
             style=${{ backgroundColor: 'var(--host-bg-color, ' + (theme === 'light' ? '#f8fafc' : '#020617') + ')' }}
           >
             <!-- Background Grid -->
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>
-            
-            <${Header} theme=${theme} onToggleTheme=${toggleTheme} />
             
             <${ReactFlow}
               nodes=${layoutedNodes}
@@ -822,14 +924,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               fitView
               minZoom=${0.1}
               className=${'bg-transparent'}
+              onWheel=${(e) => {
+                  // Prevent scrolling propagation to notebook when zooming?
+                  // ReactFlow handles this mostly, but sometimes notebook scrolls.
+                  // We'll rely on default behavior.
+              }}
             >
               <${Background} color=${theme === 'light' ? '#cbd5e1' : '#334155'} gap=${24} size=${1} variant="dots" />
-              <${Controls} className=${theme === 'light' ? '!bg-white !text-slate-700 !border-slate-200 !shadow-xl' : '!bg-slate-900 !text-slate-200 !border-slate-700 !shadow-xl'} />
+              <${CustomControls} theme=${theme} onToggleTheme=${toggleTheme} showMiniMap=${showMiniMap} onToggleMiniMap=${() => setShowMiniMap(m => !m)} />
+              ${showMiniMap ? html`
               <${MiniMap} 
                 className=${theme === 'light' ? '!bg-white !border-slate-200 !shadow-xl rounded-lg overflow-hidden' : '!bg-slate-900 !border-slate-700 !shadow-xl rounded-lg overflow-hidden'}
                 maskColor=${theme === 'light' ? 'rgba(241, 245, 249, 0.6)' : 'rgba(15, 23, 42, 0.6)'}
                 nodeColor=${(n) => theme === 'light' ? '#cbd5e1' : '#475569'}
               />
+              ` : null}
             <//>
           </div>
         `;
@@ -855,6 +964,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
     html_template = html_head + html_body
     return html_template.replace("__GRAPH_JSON__", graph_json)
+
 
 class PipelineWidget(widgets.HTML):
     """
@@ -904,4 +1014,3 @@ class PipelineWidget(widgets.HTML):
     def _repr_html_(self) -> str:
         """Fallback for environments that prefer raw HTML over widgets."""
         return self.value
-
