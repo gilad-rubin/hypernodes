@@ -4,6 +4,7 @@ Tests that bound inputs in nested pipelines are correctly shown with transparenc
 """
 
 import pytest
+
 from hypernodes import Pipeline, node
 
 
@@ -36,7 +37,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         outer = Pipeline(nodes=[inner.as_node(), add])
         
         # Visualize with collapsed nested pipeline (depth=1)
-        viz = outer.visualize(depth=1, min_arg_group_size=None)
+        viz = outer.visualize(depth=1, group_inputs=False)
         viz_str = str(viz)
         
         # The collapsed nested node should be visible
@@ -54,7 +55,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         outer = Pipeline(nodes=[inner.as_node(), add])
         
         # Visualize with expanded nested pipeline (depth=2)
-        viz = outer.visualize(depth=2, min_arg_group_size=None)
+        viz = outer.visualize(depth=2, group_inputs=False)
         viz_str = str(viz)
         
         # The bound input 'factor' should appear with dashed border
@@ -74,7 +75,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         outer = Pipeline(nodes=[inner.as_node()])
         
         # Collapsed view with grouping
-        viz_collapsed = outer.visualize(depth=1, min_arg_group_size=2)
+        viz_collapsed = outer.visualize(depth=1, group_inputs=True)
         viz_str = str(viz_collapsed)
         
         # Should show collapsed pipeline node
@@ -94,7 +95,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         level3 = Pipeline(nodes=[level2.as_node(), multiply])
         
         # Fully expanded
-        viz = level3.visualize(depth=None, min_arg_group_size=None)
+        viz = level3.visualize(depth=None, group_inputs=False)
         viz_str = str(viz)
         
         # The bound inputs (factor, x) have been fulfilled, so they don't appear
@@ -117,7 +118,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         outer = Pipeline(nodes=[inner_node, add])
         
         # Expanded view
-        viz = outer.visualize(depth=2, min_arg_group_size=None)
+        viz = outer.visualize(depth=2, group_inputs=False)
         viz_str = str(viz)
         
         # Bound 'factor' should appear with dashed border
@@ -136,7 +137,7 @@ class TestNestedPipelinesBoundInputsVisualization:
         outer = Pipeline(nodes=[inner.as_node()])
         
         # Collapsed with grouping enabled
-        viz = outer.visualize(depth=1, min_arg_group_size=2)
+        viz = outer.visualize(depth=1, group_inputs=True)
         viz_str = str(viz)
         
         # Should have partial transparency (some inputs bound)

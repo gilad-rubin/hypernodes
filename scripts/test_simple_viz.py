@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 import numpy.typing as npt
 
@@ -50,8 +51,8 @@ def pack_passage(passage: Passage, embedding: Vector) -> EncodedPassage:
 single_encode = Pipeline(nodes=[extract_passage_text, text_encode, pack_passage], name="single_encode")
 
 print("Testing visualization...")
-print(f"min_arg_group_size default should be None")
-print(f"Visualizing single_encode pipeline...")
+print("group_inputs default should be True")
+print("Visualizing single_encode pipeline...")
 single_encode.visualize(filename="outputs/simple_test.svg")
 print("✓ Done! Check outputs/simple_test.svg")
 print("\nIf you still see groups, you need to restart your Jupyter kernel!")

@@ -1,9 +1,11 @@
 """Generate sample visualizations showcasing different styles."""
 import sys
+
 sys.path.insert(0, 'src')
 
-from hypernodes import node, Pipeline, DESIGN_STYLES
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+from hypernodes import Pipeline, node
 
 
 def create_sample_pipeline():
@@ -113,14 +115,14 @@ def main():
     
     # Generate with/without grouping
     print("\n6. Input Grouping Comparison:")
-    for group_size in [None, 2]:
-        group_label = "ungrouped" if group_size is None else "grouped"
+    for group_inputs in [False, True]:
+        group_label = "ungrouped" if not group_inputs else "grouped"
         filename = f"outputs/simple_{group_label}.svg"
-        simple.visualize(filename=filename, style="professional", min_arg_group_size=group_size)
+        simple.visualize(filename=filename, style="professional", group_inputs=group_inputs)
         print(f"   ✓ Generated {filename}")
     
     print("\n" + "="*60)
-    print(f"All visualizations saved to outputs/ directory!")
+    print("All visualizations saved to outputs/ directory!")
     print(f"Total files: {5 + 2 + 3 + 4 + 2 + 2} SVG files")
     print("="*60)
     print("\nYou can:")

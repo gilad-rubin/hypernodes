@@ -1,8 +1,7 @@
 """Tests for input_mapping visualization issues."""
 
-import pytest
 from hypernodes import Pipeline, node
-from hypernodes.viz.visualization import _collect_visualization_data
+from hypernodes.viz.graphviz_ui import _collect_visualization_data
 
 
 @node(output_name="cleaned")
@@ -44,7 +43,7 @@ class TestInputMappingVisualization:
         outer = Pipeline(nodes=[inner_node], name="outer")
         
         # Visualize with expansion
-        viz = outer.visualize(depth=2, min_arg_group_size=None)
+        viz = outer.visualize(depth=2, group_inputs=False)
         viz_str = str(viz)
         
         # The visualization should somehow indicate the mapping
@@ -183,4 +182,3 @@ class TestComplexInputMappingScenario:
         query_string_edges = [(s, t, lbl) for s, t, lbl in string_edges if s == "query"]
         assert len(query_string_edges) == 0, \
             "query should not be a floating parameter, should connect extract_query → clean_text"
-

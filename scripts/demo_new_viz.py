@@ -1,6 +1,7 @@
 """Comprehensive demonstration of the new visualization system."""
 
 from hypernodes import Pipeline, node
+from hypernodes.viz.ui_handler import UIHandler
 
 print("="*70)
 print("FRONTEND-AGNOSTIC VISUALIZATION SYSTEM - COMPREHENSIVE DEMO")
@@ -58,17 +59,15 @@ outer_pipeline = Pipeline(
 print("\n" + "-"*70)
 print("SCENARIO 1: Serialization - Collapsed (depth=1)")
 print("-"*70)
-from hypernodes.viz.graph_serializer import GraphSerializer
-
-serializer = GraphSerializer(outer_pipeline)
-graph_data = serializer.serialize(depth=1)
+handler_collapsed = UIHandler(outer_pipeline, depth=1)
+graph_data = handler_collapsed.get_view_data()
 
 print(f"\nNodes: {len(graph_data['nodes'])}")
 for node in graph_data['nodes']:
     print(f"  - {node['label']} ({node['node_type']})")
 
-print(f"\nLevels: {len(graph_data['levels'])}")
-for level in graph_data['levels']:
+print(f"\nLevels: {len(graph_data.get('levels', []))}")
+for level in graph_data.get('levels', []):
     print(f"  - {level['level_id']}")
     print(f"    Unfulfilled inputs: {level['unfulfilled_inputs']}")
     print(f"    Bound inputs: {level['bound_inputs_at_this_level']}")
@@ -79,7 +78,8 @@ print("\n" + "-"*70)
 print("SCENARIO 2: Serialization - Fully Expanded (depth=None)")
 print("-"*70)
 
-graph_data_expanded = serializer.serialize(depth=None)
+handler_expanded = UIHandler(outer_pipeline, depth=None)
+graph_data_expanded = handler_expanded.get_view_data()
 
 print(f"\nNodes: {len(graph_data_expanded['nodes'])}")
 for node in graph_data_expanded['nodes']:
@@ -183,11 +183,10 @@ print("\n" + "="*70)
 print("DEMONSTRATION COMPLETE ✓")
 print("="*70)
 print("\nKey Achievements:")
-print("  ✓ Frontend-agnostic serialization with complete semantic data")
+print("  ✓ Frontend-agnostic serialization via UIHandler with complete semantic data")
 print("  ✓ Pluggable visualization engines (Graphviz, IPyWidget)")
 print("  ✓ Per-level hierarchy analysis for nested pipelines")
 print("  ✓ Zero frontend calculations - all relationships pre-computed")
 print("  ✓ Full backward compatibility with existing API")
 print("  ✓ Type hints, bound status, and node types exposed")
 print("="*70)
-

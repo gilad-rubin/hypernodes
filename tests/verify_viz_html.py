@@ -2,7 +2,7 @@
 import json
 from typing import List, Any
 from hypernodes import node, Pipeline
-from hypernodes.viz.visualization_widget import PipelineWidget
+from hypernodes.viz.js_ui import PipelineWidget
 
 # Mock types
 class VectorStore: pass

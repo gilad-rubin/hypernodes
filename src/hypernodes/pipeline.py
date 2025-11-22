@@ -237,7 +237,6 @@ class Pipeline:
         # Legacy parameters (kept for backward compatibility)
         orient: str = "TB",
         flatten: bool = False,
-        min_arg_group_size: Optional[int] = 2,
         group_inputs: bool = True,
         show_legend: bool = False,
         show_types: bool = True,
@@ -256,11 +255,11 @@ class Pipeline:
             Legacy graphviz-specific parameters (will be deprecated):
             orient: Graph orientation ("TB", "LR", "BT", "RL")
             flatten: If True, render nested pipelines inline without containers
-            min_arg_group_size: Minimum inputs to group together (None=no grouping)
             group_inputs: Whether to group inputs in the frontend (graphviz)
             show_legend: Whether to show a legend explaining node types
             show_types: Whether to show type hints and default values
             style: Style name from DESIGN_STYLES or GraphvizStyle object
+            show_mapping_labels: Graphviz-only flag to display mapping labels on edges
             return_type: "auto", "graphviz", or "html"
             interactive: If True, uses ipywidget engine
             **engine_options: Additional engine-specific options
@@ -270,7 +269,7 @@ class Pipeline:
         """
         # Handle legacy interactive parameter
         if interactive:
-            from .viz.visualization_widget import PipelineWidget
+            from .viz.js_ui import PipelineWidget
             return PipelineWidget(self, depth=depth, **engine_options)
         
         # For backward compatibility, pass legacy parameters as engine_options
@@ -279,7 +278,6 @@ class Pipeline:
             engine_options.update({
                 "orient": orient,
                 "flatten": flatten,
-                "min_arg_group_size": min_arg_group_size,
                 "group_inputs": group_inputs,
                 "show_legend": show_legend,
                 "show_types": show_types,

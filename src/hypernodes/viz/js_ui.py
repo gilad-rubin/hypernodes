@@ -5,13 +5,14 @@ from typing import Any, Dict, Optional
 
 import ipywidgets as widgets
 
-from .graph_serializer import GraphSerializer
+from .visualization_engine import VisualizationEngine
 
 
 def transform_to_react_flow(
     serialized_graph: Dict[str, Any],
     theme: str = "CYBERPUNK",
     initial_depth: int = 1,
+    theme_debug: bool = False,
 ) -> Dict[str, Any]:
     """Transform serialized graph data to React Flow node/edge structures."""
     nodes = []
@@ -79,6 +80,7 @@ def transform_to_react_flow(
                 "nodeType": node_type,
                 "inputs": node.get("inputs", []),
                 "outputs": node.get("output_names", []),  # Kept for metadata
+                "outputTypes": node.get("output_types", []),
                 "theme": theme,
                 "isExpanded": is_expanded,
             },
@@ -140,7 +142,8 @@ def transform_to_react_flow(
         # 2. Create DATA Nodes for Outputs
         if not is_expanded:
             output_names = node.get("output_names", [])
-            for out_name in output_names:
+            output_types = node.get("output_types", [])
+            for idx, out_name in enumerate(output_names):
                 data_node_id = f"data_{node_id}_{out_name}"
 
                 # Register
@@ -153,7 +156,7 @@ def transform_to_react_flow(
                     "id": data_node_id,
                     "type": "custom",
                     "data": {
-                        "label": out_name,
+                        "label": f"{out_name} : {output_types[idx]}" if output_types and idx < len(output_types) else out_name,
                         "nodeType": "DATA",
                         "inputs": [],
                         "outputs": [],
@@ -274,6 +277,11 @@ def transform_to_react_flow(
         "nodes": nodes,
         "edges": edges,
         "event_index": serialized_graph.get("event_index", {}),
+        "meta": {
+            "theme_preference": theme,
+            "initial_depth": initial_depth,
+            "theme_debug": theme_debug,
+        },
     }
 
 
@@ -792,62 +800,178 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       const initialData = JSON.parse(document.getElementById('graph-data').textContent || '{"nodes":[],"edges":[]}');
+      const normalizeThemePref = (pref) => {
+        const lower = (pref || '').toLowerCase();
+        return ['light', 'dark', 'auto'].includes(lower) ? lower : 'auto';
+      };
+      const themePreference = normalizeThemePref(initialData.meta?.theme_preference || 'auto');
+      const showThemeDebug = Boolean(initialData.meta?.theme_debug);
+
+      const parseColorString = (value) => {
+        if (!value) return null;
+        const scratch = document.createElement('div');
+        scratch.style.color = value;
+        scratch.style.backgroundColor = value;
+        scratch.style.display = 'none';
+        document.body.appendChild(scratch);
+        const resolved = getComputedStyle(scratch).color || '';
+        scratch.remove();
+        const nums = resolved.match(/[\d\.]+/g);
+        if (nums && nums.length >= 3) {
+            const [r, g, b] = nums.slice(0, 3).map(Number);
+            const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+            return { r, g, b, luminance, resolved, raw: value };
+        }
+        return null;
+      };
 
       const App = () => {
         const [nodes, setNodes, onNodesChange] = useNodesState(initialData.nodes);
         const [edges, setEdges, onEdgesChange] = useEdgesState(initialData.edges);
-        const [theme, setTheme] = useState('dark');
+        const [theme, setTheme] = useState(themePreference === 'auto' ? 'dark' : themePreference);
         const [showMiniMap, setShowMiniMap] = useState(false);
         const [bgColor, setBgColor] = useState('transparent');
+        const [themeDebug, setThemeDebug] = useState({
+            source: 'init',
+            luminance: null,
+            background: 'transparent',
+            appliedTheme: themePreference === 'auto' ? 'dark' : themePreference,
+        });
+
+        const detectHostTheme = useCallback(() => {
+            const attempts = [];
+            const pushCandidate = (value, source) => {
+                if (value) attempts.push({ value: value.trim(), source });
+            };
+
+            try {
+                const parentDoc = window.parent?.document;
+                if (parentDoc) {
+                    const rootStyle = getComputedStyle(parentDoc.documentElement);
+                    const bodyStyle = getComputedStyle(parentDoc.body);
+                    pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
+                    pushCandidate(bodyStyle.backgroundColor, 'parent body background');
+                    pushCandidate(rootStyle.backgroundColor, 'parent root background');
+                }
+            } catch (e) {}
+
+            pushCandidate(getComputedStyle(document.body).backgroundColor, 'iframe body');
+
+            let chosen = attempts.find(c => parseColorString(c.value));
+            if (!chosen) chosen = { value: 'transparent', source: 'default' };
+            const parsed = parseColorString(chosen.value);
+            const luminance = parsed ? parsed.luminance : null;
+
+            let autoTheme = luminance !== null ? (luminance > 150 ? 'light' : 'dark') : 'dark';
+            let source = luminance !== null ? `${chosen.source} luminance` : chosen.source;
+
+            try {
+                const parentDoc = window.parent?.document;
+                if (parentDoc) {
+                    const themeKind = parentDoc.body.getAttribute('data-vscode-theme-kind');
+                    if (themeKind) {
+                        autoTheme = themeKind.includes('light') ? 'light' : 'dark';
+                        source = 'vscode-theme-kind';
+                    } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-light')) {
+                        autoTheme = 'light';
+                        source = 'vscode body class';
+                    } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-dark')) {
+                        autoTheme = 'dark';
+                        source = 'vscode body class';
+                    }
+                }
+            } catch (e) {}
+
+            if (source === 'default' && window.matchMedia) {
+                if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                    autoTheme = 'light';
+                    source = 'prefers-color-scheme';
+                } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    autoTheme = 'dark';
+                    source = 'prefers-color-scheme';
+                }
+            }
+
+            return {
+                theme: autoTheme,
+                background: parsed ? (parsed.resolved || parsed.raw || chosen.value) : chosen.value,
+                luminance,
+                source,
+            };
+        }, []);
 
         // --- Theme Detection & Background (Task 1) ---
         useEffect(() => {
-          const detectTheme = () => {
-             let newTheme = 'dark';
-             let detectedBg = 'transparent';
-             try {
-                 const parentStyle = getComputedStyle(window.parent.document.documentElement);
-                 // Use VSCode background variable
-                 const parentBg = parentStyle.getPropertyValue('--vscode-editor-background').trim();
-                 
-                 if (parentBg) {
-                     detectedBg = parentBg;
-                     const getBrightness = (color) => {
-                        const rgb = color.match(/\d+/g);
-                        if (rgb && rgb.length >= 3) return (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
-                        return 128;
-                     };
-                     // Decide theme based on brightness of background
-                     newTheme = getBrightness(parentBg) > 128 ? 'light' : 'dark';
-                 } else {
-                     // Fallback
-                     const themeKind = window.parent.document.body.getAttribute('data-vscode-theme-kind');
-                     if (themeKind === 'vscode-light' || window.parent.document.body.className.includes('vscode-light')) newTheme = 'light';
-                 }
-             } catch (e) {
-                 if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) newTheme = 'light';
-             }
+          const applyTheme = () => {
+             const detected = detectHostTheme();
+             const appliedTheme = themePreference === 'auto' ? detected.theme : themePreference;
              
-             setTheme(newTheme);
-             // Set specific backgrounds for better contrast if needed, or stick to transparent/detected
-             setBgColor(detectedBg); 
-             document.body.classList.toggle('light-mode', newTheme === 'light');
+             setTheme(appliedTheme);
+             setBgColor(detected.background || 'transparent');
+             if (showThemeDebug) {
+                setThemeDebug({
+                    source: detected.source,
+                    luminance: detected.luminance,
+                    background: detected.background,
+                    appliedTheme,
+                });
+             }
+             document.body.classList.toggle('light-mode', appliedTheme === 'light');
+             window.__hypernodesVizThemeState = { ...detected, appliedTheme, preference: themePreference };
           };
-          detectTheme();
-          const observer = new MutationObserver(detectTheme);
-          try { observer.observe(window.parent.document.body, { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind', 'style'] }); } catch(e) {}
-          return () => observer.disconnect();
-        }, []);
+
+          applyTheme();
+
+          const observers = [];
+          try { 
+            const parentDoc = window.parent?.document;
+            if (parentDoc) {
+                const config = { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind', 'style'] };
+                const observer = new MutationObserver(applyTheme);
+                observer.observe(parentDoc.body, config);
+                observer.observe(parentDoc.documentElement, config);
+                observers.push(observer);
+            }
+          } catch(e) {}
+
+          const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+          const mqHandler = () => applyTheme();
+          if (mq && mq.addEventListener) mq.addEventListener('change', mqHandler);
+          else if (mq && mq.addListener) mq.addListener(mqHandler);
+
+          return () => {
+            observers.forEach(o => o.disconnect());
+            if (mq && mq.removeEventListener) mq.removeEventListener('change', mqHandler);
+            else if (mq && mq.removeListener) mq.removeListener(mqHandler);
+          };
+        }, [detectHostTheme, themePreference]);
 
         const toggleTheme = useCallback(() => {
             setTheme(t => {
                 const next = t === 'light' ? 'dark' : 'light';
                 document.body.classList.toggle('light-mode', next === 'light');
                 // If we toggle manually, we override the detected background to a preset
-                setBgColor(next === 'light' ? '#f8fafc' : '#020617');
+                const manualBg = next === 'light' ? '#f8fafc' : '#020617';
+                setBgColor(manualBg);
+                if (showThemeDebug) {
+                    setThemeDebug(prev => ({
+                        ...prev,
+                        source: 'manual toggle',
+                        appliedTheme: next,
+                        background: manualBg,
+                        luminance: null,
+                    }));
+                }
+                window.__hypernodesVizThemeState = {
+                    ...(window.__hypernodesVizThemeState || {}),
+                    appliedTheme: next,
+                    background: manualBg,
+                    source: 'manual toggle',
+                    preference: themePreference,
+                };
                 return next;
             });
-        }, []);
+        }, [themePreference]);
 
         // --- Expansion Logic ---
         // --- Expansion Logic ---
@@ -1040,6 +1164,16 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             >
               <${Background} color=${theme === 'light' ? '#94a3b8' : '#334155'} gap=${24} size=${1} variant="dots" />
               <${CustomControls} theme=${theme} onToggleTheme=${toggleTheme} showMiniMap=${showMiniMap} onToggleMiniMap=${() => setShowMiniMap(m => !m)} />
+              ${showThemeDebug ? html`
+              <${Panel} position="top-left" className=${`backdrop-blur-sm rounded-lg shadow-lg border text-xs px-3 py-2 mt-3 ml-3 max-w-xs
+                    ${theme === 'light' ? 'bg-white/95 border-slate-200 text-slate-700' : 'bg-slate-900/90 border-slate-700 text-slate-200'}`}>
+                  <div className="text-[10px] font-semibold tracking-wide uppercase opacity-70">Theme debug</div>
+                  <div className="mt-0.5">Applied: <span className="font-semibold">${theme}</span> (pref: ${themePreference})</div>
+                  <div>Source: ${themeDebug.source || 'n/a'}</div>
+                  <div className="truncate" title=${bgColor}>BG: ${bgColor || 'transparent'}</div>
+                  ${themeDebug.luminance !== null ? html`<div>Luma: ${Math.round(themeDebug.luminance)}</div>` : null}
+              <//>
+              ` : null}
               ${showMiniMap ? html`
               <${MiniMap} 
                 className=${theme === 'light' ? '!bg-white !border-slate-200 !shadow-xl rounded-lg overflow-hidden' : '!bg-slate-900 !border-slate-700 !shadow-xl rounded-lg overflow-hidden'}
@@ -1082,6 +1216,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     return html_template.replace("__GRAPH_JSON__", graph_json)
 
 
+class IPyWidgetEngine(VisualizationEngine):
+    """IPyWidget-based interactive visualization engine."""
+
+    def render(
+        self,
+        serialized_graph: Dict[str, Any],
+        theme: str = "CYBERPUNK",
+        **kwargs: Any,
+    ) -> Any:
+        react_flow_data = transform_to_react_flow(serialized_graph, theme=theme)
+        html_content = generate_widget_html(react_flow_data)
+        return widgets.HTML(value=html_content)
+
+
 class PipelineWidget(widgets.HTML):
     """
     Widget for visualizing pipelines inside Jupyter/VS Code notebooks.
@@ -1093,7 +1241,8 @@ class PipelineWidget(widgets.HTML):
         theme: str = "auto",
         depth: Optional[int] = 1,
         group_inputs: bool = True,
-        min_arg_group_size: Optional[int] = 2,
+        show_types: bool = True,
+        theme_debug: bool = False,
         **kwargs: Any,
     ):
         from .ui_handler import UIHandler
@@ -1101,13 +1250,14 @@ class PipelineWidget(widgets.HTML):
         self.pipeline = pipeline
         self.theme = theme
         self.depth = depth
+        self.theme_debug = theme_debug
         
         # 1. Get Graph Data once
         handler = UIHandler(
             self.pipeline,
             depth=depth,
             group_inputs=group_inputs,
-            min_arg_group_size=min_arg_group_size,
+            show_output_types=show_types,
         )
         serialized_graph = handler.get_full_graph_with_state(include_events=True)
         
@@ -1115,7 +1265,12 @@ class PipelineWidget(widgets.HTML):
         estimated_height = self._calculate_initial_height(serialized_graph)
         
         # 3. Generate HTML
-        html_content = self._generate_html(serialized_graph, theme=theme, depth=depth)
+        html_content = self._generate_html(
+            serialized_graph,
+            theme=theme,
+            depth=depth,
+            theme_debug=theme_debug,
+        )
 
         # Use srcdoc for better compatibility (VS Code, etc.)
         # We need to escape the HTML for the srcdoc attribute
@@ -1186,9 +1341,18 @@ class PipelineWidget(widgets.HTML):
         except Exception:
             return 600
 
-    def _generate_html(self, graph_data: Dict[str, Any], theme: str = "auto", depth: Optional[int] = 1) -> str:
+    def _generate_html(
+        self,
+        graph_data: Dict[str, Any],
+        theme: str = "auto",
+        depth: Optional[int] = 1,
+        theme_debug: bool = False,
+    ) -> str:
         react_flow_data = transform_to_react_flow(
-            graph_data, theme=theme, initial_depth=depth
+            graph_data,
+            theme=theme,
+            initial_depth=depth,
+            theme_debug=theme_debug,
         )
         return generate_widget_html(react_flow_data)
 

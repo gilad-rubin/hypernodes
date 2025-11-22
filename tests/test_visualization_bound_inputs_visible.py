@@ -5,6 +5,7 @@ rather than being completely hidden.
 """
 
 import pytest
+
 from hypernodes import Pipeline, node
 
 
@@ -59,7 +60,7 @@ def test_bound_inputs_have_transparency():
     pipeline.bind(x=5)
     
     # Visualize without grouping to see individual input styling
-    viz = pipeline.visualize(min_arg_group_size=None)
+    viz = pipeline.visualize(group_inputs=False)
     viz_str = str(viz)
     
     # Check for dashed border (distinguishes bound inputs)
@@ -85,7 +86,7 @@ def test_bound_grouped_inputs_visible():
     pipeline.bind(a=1, b=2)  # Bind some of the grouped inputs
     
     # Visualize with grouping enabled
-    viz = pipeline.visualize(min_arg_group_size=2)
+    viz = pipeline.visualize(group_inputs=True)
     viz_str = str(viz)
     
     # All parameters should appear (bound and unbound)

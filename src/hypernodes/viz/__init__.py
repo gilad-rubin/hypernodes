@@ -5,20 +5,16 @@ including Graphviz-based static visualizations and interactive IPyWidget-based
 visualizations.
 """
 
-from .visualization import (
+from .graphviz_ui import (
     DESIGN_STYLES,
     GraphvizStyle,
     visualize,
     visualize_legacy,
 )
-from .graph_serializer import GraphSerializer
-from .visualization_engines import (
-    GraphvizEngine,
+from .visualization_engine import VisualizationEngine, get_engine
+from .graphviz_ui import GraphvizEngine
+from .js_ui import (
     IPyWidgetEngine,
-    VisualizationEngine,
-    get_engine,
-)
-from .visualization_widget import (
     PipelineWidget,
     generate_widget_html,
     transform_to_react_flow,
@@ -31,8 +27,6 @@ __all__ = [
     # Styles
     "GraphvizStyle",
     "DESIGN_STYLES",
-    # Serialization
-    "GraphSerializer",
     # Engines
     "VisualizationEngine",
     "GraphvizEngine",
@@ -43,4 +37,3 @@ __all__ = [
     "generate_widget_html",
     "transform_to_react_flow",
 ]
-

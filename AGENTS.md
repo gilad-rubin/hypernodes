@@ -427,10 +427,10 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `callbacks.py`: Callback protocol + context + dispatcher
 
 ### Visualization (`src/hypernodes/viz/`)
-- `visualization.py`: Graphviz rendering and legacy visualization functions
-- `graph_serializer.py`: Frontend-agnostic graph serialization
-- `visualization_engines.py`: Pluggable rendering engines (Graphviz, IPyWidget)
-- `visualization_widget.py`: Interactive IPyWidget visualization components
+- `ui_handler.py`: Backend state manager + serializer for all frontends
+- `graphviz_ui.py`: Graphviz rendering engine
+- `js_ui.py`: IPyWidget/React Flow rendering helpers
+- `visualization_engine.py`: Pluggable rendering engines (Graphviz, IPyWidget)
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine facade
@@ -556,36 +556,13 @@ outer.run()  # ✅ Works! No inputs needed
 ## Visualization System Details
 
 The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
-- **Graph Serialization** (`graph_serializer.py`): Frontend-agnostic semantic graph data
-- **Rendering Engines** (`visualization_engines.py`): Pluggable backends (Graphviz, IPyWidget, etc.)
-- **Legacy Visualization** (`visualization.py`): Backwards-compatible Graphviz rendering
-- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations
-  - **Fix (Nov 2025)**: Changed from base64 data URI to `srcdoc` attribute for better VSCode notebook compatibility
+- **UIHandler (`ui_handler.py`)**: Backend serializer + state manager powering Graphviz and React Flow frontends. Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with mapping labels.
+- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz_ui.py`) and IPyWidget/React Flow (`js_ui.py`).
+- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses handler data).
+- **Legacy Visualization**: Older helpers in `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
 
-### GraphSerializer (`viz/graph_serializer.py`)
-
-**Key Fix (Nov 2025):** Proper handling of cross-level connections and input/output mappings.
-
-**Critical features:**
-- **Cross-level edge resolution**: When a nested pipeline is expanded, edges connect directly to inner nodes that produce outputs, not to the PipelineNode wrapper
-- **Input/output mapping labels**: Adds edge labels like `"outer_param → inner_param"` when parameters are renamed across boundaries
-- **Global output tracking**: `_output_to_node_id` maps output names to actual producer node IDs across all nesting levels
-- **Expanded pipeline detection**: Detects when dependencies are on expanded PipelineNodes and replaces them with inner producer nodes
-
-**Edge creation logic:**
-1. For node dependencies: Check if dependency is an expanded PipelineNode
-   - If yes: Find actual inner nodes that produce needed outputs, create edges to those
-   - If no: Create regular node→node edge
-2. For parameter edges: Check if parameter is produced by node in outer scope
-   - If yes: Create node→node edge with mapping label if names differ
-   - If no: Create parameter→node edge using outer parameter name
-
-**Example scenario:**
-```python
-# Inner pipeline outputs "evaluation_result"
-# Outer expects "evaluation_results" via output_mapping
-# GraphSerializer creates edge: evaluate_answer → compute_metrics
-# With label: "evaluation_result → evaluation_results"
-```
-
-**Test coverage:** `tests/test_visualization_mappings.py` - comprehensive tests for all mapping scenarios
+**UIHandler serialization highlights:**
+- Resolves cross-level edges for nested pipelines (edges point to inner producers, not wrappers).
+- Emits mapping labels for input/output remapping (e.g., `"outer → inner"`).
+- Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped inputs.
+- Supports depth controls and interactive expand/collapse without frontend recomputation.

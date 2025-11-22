@@ -2,6 +2,7 @@
 
 from hypernodes import Pipeline, node
 
+
 # Create simple test pipeline
 @node(output_name="doubled")
 def double(x: int) -> int:
@@ -67,7 +68,7 @@ try:
         orient="LR",
         depth=1,
         flatten=False,
-        min_arg_group_size=2,
+        group_inputs=True,
         show_legend=True,
         show_types=True,
         style="professional",

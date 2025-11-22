@@ -36,8 +36,8 @@ def main():
     pipeline1 = Pipeline(nodes=[add, scale], name="no_binding")
     print(f"   Bound inputs: {pipeline1.bound_inputs}")
     print(f"   Unfulfilled: {pipeline1.unfulfilled_args}")
-    viz1 = pipeline1.visualize(min_arg_group_size=None)
-    print(f"   ✓ Visualization shows all 4 inputs with normal opacity")
+    viz1 = pipeline1.visualize(group_inputs=False)
+    print("   ✓ Visualization shows all 4 inputs with normal opacity")
     print()
     
     # Example 2: Partial binding - some inputs dashed
@@ -46,9 +46,9 @@ def main():
     pipeline2.bind(x=5, factor=10)
     print(f"   Bound inputs: {pipeline2.bound_inputs}")
     print(f"   Unfulfilled: {pipeline2.unfulfilled_args}")
-    viz2 = pipeline2.visualize(min_arg_group_size=None)
-    print(f"   ✓ Bound inputs 'x' and 'factor' have dashed borders")
-    print(f"   ✓ Unbound inputs 'y' and 'value' have solid borders")
+    viz2 = pipeline2.visualize(group_inputs=False)
+    print("   ✓ Bound inputs 'x' and 'factor' have dashed borders")
+    print("   ✓ Unbound inputs 'y' and 'value' have solid borders")
     print()
     
     # Example 3: Full binding - all inputs dashed
@@ -57,9 +57,9 @@ def main():
     pipeline3.bind(x=5, y=10, value=2, factor=3)
     print(f"   Bound inputs: {pipeline3.bound_inputs}")
     print(f"   Unfulfilled: {pipeline3.unfulfilled_args}")
-    viz3 = pipeline3.visualize(min_arg_group_size=None)
-    print(f"   ✓ All inputs have dashed borders")
-    print(f"   ✓ Pipeline can run without any external inputs!")
+    viz3 = pipeline3.visualize(group_inputs=False)
+    print("   ✓ All inputs have dashed borders")
+    print("   ✓ Pipeline can run without any external inputs!")
     print()
     
     # Example 4: Grouped inputs with partial binding
@@ -72,10 +72,10 @@ def main():
     pipeline4.bind(a=1, b=2)  # Bind 2 out of 4
     print(f"   Bound inputs: {pipeline4.bound_inputs}")
     print(f"   Unfulfilled: {pipeline4.unfulfilled_args}")
-    viz4 = pipeline4.visualize(min_arg_group_size=2)
-    print(f"   ✓ Bound inputs (a,b) grouped with dashed border")
-    print(f"   ✓ Unbound inputs (c,d) grouped with solid border")
-    print(f"   ✓ Two separate groups (no mixing bound/unbound)")
+    viz4 = pipeline4.visualize(group_inputs=True)
+    print("   ✓ Bound inputs (a,b) grouped with dashed border")
+    print("   ✓ Unbound inputs (c,d) grouped with solid border")
+    print("   ✓ Two separate groups (no mixing bound/unbound)")
     print()
     
     # Example 5: Nested pipeline with binding
@@ -86,9 +86,9 @@ def main():
     print(f"   Inner bound: {inner.bound_inputs}")
     print(f"   Inner unfulfilled: {inner.unfulfilled_args}")
     print(f"   Outer unfulfilled: {outer.unfulfilled_args}")
-    viz5 = outer.visualize(depth=2, min_arg_group_size=None)
-    print(f"   ✓ Inner 'factor' input shown with dashed border")
-    print(f"   ✓ Outer still needs 'value', 'x', 'y' with solid borders")
+    viz5 = outer.visualize(depth=2, group_inputs=False)
+    print("   ✓ Inner 'factor' input shown with dashed border")
+    print("   ✓ Outer still needs 'value', 'x', 'y' with solid borders")
     print()
     
     print("=" * 60)
@@ -108,7 +108,7 @@ def main():
     print("  • Bound and unbound are NOT grouped together")
     print()
     print("To save visualizations, use:")
-    print("  pipeline.visualize('output.svg', min_arg_group_size=None)")
+    print("  pipeline.visualize('output.svg', group_inputs=False)")
     print()
     
     # Demonstrate the actual border styles
@@ -119,7 +119,7 @@ def main():
     
     pipeline_test = Pipeline(nodes=[add])
     pipeline_test.bind(x=5)
-    viz = pipeline_test.visualize(min_arg_group_size=None)
+    viz = pipeline_test.visualize(group_inputs=False)
     viz_str = str(viz)
     
     # Show that bound input has dashed border

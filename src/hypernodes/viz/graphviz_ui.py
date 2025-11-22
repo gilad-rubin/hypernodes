@@ -584,7 +584,7 @@ def _collect_visualization_data(
 
 def _identify_grouped_inputs(
     viz_graph: VisualizationGraph,
-    min_group_size: Optional[int] = 2,
+    group_inputs: bool = True,
     bound_inputs: Optional[Set[str]] = None,
 ) -> Dict[Node, List[str]]:
     """Identify input parameters that should be grouped together.
@@ -594,14 +594,16 @@ def _identify_grouped_inputs(
 
     Args:
         viz_graph: VisualizationGraph with nodes and edges
-        min_group_size: Minimum number of inputs to create a group (None = no grouping)
+        group_inputs: Whether to group inputs (True = group, False = no grouping)
         bound_inputs: Set of bound input parameter names (to prevent mixing bound/unbound)
 
     Returns:
         Dictionary mapping nodes to lists of input parameters to group
     """
-    if min_group_size is None:
+    if not group_inputs:
         return {}
+    
+    min_group_size = 2
 
     if bound_inputs is None:
         bound_inputs = set()
@@ -894,11 +896,12 @@ def visualize_legacy(
     orient: Literal["TB", "LR", "BT", "RL"] = "TB",
     depth: Optional[int] = 1,
     flatten: bool = False,
-    min_arg_group_size: Optional[int] = 2,
+    group_inputs: bool = True,
     show_legend: bool = False,
     show_types: bool = True,
     style: Union[str, GraphvizStyle] = "default",
     return_type: Literal["auto", "graphviz", "html"] = "auto",
+    show_mapping_labels: bool = False,
 ) -> Any:
     """Visualize a pipeline using Graphviz.
 
@@ -908,11 +911,12 @@ def visualize_legacy(
         orient: Graph orientation ("TB", "LR", "BT", "RL")
         depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
         flatten: If True, render nested pipelines inline without containers
-        min_arg_group_size: Minimum inputs to group together (None=no grouping)
+        group_inputs: Whether to group inputs (True = group, False = no grouping)
         show_legend: Whether to show a legend explaining node types
         show_types: Whether to show type hints and default values
         style: Style name from DESIGN_STYLES or GraphvizStyle object
         return_type: "auto", "graphviz", or "html"
+        show_mapping_labels: Whether to display input/output mapping labels on edges
 
     Returns:
         graphviz.Digraph object (or HTML in Jupyter if return_type="html")
@@ -941,7 +945,7 @@ def visualize_legacy(
 
     # Identify grouped inputs (excluding mixed bound/unbound groups)
     grouped_inputs = _identify_grouped_inputs(
-        viz_graph, min_arg_group_size, bound_inputs=bound_inputs_for_grouping
+        viz_graph, group_inputs=group_inputs, bound_inputs=bound_inputs_for_grouping
     )
 
     # Create graphviz digraph
@@ -1228,7 +1232,7 @@ def visualize_legacy(
         target_id = str(id(target))
 
         # Use edge label if provided, otherwise empty
-        label_str = edge_label if edge_label else ""
+        label_str = edge_label if (show_mapping_labels and edge_label) else ""
         
         dot.edge(
             source_id,
@@ -1316,14 +1320,14 @@ def visualize_legacy(
                 fontsize=str(style_obj.legend_font_size),
             )
             
-            # Add explanation for mapping arrows
-            legend.node(
-                "legend_mapping",
-                label="a → b: Parameter Mapping",
-                shape="plaintext",
-                fontname=style_obj.font_name,
-                fontsize=str(style_obj.legend_font_size),
-            )
+            if show_mapping_labels:
+                legend.node(
+                    "legend_mapping",
+                    label="a → b: Parameter Mapping",
+                    shape="plaintext",
+                    fontname=style_obj.font_name,
+                    fontsize=str(style_obj.legend_font_size),
+                )
 
     # Render to file if filename provided
     if filename:
@@ -1362,6 +1366,217 @@ def visualize_legacy(
     else:
         return dot
 
+
+class GraphvizEngine:
+    """Graphviz renderer for preprocessed graphs (render_nodes/render_edges)."""
+
+    def render(
+        self,
+        serialized_graph: Dict[str, Any],
+        filename: Optional[str] = None,
+        orient: Literal["TB", "LR", "BT", "RL"] = "TB",
+        style: Union[str, GraphvizStyle] = "default",
+        show_legend: bool = False,
+        show_types: bool = True,
+        return_type: Literal["auto", "graphviz", "html"] = "auto",
+        flatten: bool = False,  # ignored in preprocessed mode
+        group_inputs: Optional[bool] = None,  # ignored in preprocessed mode
+        **kwargs: Any,
+    ) -> Any:
+        if not GRAPHVIZ_AVAILABLE:
+            raise ImportError(
+                "Graphviz is not installed. Install it with: uv add hypernodes[viz]"
+            )
+
+        # Resolve style
+        if isinstance(style, str):
+            if style not in DESIGN_STYLES:
+                raise ValueError(
+                    f"Unknown style '{style}'. Choose from: {list(DESIGN_STYLES.keys())}"
+                )
+            style_obj = DESIGN_STYLES[style]
+        else:
+            style_obj = style
+
+        dot = graphviz.Digraph(comment="Pipeline")
+        dot.attr(rankdir=orient)
+        dot.attr(bgcolor=style_obj.background_color)
+        dot.attr(fontname=style_obj.font_name)
+        dot.attr(fontsize=str(style_obj.font_size))
+        dot.graph_attr.update({
+            "ranksep": "0.8",
+            "nodesep": "0.5",
+            "pad": "0.06",
+        })
+
+        nodes = serialized_graph.get("render_nodes", serialized_graph.get("nodes", []))
+        edges = serialized_graph.get("render_edges", serialized_graph.get("edges", []))
+        levels = serialized_graph.get("levels", [])
+        applied_options = serialized_graph.get("applied_options") or {}
+        show_types = applied_options.get("show_output_types", show_types)
+
+        node_map = {n["id"]: n for n in nodes}
+        level_children: Dict[str, list[str]] = {}
+        for level in levels:
+            pid = level.get("parent_level_id")
+            if pid:
+                level_children.setdefault(pid, []).append(level["level_id"])
+
+        nodes_by_level: Dict[str, list[Dict[str, Any]]] = {}
+        for n in nodes:
+            lvl = n.get("level_id", "root")
+            nodes_by_level.setdefault(lvl, []).append(n)
+
+        def node_label(n: Dict[str, Any]) -> str:
+            name = n.get("label", n.get("function_name", n.get("id", "")))
+            output_names = n.get("output_names", [])
+            output_types = n.get("output_types", [])
+            if show_types and output_types:
+                if len(output_types) == len(output_names):
+                    outputs = ", ".join(f"{o} : {t}" for o, t in zip(output_names, output_types))
+                elif len(output_types) == 1 and len(output_names) >= 1:
+                    outputs = ", ".join(f"{o} : {output_types[0]}" for o in output_names)
+                else:
+                    outputs = ", ".join(output_names) if output_names else "result"
+            else:
+                outputs = ", ".join(output_names) if output_names else "result"
+            return f'''<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+  <TR><TD><B>{_escape_html(str(name))}</B></TD></TR>
+  <TR><TD BGCOLOR="{style_obj.func_node_color}">{_escape_html(outputs)}</TD></TR>
+</TABLE>>'''
+
+        def pipeline_label(n: Dict[str, Any]) -> str:
+            name = n.get("label", n.get("function_name", n.get("id", "")))
+            output_names = n.get("output_names", [])
+            output_types = n.get("output_types", [])
+            if show_types and output_types:
+                if len(output_types) == len(output_names):
+                    outputs = ", ".join(f"{o} : {t}" for o, t in zip(output_names, output_types))
+                elif len(output_types) == 1 and len(output_names) >= 1:
+                    outputs = ", ".join(f"{o} : {output_types[0]}" for o in output_names)
+                else:
+                    outputs = ", ".join(output_names) if output_names else "..."
+            else:
+                outputs = ", ".join(output_names) if output_names else "..."
+            return f'''<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4">
+  <TR><TD><B>{_escape_html(str(name))}</B> ⚙</TD></TR>
+  <TR><TD BGCOLOR="{style_obj.pipeline_node_color}">{_escape_html(outputs)}</TD></TR>
+</TABLE>>'''
+
+        def render_level(container, level_id: str):
+            # function/pipeline/input nodes already pre-grouped by level
+            for n in nodes_by_level.get(level_id, []):
+                nid = n["id"]
+                ntype = n.get("node_type", "STANDARD")
+                if ntype == "PIPELINE":
+                    # collapsed node
+                    if n.get("is_expanded"):
+                        continue
+                    container.node(
+                        nid,
+                        label=pipeline_label(n),
+                        shape="box",
+                        style="rounded,filled",
+                        fillcolor=style_obj.pipeline_node_color,
+                        fontname=style_obj.font_name,
+                        fontsize=str(style_obj.font_size),
+                        penwidth=str(style_obj.node_border_width),
+                        margin=style_obj.node_padding,
+                    )
+                elif ntype in ("INPUT", "INPUT_GROUP"):
+                    is_bound = n.get("is_bound", False)
+                    node_style = "dashed,filled" if is_bound else "filled"
+                    container.node(
+                        nid,
+                        label=_escape_html(n.get("label", nid)),
+                        shape="box",
+                        style=node_style,
+                        fillcolor=style_obj.grouped_args_node_color
+                        if ntype == "INPUT_GROUP"
+                        else style_obj.arg_node_color,
+                        fontname=style_obj.font_name,
+                        fontsize=str(style_obj.font_size),
+                        penwidth=str(style_obj.node_border_width),
+                        margin=style_obj.node_padding,
+                    )
+                else:
+                    container.node(
+                        nid,
+                        label=node_label(n),
+                        shape="box",
+                        style="rounded,filled",
+                        fillcolor=style_obj.dual_node_color if ntype == "DUAL" else style_obj.func_node_color,
+                        fontname=style_obj.font_name,
+                        fontsize=str(style_obj.font_size),
+                        penwidth=str(style_obj.node_border_width),
+                        margin=style_obj.node_padding,
+                    )
+
+            # clusters for children
+            for child_level in level_children.get(level_id, []):
+                label = child_level
+                parent_pnode_id = level_map.get(child_level, {}).get("parent_pipeline_node_id")
+                
+                # Skip rendering cluster if parent pipeline is collapsed
+                if parent_pnode_id and parent_pnode_id in node_map:
+                    parent_node = node_map[parent_pnode_id]
+                    if not parent_node.get("is_expanded"):
+                        continue
+
+                if parent_pnode_id and parent_pnode_id in node_map:
+                    label = node_map[parent_pnode_id].get("label", label)
+                
+                with container.subgraph(name=f"cluster_{child_level}") as sub:
+                    sub.attr(
+                        label=label,
+                        fontname=style_obj.font_name,
+                        fontsize=str(style_obj.font_size),
+                        color=style_obj.cluster_border_color,
+                        penwidth=str(style_obj.cluster_border_width),
+                        style="rounded,filled",
+                        fillcolor=style_obj.cluster_fill_color,
+                        labelloc="t",
+                        labeljust="c",
+                        margin="16",
+                    )
+                    render_level(sub, child_level)
+
+        # Build level map for cluster labels
+        level_map = {lvl["level_id"]: lvl for lvl in levels}
+        render_level(dot, "root")
+
+        # Edges
+        for edge in edges:
+            source = edge["source"]
+            target = edge["target"]
+            edge_type = edge.get("edge_type", "data_flow")
+            mapping_label = edge.get("mapping_label")
+            edge_color = "#333333" if edge_type != "parameter_flow" else "#666666"
+            dot.edge(
+                str(source),
+                str(target),
+                label=mapping_label if mapping_label else "",
+                color=edge_color,
+                penwidth=str(style_obj.edge_width),
+            )
+
+        if filename:
+            if "." in filename:
+                base_name, format_ext = filename.rsplit(".", 1)
+                dot.render(base_name, format=format_ext, cleanup=True)
+            else:
+                dot.render(filename, format="svg", cleanup=True)
+
+        if return_type == "graphviz" or return_type == "auto":
+            return dot
+        if return_type == "html":
+            svg_data = dot._repr_image_svg_xml()
+            if svg_data:
+                responsive_svg = _make_svg_responsive(svg_data)
+                return HTML(_wrap_svg_html(responsive_svg))
+        return dot
 
 def visualize(
     pipeline: Pipeline,
@@ -1405,7 +1620,7 @@ def visualize(
         pipeline.visualize(engine=CustomEngine())
     """
     from .ui_handler import UIHandler
-    from .visualization_engines import get_engine
+    from .visualization_engine import get_engine
 
     handler = UIHandler(pipeline, depth=depth)
 

@@ -4,6 +4,7 @@ Tests for the visualization feature when using .bind() to fulfill inputs.
 """
 
 import pytest
+
 from hypernodes import Pipeline, node
 
 
@@ -75,8 +76,8 @@ class TestVisualizationWithBind:
         pipeline.bind(threshold=0.5)
         
         # Should visualize successfully with grouped inputs
-        # min_arg_group_size=2 means config and threshold might be grouped
-        viz = pipeline.visualize(min_arg_group_size=2)
+        # group_inputs=True means config and threshold might be grouped
+        viz = pipeline.visualize(group_inputs=True)
         assert viz is not None
 
     def test_visualize_all_grouped_inputs_bound(self):
@@ -85,7 +86,7 @@ class TestVisualizationWithBind:
         pipeline.bind(config={"key": "value"}, threshold=0.5)
         
         # Should visualize successfully
-        viz = pipeline.visualize(min_arg_group_size=2)
+        viz = pipeline.visualize(group_inputs=True)
         assert viz is not None
 
     def test_visualize_nested_pipeline_with_binding(self):

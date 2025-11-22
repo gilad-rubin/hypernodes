@@ -1,6 +1,7 @@
 """Test script to verify the new visualization system works correctly."""
 
 from hypernodes import Pipeline, node
+from hypernodes.viz.ui_handler import UIHandler
 
 # Create simple test pipeline
 @node(output_name="doubled")
@@ -27,11 +28,12 @@ except Exception as e:
 # Test 2: Serialization only
 print("\nTest 2: Serialization...")
 try:
-    from hypernodes.viz.graph_serializer import GraphSerializer
-    serializer = GraphSerializer(pipeline)
-    graph_data = serializer.serialize(depth=1)
-    print(f"✓ Success! Serialized {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges")
-    print(f"  Levels: {[level['level_id'] for level in graph_data['levels']]}")
+    handler = UIHandler(pipeline)
+    graph_data = handler.get_view_data()
+    print(
+        f"✓ Success! Serialized {len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges"
+    )
+    print(f"  Levels: {[level['level_id'] for level in graph_data.get('levels', [])]}")
 except Exception as e:
     print(f"✗ Failed: {e}")
     import traceback
@@ -40,7 +42,7 @@ except Exception as e:
 # Test 3: Explicit engine selection
 print("\nTest 3: Explicit graphviz engine...")
 try:
-    from hypernodes.viz.visualization_engines import GraphvizEngine
+    from hypernodes.viz.graphviz_ui import GraphvizEngine
     engine = GraphvizEngine()
     result = pipeline.visualize(engine=engine, return_type="graphviz")
     print(f"✓ Success! Result type: {type(result)}")
@@ -82,10 +84,13 @@ try:
         name="OuterPipeline"
     )
     
-    serializer = GraphSerializer(outer_pipeline)
-    graph_data = serializer.serialize(depth=None)  # Fully expanded
-    print(f"✓ Success! Serialized {len(graph_data['nodes'])} nodes, {len(graph_data['levels'])} levels")
-    print(f"  Levels: {[level['level_id'] for level in graph_data['levels']]}")
+    handler = UIHandler(outer_pipeline, depth=None)
+    graph_data = handler.get_view_data()
+    print(
+        f"✓ Success! Serialized {len(graph_data['nodes'])} nodes, "
+        f"{len(graph_data.get('levels', []))} levels"
+    )
+    print(f"  Levels: {[level['level_id'] for level in graph_data.get('levels', [])]}")
 except Exception as e:
     print(f"✗ Failed: {e}")
     import traceback
@@ -94,4 +99,3 @@ except Exception as e:
 print("\n" + "="*50)
 print("All tests completed!")
 print("="*50)
-
