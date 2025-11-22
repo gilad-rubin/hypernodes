@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 try:
     import graphviz
+
     GRAPHVIZ_AVAILABLE = True
 except ImportError:
     GRAPHVIZ_AVAILABLE = False
@@ -17,7 +18,104 @@ from ..structures import (
     VisualizationGraph,
     VizNode,
 )
-from .style import DESIGN_STYLES, GraphvizStyle, NodeStyle
+from ..utils import read_viz_asset
+from .style import DESIGN_STYLES, NodeStyle
+
+
+COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
+    "var(--hn-node-bg)": "#100001",
+    "var(--hn-node-border)": "#100002",
+    "var(--hn-node-text)": "#100003",
+    "var(--hn-cluster-border)": "#100004",
+    "var(--hn-cluster-text)": "#100005",
+    "var(--hn-edge)": "#100006",
+    "var(--hn-func-accent)": "#100010",
+    "var(--hn-func-text)": "#100011",
+    "var(--hn-func-bg)": "#100012",
+    "var(--hn-pipe-accent)": "#100020",
+    "var(--hn-pipe-accent-text)": "#100021",
+    "var(--hn-pipe-bg)": "#100022",
+    "var(--hn-pipe-border)": "#100023",
+    "var(--hn-pipe-text)": "#100024",
+    "var(--hn-dual-accent)": "#100030",
+    "var(--hn-dual-accent-text)": "#100031",
+    "var(--hn-dual-bg)": "#100032",
+    "var(--hn-dual-border)": "#100033",
+    "var(--hn-dual-text)": "#100034",
+    "var(--hn-data-bg)": "#100040",
+    "var(--hn-data-border)": "#100041",
+    "var(--hn-data-text)": "#100042",
+    "var(--hn-data-accent)": "#100043",
+    "var(--hn-surface-bg)": "#100050",
+    "var(--hn-cluster-fill)": "#100051",
+}
+
+CSS_VAR_FALLBACKS: Dict[str, str] = {
+    "--hn-surface-bg": "#f8fafc",
+    "--hn-edge": "#94a3b8",
+    "--hn-node-bg": "#ffffff",
+    "--hn-node-border": "#e2e8f0",
+    "--hn-node-text": "#0f172a",
+    "--hn-cluster-border": "#cbd5e1",
+    "--hn-cluster-text": "#475569",
+    "--hn-cluster-fill": "#f8fafc",
+    "--hn-func-accent": "#4f46e5",
+    "--hn-func-text": "#ffffff",
+    "--hn-func-bg": "#eef2ff",
+    "--hn-pipe-accent": "#d97706",
+    "--hn-pipe-accent-text": "#ffffff",
+    "--hn-pipe-bg": "#fffbeb",
+    "--hn-pipe-border": "#fcd34d",
+    "--hn-pipe-text": "#451a03",
+    "--hn-dual-accent": "#c026d3",
+    "--hn-dual-accent-text": "#ffffff",
+    "--hn-dual-bg": "#fdf4ff",
+    "--hn-dual-border": "#f0abfc",
+    "--hn-dual-text": "#4a044e",
+    "--hn-data-bg": "#f1f5f9",
+    "--hn-data-border": "#94a3b8",
+    "--hn-data-text": "#334155",
+    "--hn-data-accent": "#475569",
+}
+
+
+def _extract_var_name(token: str) -> Optional[str]:
+    if not token or not token.startswith("var("):
+        return None
+    inner = token[4:-1] if token.endswith(")") else token[4:]
+    var_name = inner.split(",", 1)[0].strip()
+    return var_name if var_name else None
+
+
+def _build_hex_to_var_map() -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for token, placeholder in COLOR_TOKEN_TO_PLACEHOLDER.items():
+        var_name = _extract_var_name(token)
+        if not var_name:
+            continue
+        fallback = CSS_VAR_FALLBACKS.get(var_name, "#000000")
+        mapping[placeholder.lstrip("#").upper()] = f"var({var_name}, {fallback})"
+    return mapping
+
+
+HEX_TO_VAR = _build_hex_to_var_map()
+
+
+def _color_token_to_hex(value: Optional[str], fallback: str = "#000000") -> str:
+    if not value:
+        return fallback
+    normalized = value.strip()
+    if not normalized:
+        return fallback
+    lower = normalized.lower()
+    if lower in {"transparent", "none"}:
+        return lower
+    placeholder = COLOR_TOKEN_TO_PLACEHOLDER.get(normalized)
+    if placeholder:
+        return placeholder
+    if normalized.startswith("var("):
+        return fallback
+    return normalized
 
 
 def _strip_svg_prolog(svg_data: str) -> str:
@@ -98,11 +196,119 @@ def _make_svg_responsive(svg_data: str) -> str:
 
 
 def _wrap_svg_html(svg_data: str) -> str:
-    """Wrap responsive SVG in a scrollable container for notebook rendering."""
+    """Wrap responsive SVG in a scrollable container with theme support."""
+    theme_utils = read_viz_asset("theme_utils.js")
+
+    # Unique ID for this visualization to avoid conflicts
+    import uuid
+
+    viz_id = f"viz-{str(uuid.uuid4())[:8]}"
+
+    script = f"""
+    <script>
+    (function() {{
+        {theme_utils}
+        
+        const container = document.getElementById("{viz_id}");
+        if (container && window.HyperNodesTheme) {{
+            const {{ detectHostTheme }} = window.HyperNodesTheme;
+            
+            const THEME_VARS = {{
+                light: {{
+                    '--hn-surface-bg': '#f8fafc',
+                    '--hn-edge': '#64748b',
+                    '--hn-node-bg': '#ffffff',
+                    '--hn-node-border': '#e2e8f0',
+                    '--hn-node-text': '#0f172a',
+                    '--hn-cluster-border': '#cbd5e1',
+                    '--hn-cluster-text': '#475569',
+                    '--hn-func-accent': '#4f46e5',
+                    '--hn-func-text': '#ffffff',
+                    '--hn-func-bg': '#eef2ff',
+                    '--hn-pipe-accent': '#d97706',
+                    '--hn-pipe-accent-text': '#ffffff',
+                    '--hn-pipe-bg': '#fffbeb',
+                    '--hn-pipe-border': '#fcd34d',
+                    '--hn-pipe-text': '#451a03',
+                    '--hn-dual-accent': '#c026d3',
+                    '--hn-dual-accent-text': '#ffffff',
+                    '--hn-dual-bg': '#fdf4ff',
+                    '--hn-dual-border': '#f0abfc',
+                    '--hn-dual-text': '#4a044e',
+                    '--hn-data-bg': '#f1f5f9',
+                    '--hn-data-border': '#94a3b8',
+                    '--hn-data-text': '#334155',
+                    '--hn-data-accent': '#475569'
+                }},
+                dark: {{
+                    '--hn-surface-bg': '#020617',
+                    '--hn-edge': '#94a3b8',
+                    '--hn-node-bg': '#1e293b',
+                    '--hn-node-border': '#334155',
+                    '--hn-node-text': '#f1f5f9',
+                    '--hn-cluster-border': '#334155',
+                    '--hn-cluster-text': '#cbd5e1',
+                    '--hn-func-accent': '#6366f1',
+                    '--hn-func-text': '#ffffff',
+                    '--hn-func-bg': '#1e1b4b',
+                    '--hn-pipe-accent': '#fbbf24',
+                    '--hn-pipe-accent-text': '#1f2937',
+                    '--hn-pipe-bg': '#451a03',
+                    '--hn-pipe-border': '#78350f',
+                    '--hn-pipe-text': '#fde68a',
+                    '--hn-dual-accent': '#e879f9',
+                    '--hn-dual-accent-text': '#1f2937',
+                    '--hn-dual-bg': '#4a044e',
+                    '--hn-dual-border': '#86198f',
+                    '--hn-dual-text': '#fdf4ff',
+                    '--hn-data-bg': '#0f172a',
+                    '--hn-data-border': '#334155',
+                    '--hn-data-text': '#94a3b8',
+                    '--hn-data-accent': '#475569'
+                }}
+            }};
+
+            function applyTheme() {{
+                const detected = detectHostTheme();
+                const theme = detected.theme;
+                const vars = THEME_VARS[theme] || THEME_VARS.light;
+                const surface = detected.background || vars['--hn-surface-bg'] || (theme === 'dark' ? '#020617' : '#f8fafc');
+
+                container.style.backgroundColor = surface;
+                container.style.setProperty('--hn-surface-bg', surface);
+                container.style.setProperty('--hn-cluster-fill', surface);
+
+                Object.entries(vars).forEach(([key, val]) => {{
+                    if (key === '--hn-surface-bg') return;
+                    container.style.setProperty(key, val);
+                }});
+            }}
+            
+            applyTheme();
+            
+            // Observe theme changes
+            try {{
+                const parentDoc = window.parent?.document;
+                if (parentDoc) {{
+                    const observer = new MutationObserver(applyTheme);
+                    observer.observe(parentDoc.body, {{ attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind', 'style'] }});
+                }}
+            }} catch(e) {{}}
+            
+            // Media query listener
+            if (window.matchMedia) {{
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+            }}
+        }}
+    }})();
+    </script>
+    """
+
     return (
-        '<div style="width:100%; overflow-x:auto; padding-bottom:8px;">'
+        f'<div id="{viz_id}" style="width:100%; overflow-x:auto; padding-bottom:8px; transition: background-color 0.3s; background-color: var(--hn-surface-bg, transparent);">'
         f"{svg_data}"
         "</div>"
+        f"{script}"
     )
 
 
@@ -112,48 +318,150 @@ class GraphvizRenderer:
     def __init__(self, style: str = "default"):
         self.style = DESIGN_STYLES.get(style, DESIGN_STYLES["default"])
 
+    def _post_process_svg(self, svg_data: str) -> str:
+        """Replace hex placeholders with CSS variables and inject styles."""
+
+        # 1. Replace Hex Placeholders with var(...) calls
+        for hex_core, var_str in HEX_TO_VAR.items():
+            pattern = re.compile(f"#{hex_core}", re.IGNORECASE)
+            svg_data = pattern.sub(var_str, svg_data)
+
+        # 2. Inject CSS Variables Definition
+        style_block = """
+        <style>
+            :root {
+                --hn-surface-bg: #f8fafc;
+                --hn-edge: #64748b;
+                --hn-node-bg: #ffffff;
+                --hn-node-border: #e2e8f0;
+                --hn-node-text: #1e293b;
+                --hn-cluster-border: #cbd5e1;
+                --hn-cluster-text: #475569;
+                --hn-cluster-fill: var(--hn-surface-bg);
+                --hn-func-accent: #4f46e5;
+                --hn-func-text: #ffffff;
+                --hn-func-bg: #eef2ff;
+                --hn-pipe-accent: #d97706;
+                --hn-pipe-accent-text: #ffffff;
+                --hn-pipe-bg: #fffbeb;
+                --hn-pipe-border: #fcd34d;
+                --hn-pipe-text: #451a03;
+                --hn-dual-accent: #c026d3;
+                --hn-dual-accent-text: #ffffff;
+                --hn-dual-bg: #fdf4ff;
+                --hn-dual-border: #f0abfc;
+                --hn-dual-text: #4a044e;
+                --hn-data-bg: #f1f5f9;
+                --hn-data-border: #94a3b8;
+                --hn-data-text: #334155;
+                --hn-data-accent: #475569;
+            }
+            
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --hn-surface-bg: #020617;
+                    --hn-edge: #94a3b8;
+                    --hn-node-bg: #1e293b;
+                    --hn-node-border: #334155;
+                    --hn-node-text: #f1f5f9;
+                    --hn-cluster-border: #334155;
+                    --hn-cluster-text: #cbd5e1;
+                    --hn-cluster-fill: var(--hn-surface-bg);
+                    --hn-func-accent: #6366f1;
+                    --hn-func-text: #ffffff;
+                    --hn-func-bg: #1e1b4b;
+                    --hn-pipe-accent: #fbbf24;
+                    --hn-pipe-accent-text: #1f2937;
+                    --hn-pipe-bg: #451a03;
+                    --hn-pipe-border: #78350f;
+                    --hn-pipe-text: #fde68a;
+                    --hn-dual-accent: #e879f9;
+                    --hn-dual-accent-text: #1f2937;
+                    --hn-dual-bg: #4a044e;
+                    --hn-dual-border: #86198f;
+                    --hn-dual-text: #fdf4ff;
+                    --hn-data-bg: #0f172a;
+                    --hn-data-border: #334155;
+                    --hn-data-text: #94a3b8;
+                    --hn-data-accent: #475569;
+                }
+            }
+            
+            .hn-cluster polygon {
+                stroke: var(--hn-cluster-border) !important;
+                fill: var(--hn-cluster-fill) !important;
+            }
+            .hn-cluster text {
+                fill: var(--hn-cluster-text) !important;
+            }
+            
+            .hn-edge path,
+            .hn-edge polygon {
+                stroke: var(--hn-edge) !important;
+                fill: var(--hn-edge) !important;
+            }
+            .hn-edge text {
+                fill: var(--hn-cluster-text) !important;
+            }
+        </style>
+        """
+
+        # Insert style block
+        if "</svg>" in svg_data:
+            return svg_data.replace("</svg>", style_block + "</svg>")
+        return svg_data + style_block
+
     def render(self, graph_data: VisualizationGraph) -> str:
         """Render the graph to SVG."""
         if not GRAPHVIZ_AVAILABLE:
             return "<div>Graphviz not installed</div>"
 
         dot = graphviz.Digraph()
-        
-        # Enhanced Graph Attributes (from reference)
+
+        graph_bg = _color_token_to_hex(self.style.background_color, "transparent")
+        edge_color = _color_token_to_hex(self.style.edge_color, "#64748b")
+        cluster_border_color = _color_token_to_hex(self.style.cluster_border_color, "#cbd5e1")
+        cluster_label_color = _color_token_to_hex(self.style.cluster_label_color, "#475569")
+        cluster_fill_color = _color_token_to_hex(self.style.cluster_fill_color, "transparent")
+
+        # Enhanced Graph Attributes
         dot.attr(
             "graph",
-            bgcolor=self.style.background_color,
+            bgcolor=graph_bg,
             rankdir="TB",
             splines="spline",  # Smoother lines
-            nodesep="1.05",    # More horizontal space
-            ranksep="1.25",    # More vertical space
+            nodesep="1.05",  # More horizontal space
+            ranksep="1.25",  # More vertical space
             pad="0.55",
             fontname=self.style.font_name,
             overlap="false",
             outputorder="nodesfirst",
         )
-        
+
         # Enhanced Node Attributes
         dot.attr(
             "node",
-            shape="box",
-            style="rounded,filled",
+            shape="plain",  # Use plain shape because HTML label handles the box
             fontname=self.style.font_name,
             fontsize=str(self.style.font_size),
-            margin="0.16,0.10",
-            penwidth="1.6",
+            margin="0",  # No margin around the HTML table
+            # Ensure no default colors interfere
+            color="transparent",
+            fillcolor="transparent",
         )
-        
+
         # Enhanced Edge Attributes
+        # Use specific placeholder HEX for Edge
         dot.attr(
             "edge",
             arrowhead="vee",
             arrowsize=self.style.arrow_size,
             penwidth=self.style.edge_penwidth,
-            color=self.style.edge_color,
+            color=edge_color,
             fontname=self.style.font_name,
             fontsize=str(self.style.edge_font_size),
-            fontcolor=self.style.cluster_label_color,
+            fontcolor=cluster_label_color,
+            class_="hn-edge",
         )
 
         # Group nodes by parent for clustering
@@ -174,13 +482,17 @@ class GraphvizRenderer:
                     # Create cluster
                     with container.subgraph(name=f"cluster_{node.id}") as c:
                         c.attr(label=node.label)
-                        c.attr(style="filled,dashed,rounded")
-                        c.attr(color=self.style.cluster_border_color)
-                        c.attr(fillcolor=self.style.cluster_fill_color)
-                        c.attr(fontcolor=self.style.cluster_label_color)
+                        c.attr(style="rounded,dashed")
+                        c.attr(color=cluster_border_color)
+                        c.attr(fontcolor=cluster_label_color)
+                        if cluster_fill_color and cluster_fill_color not in {"transparent", "none"}:
+                            c.attr(bgcolor=cluster_fill_color)
+                            c.attr(fillcolor=cluster_fill_color)
+                            c.attr(style="rounded,filled,dashed")
                         c.attr(fontname=self.style.font_name)
                         c.attr(margin="20")
-                        
+                        c.attr(class_="hn-cluster")
+
                         # Recurse
                         add_nodes_recursive(node.id, c)
                 else:
@@ -196,37 +508,14 @@ class GraphvizRenderer:
                 edge.source,
                 edge.target,
                 label=edge.label,
-                # Edge attrs are already set globally, can override here if needed
             )
 
         try:
             svg_data = dot.pipe(format="svg").decode("utf-8")
-            
-            # --- Post-processing for "Professional" Look (from reference) ---
-            
-            # 1. Inject Drop Shadow Filter
-            defs = """
-              <defs>
-                <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.15"/>
-                </filter>
-                <style>
-                  g.edge path, g.edge polygon {
-                    stroke-linecap: round;
-                    stroke-linejoin: round;
-                  }
-                  g.node { cursor: pointer; }
-                </style>
-              </defs>
-            """
-            svg_data = re.sub(r"(<svg[^>]*>)", r"\1\n" + defs, svg_data, count=1)
-            
-            # 2. Apply Shadow Filter to Nodes
-            svg_data = svg_data.replace('class="node"', 'class="node" filter="url(#cardShadow)"')
-            
-            # 3. Improve Rendering Precision
-            svg_data = svg_data.replace('stroke-opacity="1"', 'stroke-opacity="1" shape-rendering="geometricPrecision"')
-            
+
+            # Post-process to swap HEX for VARS
+            svg_data = self._post_process_svg(svg_data)
+
             return _wrap_svg_html(_make_svg_responsive(svg_data))
         except Exception as e:
             return f"<div>Error rendering graph: {e}</div>"
@@ -234,102 +523,139 @@ class GraphvizRenderer:
     def _add_node(self, node: VizNode, container):
         """Add a single node to the graph."""
         if isinstance(node, FunctionNode):
-            node_style = self.style.dual_node if isinstance(node, DualNode) else self.style.function_node
-            subtitle = "DUAL NODE" if isinstance(node, DualNode) else "FUNCTION"
-            
-            label = self._create_clean_label(
-                title=node.label,
-                subtitle=subtitle,
-                style=node_style
+            node_style = (
+                self.style.dual_node
+                if isinstance(node, DualNode)
+                else self.style.function_node
             )
-            
+            subtitle = "DUAL NODE" if isinstance(node, DualNode) else "FUNCTION"
+
+            label = self._create_clean_label(
+                title=node.label, subtitle=subtitle, style=node_style
+            )
+
             container.node(
                 node.id,
                 label=label,
-                shape="plain",
-                # Colors handled by HTML label, but set border for fallback
-                color=node_style.border_color,
             )
-            
-        elif isinstance(node, PipelineNode): # Collapsed
+
+        elif isinstance(node, PipelineNode):  # Collapsed
             node_style = self.style.pipeline_node
             label = self._create_clean_label(
                 title=node.label,
                 subtitle="PIPELINE",
                 style=node_style,
-                is_expandable=True
+                is_expandable=True,
             )
-            
+
             # Add URL for interactivity
             container.node(
                 node.id,
                 label=label,
-                shape="plain",
                 URL=f"hypernodes:expand?id={node.id}",
                 tooltip="Click to expand",
             )
-            
+
         elif isinstance(node, DataNode):
             node_style = self.style.data_node
             label = self._create_clean_label(
                 title=node.name,
                 subtitle=node.type_hint or "Data",
                 style=node_style,
-                is_compact=True
+                is_compact=True,
             )
-            
+
             container.node(
                 node.id,
                 label=label,
-                shape="plain",
             )
-            
+
         elif isinstance(node, GroupDataNode):
             node_style = self.style.data_node
             label = self._create_clean_label(
                 title="Inputs",
                 subtitle=f"{len(node.nodes)} items",
                 style=node_style,
-                is_compact=True
+                is_compact=True,
             )
-            
+
             container.node(
                 node.id,
                 label=label,
-                shape="plain",
             )
 
-    def _create_clean_label(self, title: str, subtitle: str, style: NodeStyle, is_expandable: bool = False, is_compact: bool = False) -> str:
-        """Create a clean, professional HTML label matching the reference style."""
-        
+    def _create_clean_label(
+        self,
+        title: str,
+        subtitle: str,
+        style: NodeStyle,
+        is_expandable: bool = False,
+        is_compact: bool = False,
+    ) -> str:
+        """Create a clean, professional HTML label mimicking the JS frontend layout."""
+
         def escape(s):
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") if s else ""
+            return (
+                s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                if s
+                else ""
+            )
 
         title = escape(title)
         subtitle = escape(subtitle)
-        
-        # Font sizes
+
+        # Sizing
         title_size = "12" if is_compact else "14"
         sub_size = "9" if is_compact else "10"
-        
-        # Colors
-        # We use the style's specific colors. 
-        # Note: Reference uses hardcoded slate scales, we map our theme to that.
-        type_color = style.accent_color
-        text_color = style.text_color
-        
-        # Expansion hint
+        padding = "4" if is_compact else "8"
+
+        # !!! CRITICAL FIX: Graphviz HTML labels DO NOT support the 'CLASS' attribute on most versions.
+        # Attempting to use CLASS causes warnings and they are ignored.
+        # We must use the HEX placeholder swapping strategy.
+
+        # 1. Define unique hex placeholder codes for each semantic variable so Graphviz accepts them.
+        # The placeholders are swapped for CSS variables after rendering.
+
+        bg_color = _color_token_to_hex(style.bg_color, "#FFFFFF")
+        border_color = _color_token_to_hex(style.border_color, "#cbd5e1")
+        text_color = _color_token_to_hex(style.text_color, "#0f172a")
+        accent_color = _color_token_to_hex(style.accent_color, "#4f46e5")
+        cluster_text = _color_token_to_hex("var(--hn-cluster-text)", "#475569")
+
         expand_row = ""
         if is_expandable:
-            expand_row = f'<TR><TD><FONT POINT-SIZE="9" COLOR="{self.style.cluster_border_color}">Click to expand ↓</FONT></TD></TR>'
+            expand_row = f'''
+            <TR>
+                <TD COLSPAN="2" ALIGN="CENTER" CELLPADDING="4">
+                    <FONT POINT-SIZE="9" COLOR="{cluster_text}">Click to expand ↓</FONT>
+                </TD>
+            </TR>
+            '''
 
-        # Cell padding controls "breathing room" inside the card
-        # Reduce padding to make compact
-        padding = "4" if is_compact else "6"
-        
+        # Note: STYLE="ROUNDED" works on TABLE in some versions, but ignored in others.
+        # We rely on the outer shape="plain" so the table is the visual node.
+
         return f'''<
-        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="{padding}" BGCOLOR="{style.bg_color}" STYLE="ROUNDED">
-            <TR><TD ALIGN="CENTER"><B><FONT POINT-SIZE="{title_size}" COLOR="{text_color}">{title}</FONT></B></TD></TR>
-            <TR><TD ALIGN="CENTER"><FONT POINT-SIZE="{sub_size}" COLOR="{type_color}">{subtitle}</FONT></TD></TR>
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED">
+            <TR>
+                <TD BORDER="0" CELLPADDING="{padding}">
+                    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+                        <TR>
+                            <TD VALIGN="TOP" WIDTH="24">
+                                <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6" BGCOLOR="{accent_color}" STYLE="ROUNDED">
+                                    <TR><TD></TD></TR>
+                                </TABLE>
+                            </TD>
+                            <TD WIDTH="8"></TD>
+                            <TD VALIGN="MIDDLE">
+                                <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+                                    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="{sub_size}" COLOR="{accent_color}"><B>{subtitle}</B></FONT></TD></TR>
+                                    <TR><TD ALIGN="LEFT"><B><FONT POINT-SIZE="{title_size}" COLOR="{text_color}">{title}</FONT></B></TD></TR>
+                                </TABLE>
+                            </TD>
+                        </TR>
+                    </TABLE>
+                </TD>
+            </TR>
             {expand_row}
         </TABLE>>'''

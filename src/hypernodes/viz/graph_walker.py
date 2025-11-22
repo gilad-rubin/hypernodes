@@ -19,10 +19,11 @@ from .structures import (
 class GraphWalker:
     """Traverses the pipeline graph to generate a flat visualization structure."""
 
-    def __init__(self, pipeline: Pipeline, expanded_nodes: Set[str], group_inputs: bool = True):
+    def __init__(self, pipeline: Pipeline, expanded_nodes: Set[str], group_inputs: bool = True, traverse_collapsed: bool = False):
         self.pipeline = pipeline
         self.expanded_nodes = expanded_nodes
         self.group_inputs = group_inputs
+        self.traverse_collapsed = traverse_collapsed
 
     def get_visualization_data(self) -> VisualizationGraph:
         """Generate the flat visualization graph based on current state."""
@@ -104,7 +105,24 @@ class GraphWalker:
         node_id = f"{prefix}{id(node)}"
         is_expanded = node_id in self.expanded_nodes
         
-        label = node.name or (node.pipeline.name if hasattr(node.pipeline, "name") else "pipeline")
+        # Generate a human-readable label
+        # Priority: node.name > node.pipeline.name > function name of first node > "Pipeline"
+        label = None
+        if node.name:
+            label = node.name
+        elif hasattr(node.pipeline, "name") and node.pipeline.name:
+            label = node.pipeline.name
+        else:
+            # Try to get a descriptive name from the first function in the pipeline
+            if node.pipeline.nodes:
+                first_node = node.pipeline.nodes[0]
+                if hasattr(first_node, "func") and hasattr(first_node.func, "__name__"):
+                    label = f"{first_node.func.__name__}_pipeline"
+                else:
+                    label = "Pipeline"
+            else:
+                label = "Pipeline"
+        
         viz_node = PipelineNode(
             id=node_id,
             parent_id=parent_id,
@@ -113,9 +131,19 @@ class GraphWalker:
         )
         nodes_out.append(viz_node)
         
-        if is_expanded:
+        if is_expanded or self.traverse_collapsed:
+            # For expanded PipelineNode (or if traversing collapsed nodes for interactive viz):
+            # 1. Create input edges TO the PipelineNode wrapper
+            self._handle_input_connections(node, node_id, prefix, nodes_out, edges_out, scope)
+            
+            # 2. Expand the internal structure (creates boundary output DataNodes)
             self._expand_pipeline_node(node, node_id, prefix, nodes_out, edges_out, scope)
+            
+            # Note: Output edges FROM the PipelineNode are handled by _expand_pipeline_node
+            # which creates boundary DataNodes. We don't call _handle_output_connections
+            # because that would create duplicate output DataNodes.
         else:
+            # For collapsed PipelineNode: handle both inputs and outputs normally
             self._handle_connections(node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline)
 
     @_visit_node.register
@@ -170,15 +198,16 @@ class GraphWalker:
         # Create reverse mapping for inputs: Inner -> Outer
         reverse_input_mapping = {v: k for k, v in node.input_mapping.items()} if node.input_mapping else {}
 
-        # Map inputs: 
-        for arg in node.pipeline.graph.root_args:
-            # Check if mapped (arg is inner name)
-            outer_arg = reverse_input_mapping.get(arg, arg)
+        # Map inputs for UNFULFILLED args only (bound inputs will be handled by _process_pipeline)
+        # Use node.unfulfilled_args (outer names) instead of pipeline.graph.root_args
+        for outer_arg in node.unfulfilled_args:
+            # Map to inner name
+            inner_arg = node.input_mapping.get(outer_arg, outer_arg)
             
             if outer_arg in scope:
-                nested_scope[arg] = scope[outer_arg]
+                nested_scope[inner_arg] = scope[outer_arg]
             else:
-                # Not found in outer scope (maybe global input not yet created?)
+                # Not found in outer scope - create input DataNode
                 input_node_id = f"input_{prefix}{outer_arg}"
                 if input_node_id not in [n.id for n in nodes_out]:
                     input_node = DataNode(
@@ -190,9 +219,9 @@ class GraphWalker:
                     nodes_out.append(input_node)
                     scope[outer_arg] = input_node_id
                 
-                nested_scope[arg] = input_node_id
+                nested_scope[inner_arg] = input_node_id
 
-        # Recurse
+        # Recurse - this will handle bound inputs via _process_pipeline
         self._process_pipeline(
             pipeline=node.pipeline,
             parent_id=node_id,
@@ -228,6 +257,9 @@ class GraphWalker:
                     # Create edge from inner DataNode to outer DataNode to show the mapping
                     edges_out.append(VizEdge(source=inner_data_node_id, target=outer_data_node_id))
                     
+                    # FIX: Create edge from PipelineNode wrapper to boundary output
+                    edges_out.append(VizEdge(source=node_id, target=outer_data_node_id))
+                    
                     # Register in outer scope
                     scope[outer_out] = outer_data_node_id
         else:
@@ -252,21 +284,22 @@ class GraphWalker:
                     # Create edge from inner DataNode to boundary DataNode
                     edges_out.append(VizEdge(source=inner_data_node_id, target=boundary_data_node_id))
                     
+                    # FIX: Create edge from PipelineNode wrapper to boundary output
+                    edges_out.append(VizEdge(source=node_id, target=boundary_data_node_id))
+                    
                     # Register in outer scope
                     scope[out_name] = boundary_data_node_id
 
-    def _handle_connections(
-        self, 
-        node: Any, 
-        node_id: str, 
+    def _handle_input_connections(
+        self,
+        node: Any,
+        node_id: str,
         prefix: str,
-        nodes_out: List[VizNode], 
-        edges_out: List[VizEdge], 
+        nodes_out: List[VizNode],
+        edges_out: List[VizEdge],
         scope: Dict[str, str],
-        parent_pipeline: Optional[Pipeline] = None,
     ):
-        """Handle input/output connections for any node type."""
-        # 1. Inputs
+        """Handle input connections to a node."""
         if hasattr(node, "root_args"):
             for arg in node.root_args:
                 # arg is already the correct name (outer name for PipelineNode)
@@ -296,7 +329,16 @@ class GraphWalker:
                     
                     edges_out.append(VizEdge(source=input_node_id, target=node_id))
 
-        # 2. Outputs
+    def _handle_output_connections(
+        self,
+        node: Any,
+        node_id: str,
+        nodes_out: List[VizNode],
+        edges_out: List[VizEdge],
+        scope: Dict[str, str],
+        parent_pipeline: Optional[Pipeline] = None,
+    ):
+        """Handle output connections from a node."""
         if hasattr(node, "output_name"):
             output_names = node.output_name
             if not isinstance(output_names, tuple):
@@ -333,6 +375,20 @@ class GraphWalker:
                 
                 # Create Edge: FunctionNode -> DataNode
                 edges_out.append(VizEdge(source=node_id, target=data_node_id))
+
+    def _handle_connections(
+        self, 
+        node: Any, 
+        node_id: str, 
+        prefix: str,
+        nodes_out: List[VizNode], 
+        edges_out: List[VizEdge], 
+        scope: Dict[str, str],
+        parent_pipeline: Optional[Pipeline] = None,
+    ):
+        """Handle input/output connections for any node type."""
+        self._handle_input_connections(node, node_id, prefix, nodes_out, edges_out, scope)
+        self._handle_output_connections(node, node_id, nodes_out, edges_out, scope, parent_pipeline)
 
     def _group_data_nodes(self, nodes: List[VizNode], edges: List[VizEdge]) -> tuple[List[VizNode], List[VizEdge]]:
         """Group DataNodes that are inputs to the same node."""

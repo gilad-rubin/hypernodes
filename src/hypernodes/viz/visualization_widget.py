@@ -35,7 +35,7 @@ class PipelineWidget(widgets.HTML):
             group_inputs=group_inputs,
             show_output_types=show_types,
         )
-        graph_data = handler.get_visualization_data()
+        graph_data = handler.get_visualization_data(traverse_collapsed=True)
         
         # 2. Transform to React Flow
         renderer = JSRenderer()

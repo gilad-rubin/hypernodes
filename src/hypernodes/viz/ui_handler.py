@@ -106,11 +106,12 @@ class UIHandler:
         else:
             self.expand_node(node_id)
 
-    def get_visualization_data(self) -> VisualizationGraph:
+    def get_visualization_data(self, traverse_collapsed: bool = False) -> VisualizationGraph:
         """Generate the flat visualization graph based on current state."""
         walker = GraphWalker(
             pipeline=self.pipeline,
             expanded_nodes=self.expanded_nodes,
-            group_inputs=self.group_inputs
+            group_inputs=self.group_inputs,
+            traverse_collapsed=traverse_collapsed
         )
         return walker.get_visualization_data()

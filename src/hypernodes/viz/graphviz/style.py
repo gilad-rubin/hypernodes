@@ -17,7 +17,7 @@ class GraphvizStyle:
     font_name: str = "Inter, Helvetica, Arial, sans-serif"
     font_size: int = 12
     edge_font_size: int = 10
-    background_color: str = "#F8FAFC" # Very light slate/gray
+    background_color: str = "#F8FAFC"  # Very light slate/gray
     edge_color: str = "#64748b"  # Slate-500
     edge_penwidth: str = "1.2"
     arrow_size: str = "0.7"
@@ -29,16 +29,16 @@ class GraphvizStyle:
     
     # Node styles
     function_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#FFFFFF", border_color="#cbd5e1", text_color="#0f172a", accent_color="#4f46e5" # Indigo-600
+        bg_color="#FFFFFF", border_color="#cbd5e1", text_color="#0f172a", accent_color="#4f46e5"  # Indigo-600
     ))
     pipeline_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#fffbeb", border_color="#fcd34d", text_color="#451a03", accent_color="#d97706" # Amber-600
+        bg_color="#fffbeb", border_color="#fcd34d", text_color="#451a03", accent_color="#d97706"  # Amber-600
     ))
     dual_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#fdf4ff", border_color="#f0abfc", text_color="#4a044e", accent_color="#c026d3" # Fuchsia-600
+        bg_color="#fdf4ff", border_color="#f0abfc", text_color="#4a044e", accent_color="#c026d3"  # Fuchsia-600
     ))
     data_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#e2e8f0", border_color="#94a3b8", text_color="#334155", accent_color="#475569" # Slate-600
+        bg_color="#e2e8f0", border_color="#94a3b8", text_color="#334155", accent_color="#475569"  # Slate-600
     ))
     
     # Legacy compatibility properties
@@ -56,6 +56,42 @@ class GraphvizStyle:
 
 
 # --- Themes ---
+
+AUTO_THEME = GraphvizStyle(
+    background_color="var(--hn-surface-bg)",
+    edge_color="var(--hn-edge)",
+    cluster_fill_color="var(--hn-cluster-fill)",
+    cluster_border_color="var(--hn-cluster-border)",
+    cluster_label_color="var(--hn-cluster-text)",
+    function_node=NodeStyle(
+        bg_color="var(--hn-node-bg)",
+        border_color="var(--hn-node-border)",
+        text_color="var(--hn-node-text)",
+        accent_color="var(--hn-func-accent)",
+        accent_text_color="var(--hn-func-text)",
+    ),
+    pipeline_node=NodeStyle(
+        bg_color="var(--hn-pipe-bg)",
+        border_color="var(--hn-pipe-border)",
+        text_color="var(--hn-pipe-text)",
+        accent_color="var(--hn-pipe-accent)",
+        accent_text_color="var(--hn-pipe-accent-text)",
+    ),
+    dual_node=NodeStyle(
+        bg_color="var(--hn-dual-bg)",
+        border_color="var(--hn-dual-border)",
+        text_color="var(--hn-dual-text)",
+        accent_color="var(--hn-dual-accent)",
+        accent_text_color="var(--hn-dual-accent-text)",
+    ),
+    data_node=NodeStyle(
+        bg_color="var(--hn-data-bg)",
+        border_color="var(--hn-data-border)",
+        text_color="var(--hn-data-text)",
+        accent_color="var(--hn-data-accent)",
+        accent_text_color="var(--hn-data-text)",
+    ),
+)
 
 LIGHT_THEME = GraphvizStyle(
     background_color="#F8FAFC",
@@ -106,7 +142,8 @@ LEGACY_DEFAULT = GraphvizStyle(
 )
 
 DESIGN_STYLES: Dict[str, GraphvizStyle] = {
-    "default": LIGHT_THEME, # Modern default
+    "default": AUTO_THEME,  # Modern default (auto-detect)
+    "auto": AUTO_THEME,
     "light": LIGHT_THEME,
     "dark": DARK_THEME,
     "legacy": LEGACY_DEFAULT,
