@@ -77,12 +77,33 @@ class GraphSerializer:
             prefix=""
         )
         
+        # Compute input levels
+        input_levels = self._compute_input_levels()
+        
+        # Fix up edge source levels for parameter inputs based on their declared levels
+        # This ensures edges from inputs originate from the correct scope (e.g. root vs nested)
+        for edge in self.edges:
+            if edge.get("edge_type") == "parameter_flow":
+                source = edge.get("source", "")
+                if isinstance(source, str) and source.startswith("input_"):
+                    param_name = source.replace("input_", "")
+                    if param_name in input_levels:
+                        edge["source_level_id"] = input_levels[param_name]
+        
+        # Compute grouped inputs
+        grouped_inputs = self._identify_grouped_inputs()
+        
         return {
             "levels": self.levels,
             "nodes": self.nodes,
             "edges": self.edges,
-            "input_levels": self._compute_input_levels()
+            "input_levels": input_levels,
+            "grouped_inputs": grouped_inputs
         }
+
+    def get_node_lookup(self) -> Dict[str, Any]:
+        """Expose mapping of node_id -> underlying HyperNode instance."""
+        return dict(self._node_id_to_node)
 
     def _process_pipeline(
         self,
@@ -709,3 +730,53 @@ class GraphSerializer:
                 input_levels[param] = "root"
 
         return input_levels
+
+    def _identify_grouped_inputs(self) -> Dict[str, Dict[str, List[str]]]:
+        """Identify grouped inputs for each node.
+        
+        Returns:
+            Dict[node_id, {"bound": [params], "unbound": [params]}]
+        """
+        input_consumers = {}
+        for edge in self.edges:
+            if edge.get("edge_type") == "parameter_flow":
+                source = edge.get("source")
+                target = edge.get("target")
+                if isinstance(source, str) and source.startswith("input_"):
+                    param_name = source.replace("input_", "")
+                    if param_name not in input_consumers:
+                        input_consumers[param_name] = set()
+                    input_consumers[param_name].add(target)
+
+        # Identify bound inputs
+        bound_inputs_set = set()
+        for level in self.levels:
+            bound_inputs_set.update(level.get("bound_inputs_at_this_level", []))
+
+        # Group inputs by consumer
+        grouped_inputs_by_consumer = {}
+        for param_name, consumers in input_consumers.items():
+            if len(consumers) == 1:
+                consumer_id = next(iter(consumers))
+                is_bound = param_name in bound_inputs_set
+                group_type = "bound" if is_bound else "unbound"
+                if consumer_id not in grouped_inputs_by_consumer:
+                    grouped_inputs_by_consumer[consumer_id] = {"bound": [], "unbound": []}
+                grouped_inputs_by_consumer[consumer_id][group_type].append(param_name)
+
+        # Filter groups (min size 2)
+        final_groups = {}
+        for consumer_id, groups in grouped_inputs_by_consumer.items():
+            has_groups = False
+            filtered_groups = {"bound": [], "unbound": []}
+            
+            for group_type in ["bound", "unbound"]:
+                params = groups[group_type]
+                if len(params) >= 2:
+                    filtered_groups[group_type] = sorted(params)
+                    has_groups = True
+            
+            if has_groups:
+                final_groups[consumer_id] = filtered_groups
+                
+        return final_groups

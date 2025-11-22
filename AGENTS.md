@@ -560,6 +560,7 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - **Rendering Engines** (`visualization_engines.py`): Pluggable backends (Graphviz, IPyWidget, etc.)
 - **Legacy Visualization** (`visualization.py`): Backwards-compatible Graphviz rendering
 - **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations
+  - **Fix (Nov 2025)**: Changed from base64 data URI to `srcdoc` attribute for better VSCode notebook compatibility
 
 ### GraphSerializer (`viz/graph_serializer.py`)
 

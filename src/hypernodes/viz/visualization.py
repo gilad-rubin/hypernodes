@@ -1404,19 +1404,25 @@ def visualize(
         from my_viz import CustomEngine
         pipeline.visualize(engine=CustomEngine())
     """
-    from .graph_serializer import GraphSerializer
+    from .ui_handler import UIHandler
     from .visualization_engines import get_engine
-    
-    # Step 1: Serialize the pipeline into frontend-agnostic data
-    serializer = GraphSerializer(pipeline)
-    graph_data = serializer.serialize(depth=depth)
-    
+
+    handler = UIHandler(pipeline, depth=depth)
+
     # Step 2: Resolve engine
     if isinstance(engine, str):
         engine_instance = get_engine(engine)
+        engine_name = engine
     else:
         engine_instance = engine
-    
-    # Step 3: Render using the engine
-    return engine_instance.render(graph_data, filename=filename, **engine_options)
+        engine_name = "custom"
 
+    # Step 3: Build graph data + frontend-specific options through the handler
+    graph_data, frontend_options = handler.prepare_for_engine(
+        engine_name,
+        depth=depth if depth is not None else handler.depth,
+        **engine_options,
+    )
+
+    # Step 4: Render using the engine
+    return engine_instance.render(graph_data, filename=filename, **frontend_options)

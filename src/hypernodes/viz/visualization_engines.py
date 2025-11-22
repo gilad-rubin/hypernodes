@@ -6,7 +6,7 @@ for different frontends (Graphviz, IPyWidget, etc.).
 
 import base64
 import json
-from typing import Any, Dict, Literal, Optional, Protocol, Union
+from typing import Any, Dict, List, Literal, Optional, Protocol, Union
 
 try:
     import graphviz
@@ -64,8 +64,8 @@ class GraphvizEngine:
         show_types: bool = True,
         return_type: Literal["auto", "graphviz", "html"] = "auto",
         flatten: bool = False,
-        group_inputs: bool = True,
-        min_arg_group_size: Optional[int] = 2,
+        group_inputs: Optional[bool] = None,
+        min_arg_group_size: Optional[int] = None,
         **kwargs
     ) -> Any:
         """Render serialized graph using Graphviz.
@@ -117,15 +117,27 @@ class GraphvizEngine:
         levels = serialized_graph.get("levels", [])
         nodes = serialized_graph.get("nodes", [])
         edges = serialized_graph.get("edges", [])
+        applied_options = serialized_graph.get("applied_options") or {}
         node_map = {node["id"]: node for node in nodes}
         bound_inputs_set = set().union(
             *[set(level.get("bound_inputs_at_this_level", [])) for level in levels]
         )
-        grouped_inputs = self._compute_grouped_inputs(
-            edges,
-            bound_inputs_set,
-            group_inputs=group_inputs,
-            min_group_size=min_arg_group_size,
+        effective_group_inputs = (
+            group_inputs
+            if group_inputs is not None
+            else applied_options.get("group_inputs", True)
+        )
+        effective_min_group_size = (
+            min_arg_group_size
+            if min_arg_group_size is not None
+            else applied_options.get("min_arg_group_size", 2)
+        )
+        grouped_inputs = self._select_grouped_inputs(
+            serialized_graph.get("grouped_inputs", {}),
+            fallback_edges=edges,
+            bound_inputs_set=bound_inputs_set,
+            group_inputs=effective_group_inputs,
+            min_group_size=effective_min_group_size,
         )
         
         # Build level hierarchy and place nodes/inputs/groups in their levels
@@ -539,6 +551,39 @@ class GraphvizEngine:
             if kept:
                 filtered[consumer] = kept
         return filtered
+
+    def _select_grouped_inputs(
+        self,
+        grouped_inputs: Dict[str, Dict[str, list[str]]],
+        fallback_edges: List[Dict[str, Any]],
+        bound_inputs_set: set[str],
+        group_inputs: bool,
+        min_group_size: Optional[int],
+    ) -> Dict[str, Dict[str, list[str]]]:
+        """Prefer pre-computed grouped inputs, falling back to local computation."""
+        if not group_inputs or min_group_size is None:
+            return {}
+
+        if grouped_inputs:
+            filtered: Dict[str, Dict[str, list[str]]] = {}
+            for consumer, groups in grouped_inputs.items():
+                bound = [
+                    p for p in groups.get("bound", []) if len(groups.get("bound", [])) >= min_group_size
+                ]
+                unbound = [
+                    p for p in groups.get("unbound", []) if len(groups.get("unbound", [])) >= min_group_size
+                ]
+                if bound or unbound:
+                    filtered[consumer] = {"bound": sorted(bound), "unbound": sorted(unbound)}
+            return filtered
+
+        # Backward compatibility: compute if serializer did not provide data
+        return self._compute_grouped_inputs(
+            fallback_edges,
+            bound_inputs_set,
+            group_inputs=True,
+            min_group_size=min_group_size,
+        )
 
     def _create_group_label(
         self,
