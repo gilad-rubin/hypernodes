@@ -5,8 +5,8 @@ import ipywidgets as widgets
 
 from .js.html_generator import generate_widget_html
 from .js.renderer import JSRenderer
-from .ui_handler import UIHandler
 from .layout_estimator import LayoutEstimator
+from .ui_handler import UIHandler
 
 
 class PipelineWidget(widgets.HTML):

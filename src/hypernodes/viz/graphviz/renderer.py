@@ -1,5 +1,4 @@
 import re
-import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
 
 try:
@@ -511,12 +510,18 @@ class GraphvizRenderer:
         return dot
 
     def compute_layout(self, graph_data: VisualizationGraph) -> Dict[str, Any]:
-        """Compute layout using Graphviz and return positions."""
+        """Compute layout using Graphviz and return JSON data."""
+        if not GRAPHVIZ_AVAILABLE:
+            raise ImportError("Graphviz is not installed")
+
         dot = self._build_dot(graph_data)
-        # Use json format to get positions
-        json_data = dot.pipe(format="json").decode("utf-8")
+        
+        # Render to JSON
+        # format='json' returns a bytes object containing JSON
+        json_bytes = dot.pipe(format='json')
+        
         import json
-        return json.loads(json_data)
+        return json.loads(json_bytes.decode('utf-8'))
 
     def render(self, graph_data: VisualizationGraph) -> str:
         """Render the graph to SVG."""
