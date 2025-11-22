@@ -6,6 +6,7 @@ import ipywidgets as widgets
 from .js.html_generator import generate_widget_html
 from .js.renderer import JSRenderer
 from .ui_handler import UIHandler
+from .layout_estimator import LayoutEstimator
 
 
 class PipelineWidget(widgets.HTML):
@@ -37,17 +38,24 @@ class PipelineWidget(widgets.HTML):
         )
         graph_data = handler.get_visualization_data(traverse_collapsed=True)
         
-        # 2. Transform to React Flow
+        # 2. Estimate Layout Dimensions (Python-side)
+        # We do this BEFORE React Flow transform to use the rich structure
+        estimator = LayoutEstimator(graph_data)
+        est_width, est_height = estimator.estimate()
+        
+        # Enforce minimums
+        est_height = max(400, est_height)
+        est_width = max(600, est_width)
+        
+        # 3. Transform to React Flow
         renderer = JSRenderer()
         react_flow_data = renderer.render(
             graph_data,
             theme=theme,
             initial_depth=depth or 1,
             theme_debug=theme_debug,
+            pan_on_scroll=False, # Force disable scroll hijacking
         )
-        
-        # 3. Calculate Height
-        estimated_height = self._calculate_initial_height(react_flow_data)
         
         # 4. Generate HTML
         html_content = generate_widget_html(react_flow_data)
@@ -67,29 +75,33 @@ class PipelineWidget(widgets.HTML):
         </style>
         """
 
+        # We set the iframe size to the estimated size
+        # This ensures the notebook cell expands to fit the graph
         iframe_html = (
             f"{css_fix}"
             f'<iframe srcdoc="{escaped_html}" '
-            f'width="100%" height="{estimated_height}" frameborder="0" '
-            f'style="border: none; width: 95%; max-width: 1600px; margin: 0; height: {estimated_height}px; display: block; background: transparent;" '
+            f'width="{est_width}" height="{est_height}" frameborder="0" '
+            f'style="border: none; width: 100%; min-width: {est_width}px; height: {est_height}px; display: block; background: transparent;" '
             f'sandbox="allow-scripts allow-same-origin allow-popups allow-forms">'
             f"</iframe>"
         )
         super().__init__(value=iframe_html, **kwargs)
 
-    def _calculate_initial_height(self, graph: Dict[str, Any]) -> int:
-        """Estimate the required height based on graph structure."""
-        try:
-            nodes = graph.get("nodes", [])
-            num_nodes = len(nodes)
-            
-            # Linear scaling: Base 800 + 100px per node, capped at 3000
-            calculated = 800 + (num_nodes * 100)
-            return min(3000, calculated)
-                
-        except Exception:
-            return 600
-
     def _repr_html_(self) -> str:
         """Fallback for environments that prefer raw HTML over widgets."""
         return self.value
+
+def transform_to_react_flow(
+    graph_data: Any,
+    theme: str = "CYBERPUNK",
+    initial_depth: int = 1,
+    theme_debug: bool = False,
+) -> Dict[str, Any]:
+    """Transform graph data to React Flow format (helper)."""
+    renderer = JSRenderer()
+    return renderer.render(
+        graph_data,
+        theme=theme,
+        initial_depth=initial_depth,
+        theme_debug=theme_debug,
+    )

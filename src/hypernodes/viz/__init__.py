@@ -37,7 +37,8 @@ def visualize(
             
         # Static rendering
         handler = UIHandler(pipeline, depth=depth)
-        graph_data = handler.get_visualization_data()
+        # For static Graphviz, don't traverse collapsed pipelines (they should remain truly collapsed)
+        graph_data = handler.get_visualization_data(traverse_collapsed=False)
         
         renderer = GraphvizRenderer(style=kwargs.get("style", "default"))
         svg_content = renderer.render(graph_data)

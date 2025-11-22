@@ -27,7 +27,7 @@ class UIHandler:
         self,
         pipeline: Pipeline,
         depth: Optional[int] = 1,
-        group_inputs: bool = True,
+        group_inputs: bool = False,
         show_output_types: bool = False,
     ):
         self.pipeline = pipeline
@@ -106,7 +106,7 @@ class UIHandler:
         else:
             self.expand_node(node_id)
 
-    def get_visualization_data(self, traverse_collapsed: bool = False) -> VisualizationGraph:
+    def get_visualization_data(self, traverse_collapsed: bool = True) -> VisualizationGraph:
         """Generate the flat visualization graph based on current state."""
         walker = GraphWalker(
             pipeline=self.pipeline,

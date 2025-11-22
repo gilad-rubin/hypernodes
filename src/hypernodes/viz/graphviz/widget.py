@@ -1,70 +1,9 @@
-import uuid
-import html
-from typing import Any, Optional
-
-import ipywidgets as widgets
-from IPython.display import display
-
-from ..pipeline import Pipeline
-from ..ui_handler import UIHandler
-from .renderer import GraphvizRenderer
-
-
-class GraphvizWidget(widgets.VBox):
-    """Interactive Graphviz widget for Jupyter notebooks."""
-
-    def __init__(
-        self,
-        pipeline: Pipeline,
-        theme: str = "default",
-        depth: Optional[int] = 1,
-        **kwargs: Any,
-    ):
-        super().__init__(**kwargs)
-        
-        self.pipeline = pipeline
-        self.handler = UIHandler(pipeline, depth=depth)
-        self.renderer = GraphvizRenderer(style=theme)
-        self.uid = str(uuid.uuid4())[:8]
-        
-        # Communication channel (hidden input)
-        # We use a Text widget that JS will write to
-        self.comm = widgets.Text(value="", layout=widgets.Layout(display="none"))
-        self.comm.add_class(f"hn-comm-{self.uid}")
-        self.comm.observe(self._on_comm_message, names="value")
-        
-        # Display area for SVG
-        self.html_out = widgets.HTML(
-            value="Rendering...",
-            layout=widgets.Layout(width="100%", overflow="auto")
-        )
-        
-        self.children = [self.html_out, self.comm]
-        
-        # Initial render
-        self._render()
-
-    def _on_comm_message(self, change: Any) -> None:
-        """Handle messages from JavaScript."""
-        msg = change["new"]
-        if not msg:
-            return
-            
-        # Reset comm buffer to allow re-sending same message
-        self.comm.value = ""
-        
-        try:
-            if msg.startswith("expand:"):
-                node_id = msg.split(":", 1)[1]
-                self.handler.toggle_node(node_id)
-                self._render()
-        except Exception as e:
-            self.html_out.value = f"<div style='color:red'>Error: {e}</div>"
-
     def _render(self) -> None:
         """Render the graph and update the HTML widget."""
         try:
-            graph_data = self.handler.get_visualization_data()
+            # For Graphviz (static), don't traverse collapsed pipelines
+            # traverse_collapsed=True is for interactive widgets only
+            graph_data = self.handler.get_visualization_data(traverse_collapsed=False)
             svg_content = self.renderer.render(graph_data)
             
             # Inject the interaction script
@@ -78,6 +17,14 @@ class GraphvizWidget(widgets.VBox):
                 // The SVG is rendered in the previous sibling's child (the HTML widget)
                 // We attach the listener to the container of this script
                 const container = document.currentScript.parentElement;
+                
+                // Add mouseover/mouseout listeners to the container
+                container.addEventListener('mouseenter', () => {{
+                    // When mouse is over the graph, we want scrolling to pan/zoom IF enabled
+                    // But user requested scrolling to scroll the notebook.
+                    // Graphviz SVG is wrapped in a div with overflow:auto, so it scrolls internally if content overflows.
+                    // This is the default browser behavior. 
+                }});
                 
                 container.addEventListener('click', function(e) {{
                     // Traverse up to find anchor tag
@@ -114,4 +61,3 @@ class GraphvizWidget(widgets.VBox):
             
         except Exception as e:
             self.html_out.value = f"<div style='color:red'>Render Error: {e}</div>"
-

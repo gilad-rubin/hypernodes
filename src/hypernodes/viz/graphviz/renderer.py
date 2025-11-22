@@ -9,6 +9,7 @@ try:
 except ImportError:
     GRAPHVIZ_AVAILABLE = False
 
+from ..layout_estimator import LayoutEstimator
 from ..structures import (
     DataNode,
     DualNode,
@@ -20,7 +21,6 @@ from ..structures import (
 )
 from ..utils import read_viz_asset
 from .style import DESIGN_STYLES, NodeStyle
-
 
 COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
     "var(--hn-node-bg)": "#100001",
@@ -164,14 +164,18 @@ def _parse_svg_length(length: Optional[str]) -> Optional[float]:
     return value
 
 
-def _make_svg_responsive(svg_data: str) -> str:
+def _make_svg_responsive(svg_data: str, est_width: float = 800, est_height: float = 600) -> str:
     """Adjust Graphviz SVG output for responsive display inside Jupyter cells."""
     cleaned_svg = _strip_svg_prolog(svg_data)
     try:
         ET.register_namespace("", "http://www.w3.org/2000/svg")
         root = ET.fromstring(cleaned_svg)
 
+        # We prefer to use the estimated dimensions from LayoutEstimator if available
+        # But we also respect what Graphviz calculated if it's reasonable
+        
         width_px = _parse_svg_length(root.attrib.get("width"))
+        height_px = _parse_svg_length(root.attrib.get("height"))
 
         for attr in ("width", "height"):
             if attr in root.attrib:
@@ -182,12 +186,19 @@ def _make_svg_responsive(svg_data: str) -> str:
 
         existing_style = root.attrib.get("style", "")
         style_bits = [bit for bit in existing_style.split(";") if bit]
-        if width_px:
-            adjusted_width = max(width_px - 48.0, width_px * 0.85, 120.0)
-            style_bits.append(f"width:min(100%, {adjusted_width:.2f}px)")
-        else:
-            style_bits.append("width:100%")
-        style_bits.extend(["max-width:100%", "height:auto", "display:block"])
+        
+        # Use the larger of Graphviz calculated vs Estimated for container sizing
+        # This ensures we don't crop, but also don't shrink too much
+        final_width = max(width_px or 0, est_width)
+        final_height = max(height_px or 0, est_height)
+        
+        style_bits.append(f"width:{final_width}px")
+        style_bits.append(f"height:{final_height}px")
+        
+        # Ensure it doesn't overflow max width of cell but allows scrolling
+        style_bits.append("max-width:none") 
+        style_bits.append("display:block")
+        
         root.attrib["style"] = ";".join(dict.fromkeys(style_bits)) + ";"
 
         return ET.tostring(root, encoding="unicode")
@@ -411,10 +422,60 @@ class GraphvizRenderer:
             return svg_data.replace("</svg>", style_block + "</svg>")
         return svg_data + style_block
 
+    def _build_id_mapping(self, graph_data: VisualizationGraph) -> Dict[str, str]:
+        """Build a mapping from raw node IDs to human-readable Graphviz identifiers.
+        
+        This ensures that tooltips and internal SVG IDs use descriptive names
+        instead of raw Python object IDs. These IDs become the SVG <title> elements
+        which appear as tooltips when hovering over nodes.
+        """
+        mapping = {}
+        used_ids = set()
+        
+        for node in graph_data.nodes:
+            # Generate base readable ID - use actual names without prefixes
+            # since these become tooltips
+            if isinstance(node, FunctionNode):
+                readable_id = node.function_name
+            elif isinstance(node, PipelineNode):
+                readable_id = node.label
+            elif isinstance(node, DataNode):
+                readable_id = node.name
+            elif isinstance(node, GroupDataNode):
+                # This should rarely appear now that group_inputs defaults to False
+                readable_id = "Grouped Inputs"
+            else:
+                # Fallback for unknown types
+                readable_id = f"node_{abs(hash(node.id)) % 100000}"
+            
+            # Ensure uniqueness by appending counter if needed
+            base_id = readable_id
+            counter = 1
+            while readable_id in used_ids:
+                readable_id = f"{base_id}_{counter}"
+                counter += 1
+            
+            used_ids.add(readable_id)
+            mapping[node.id] = readable_id
+        
+        return mapping
+
     def render(self, graph_data: VisualizationGraph) -> str:
         """Render the graph to SVG."""
         if not GRAPHVIZ_AVAILABLE:
             return "<div>Graphviz not installed</div>"
+
+        # Build ID mapping for human-readable identifiers
+        self._id_mapping = self._build_id_mapping(graph_data)
+        
+        # Estimate layout dimensions to set initial container size
+        # This mimics the behavior in the interactive JS widget
+        estimator = LayoutEstimator(graph_data)
+        est_width, est_height = estimator.estimate()
+        
+        # Enforce minimums
+        est_height = max(400, est_height)
+        est_width = max(600, est_width)
 
         dot = graphviz.Digraph()
 
@@ -436,7 +497,14 @@ class GraphvizRenderer:
             fontname=self.style.font_name,
             overlap="false",
             outputorder="nodesfirst",
+            # Add size hint to graphviz (though SVG ignores it mostly, it helps ratio)
+            ratio="fill", 
+            size=f"{est_width/96},{est_height/96}!" # Convert pixels to inches for Graphviz
         )
+        
+        # Pass estimated dimensions to post-processor
+        self._est_width = est_width
+        self._est_height = est_height
 
         # Enhanced Node Attributes
         dot.attr(
@@ -479,8 +547,9 @@ class GraphvizRenderer:
 
             for node in nodes_by_parent[parent_id]:
                 if isinstance(node, PipelineNode) and node.is_expanded:
-                    # Create cluster
-                    with container.subgraph(name=f"cluster_{node.id}") as c:
+                    # Create cluster with mapped ID
+                    mapped_id = self._id_mapping.get(node.id, node.id)
+                    with container.subgraph(name=f"cluster_{mapped_id}") as c:
                         c.attr(label=node.label)
                         c.attr(style="rounded,dashed")
                         c.attr(color=cluster_border_color)
@@ -502,11 +571,11 @@ class GraphvizRenderer:
         # Start from root (None parent)
         add_nodes_recursive(None, dot)
 
-        # Add edges
+        # Add edges using mapped IDs
         for edge in graph_data.edges:
             dot.edge(
-                edge.source,
-                edge.target,
+                self._id_mapping.get(edge.source, edge.source),
+                self._id_mapping.get(edge.target, edge.target),
                 label=edge.label,
             )
 
@@ -516,12 +585,15 @@ class GraphvizRenderer:
             # Post-process to swap HEX for VARS
             svg_data = self._post_process_svg(svg_data)
 
-            return _wrap_svg_html(_make_svg_responsive(svg_data))
+            return _wrap_svg_html(_make_svg_responsive(svg_data, self._est_width, self._est_height))
         except Exception as e:
             return f"<div>Error rendering graph: {e}</div>"
 
     def _add_node(self, node: VizNode, container):
         """Add a single node to the graph."""
+        # Use mapped ID instead of raw node.id
+        node_id = self._id_mapping.get(node.id, node.id)
+        
         if isinstance(node, FunctionNode):
             node_style = (
                 self.style.dual_node
@@ -535,7 +607,7 @@ class GraphvizRenderer:
             )
 
             container.node(
-                node.id,
+                node_id,
                 label=label,
             )
 
@@ -550,7 +622,7 @@ class GraphvizRenderer:
 
             # Add URL for interactivity
             container.node(
-                node.id,
+                node_id,
                 label=label,
                 URL=f"hypernodes:expand?id={node.id}",
                 tooltip="Click to expand",
@@ -566,7 +638,7 @@ class GraphvizRenderer:
             )
 
             container.node(
-                node.id,
+                node_id,
                 label=label,
             )
 
@@ -580,7 +652,7 @@ class GraphvizRenderer:
             )
 
             container.node(
-                node.id,
+                node_id,
                 label=label,
             )
 
@@ -634,6 +706,7 @@ class GraphvizRenderer:
 
         # Note: STYLE="ROUNDED" works on TABLE in some versions, but ignored in others.
         # We rely on the outer shape="plain" so the table is the visual node.
+        # Tooltips are automatically generated from the node ID by Graphviz.
 
         return f'''<
         <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED">

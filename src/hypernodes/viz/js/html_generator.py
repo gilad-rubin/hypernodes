@@ -61,9 +61,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     {_read_asset("custom.css", "css") or ""}
     <style>
         /* Reset and Base Styles */
-        body {{ margin: 0; overflow: hidden; background: transparent; color: #e5e7eb; font-family: 'Inter', system-ui, -apple-system, sans-serif; }}
+        body {{ margin: 0; overflow: auto; background: transparent; color: #e5e7eb; font-family: 'Inter', system-ui, -apple-system, sans-serif; }}
         .react-flow__attribution {{ display: none; }}
-        #root {{ min-height: 100vh; min-width: 100vw; background: transparent; display: flex; align-items: center; justify-content: center; }}
+        #root {{ min-height: 100vh; min-width: 100vw; background: transparent; display: flex; align-items: flex-start; justify-content: center; }}
         #fallback {{ font-size: 13px; letter-spacing: 0.4px; color: #94a3b8; }}
         
         /* Canvas Outline */
@@ -404,6 +404,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const [layoutedNodes, setLayoutedNodes] = useState([]);
         const [layoutedEdges, setLayoutedEdges] = useState([]);
         const [layoutError, setLayoutError] = useState(null);
+        const [graphHeight, setGraphHeight] = useState(600);
 
         useEffect(() => {
           if (!nodes.length) return;
@@ -426,21 +427,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
             
             const mapToElk = (n) => {
-                let width = 240;
-                let height = 60;
+                let width = 320;
+                let height = 90;
                 
                 if (n.data?.nodeType === 'DATA') {
-                    width = 120;
-                    height = 30;
-                    if (n.data.label) width = Math.max(100, n.data.label.length * 8 + 40);
-                } else if (n.data?.nodeType === 'INPUT') {
-                    width = 140;
-                    height = 40;
-                } else if (n.data?.nodeType === 'INPUT_GROUP') {
                     width = 160;
+                    height = 40;
+                    if (n.data.label) width = Math.max(120, n.data.label.length * 8 + 40);
+                } else if (n.data?.nodeType === 'INPUT') {
+                    width = 180;
+                    height = 50;
+                } else if (n.data?.nodeType === 'INPUT_GROUP') {
+                    width = 200;
                     // Dynamic height based on number of inputs
                     const paramCount = n.data.params ? n.data.params.length : 1;
-                    height = 30 + (paramCount * 16);
+                    height = 40 + (paramCount * 16);
                 }
                 
                 if (n.style && n.style.width) width = n.style.width;
@@ -470,11 +471,15 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               layoutOptions: {
                 'elk.algorithm': 'layered',
                 'elk.direction': 'DOWN',
-                'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+                'elk.edgeRouting': 'ORTHOGONAL',
+                'elk.layered.spacing.nodeNodeBetweenLayers': '50',
                 'elk.spacing.nodeNode': '40',
+                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+                'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
                 'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', // Better placement (Task 14)
-                'elk.edgeRouting': 'SPLINES', // Better edge routing (Task 7)
+                'elk.resize.fixed': 'false',
+                // Separate ports for cleaner routing (Task 7)
+                'elk.portConstraints': 'FIXED_ORDER', 
               },
               children: rootChildren.map(mapToElk),
               edges: visibleEdges.map(e => ({
@@ -511,6 +516,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               (graph.children || []).forEach(n => traverse(n));
               setLayoutedNodes(positionedNodes);
               setLayoutedEdges(visibleEdges);
+              if (graph.height) setGraphHeight(graph.height);
             })
             .catch((err) => {
                 console.error('ELK layout error', err);
@@ -525,7 +531,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
         }, [nodes, edges]);
 
-        return { layoutedNodes, layoutedEdges, layoutError };
+        return { layoutedNodes, layoutedEdges, layoutError, graphHeight };
       };
 
       const initialData = JSON.parse(document.getElementById('graph-data').textContent || '{"nodes":[],"edges":[]}');
@@ -535,6 +541,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
       const themePreference = normalizeThemePref(initialData.meta?.theme_preference || 'auto');
       const showThemeDebug = Boolean(initialData.meta?.theme_debug);
+      const panOnScroll = Boolean(initialData.meta?.pan_on_scroll);
 
       const parseColorString = (value) => {
         if (!value) return null;
@@ -715,12 +722,25 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             // If collapsing, we need to find all descendants and collapse them too
             const descendantsToCollapse = new Set();
             if (!willExpand) {
-                const prefix = `${nodeId}__`;
+                // Robust descendant finding via parentNode
+                const childrenMap = new Map();
                 nds.forEach(n => {
-                    if (n.id.startsWith(prefix)) {
-                        descendantsToCollapse.add(n.id);
+                    if (n.parentNode) {
+                         if (!childrenMap.has(n.parentNode)) childrenMap.set(n.parentNode, []);
+                         childrenMap.get(n.parentNode).push(n.id);
                     }
                 });
+                
+                const getDescendants = (id) => {
+                    const children = childrenMap.get(id) || [];
+                    let res = [...children];
+                    children.forEach(childId => {
+                        res = res.concat(getDescendants(childId));
+                    });
+                    return res;
+                };
+                
+                getDescendants(nodeId).forEach(id => descendantsToCollapse.add(id));
             }
 
             return nds.map((node) => {
@@ -788,7 +808,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [nodes.map(n => n.data.isExpanded).join(',')]);
 
         const visibleEdges = useMemo(() => {
-            // ... (Edge hoisting logic kept same but robustified)
+            const nodeMap = new Map(nodes.map(n => [n.id, n]));
             const parentMap = new Map();
             const expansionMap = new Map();
             nodes.forEach(n => {
@@ -812,6 +832,16 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const processedEdges = new Set();
 
             edges.forEach(edge => {
+                const sourceNode = nodeMap.get(edge.source);
+                const targetNode = nodeMap.get(edge.target);
+
+                // Skip edges that connect directly to an expanded pipeline wrapper.
+                const sourceExpandedPipeline = sourceNode?.data?.nodeType === 'PIPELINE' && sourceNode.data.isExpanded;
+                const targetExpandedPipeline = targetNode?.data?.nodeType === 'PIPELINE' && targetNode.data.isExpanded;
+                if (sourceExpandedPipeline || targetExpandedPipeline) {
+                    return;
+                }
+
                 const sourceVis = getVisibleAncestor(edge.source);
                 const targetVis = getVisibleAncestor(edge.target);
 
@@ -826,23 +856,42 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             return newEdges;
         }, [nodes, edges]);
 
-        const { layoutedNodes, layoutedEdges, layoutError } = useLayout(nodes, visibleEdges);
+        const { layoutedNodes, layoutedEdges, layoutError, graphHeight } = useLayout(nodes, visibleEdges);
         const { fitView } = useReactFlow();
+
+        // --- Iframe Resize Logic (Task 2) ---
+        useEffect(() => {
+            if (graphHeight) {
+                const desiredHeight = Math.max(600, graphHeight + 100);
+                try {
+                    // Try to resize the hosting iframe to avoid internal scrollbars
+                    if (window.frameElement) {
+                        window.frameElement.style.height = desiredHeight + 'px';
+                    }
+                } catch (e) {
+                    // Ignore cross-origin errors or missing frameElement
+                }
+            }
+        }, [graphHeight]);
 
         // --- Resize Handling (Task 2) ---
         useEffect(() => {
             const handleResize = () => {
-                fitView({ padding: 0.05, duration: 200, minZoom: 0.6 });
+                fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1 });
             };
             window.addEventListener('resize', handleResize);
             return () => window.removeEventListener('resize', handleResize);
         }, [fitView]);
         
-        // Re-fit when layout changes
+        // Re-fit when layout changes - Forced recentering after slight delay to allow iframe resize
         useEffect(() => {
             if (layoutedNodes.length > 0) {
-                // No animation duration for instant appearance
-                window.requestAnimationFrame(() => fitView({ padding: 0.05, duration: 0, minZoom: 0.6 }));
+                // Immediate fit
+                window.requestAnimationFrame(() => fitView({ padding: 0.1, duration: 0, minZoom: 0.5, maxZoom: 1 }));
+                // Delayed fit to catch iframe resize
+                setTimeout(() => {
+                    fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1 });
+                }, 100);
             }
         }, [layoutedNodes, fitView]);
 
@@ -867,8 +916,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
         return html`
           <div 
-            className=${`w-full h-screen relative overflow-hidden transition-colors duration-300`}
-            style=${{ backgroundColor: bgColor }}
+            className=${`w-full relative overflow-hidden transition-colors duration-300`}
+            style=${{ backgroundColor: bgColor, height: Math.max(window.innerHeight - 20, graphHeight + 100) + 'px' }}
           >
             <!-- Background Grid -->
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>
@@ -881,10 +930,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               onNodesChange=${onNodesChange}
               onEdgesChange=${onEdgesChange}
               fitView
-              fitViewOptions=${{ minZoom: 0.6 }}
+              fitViewOptions=${{ padding: 0.1, minZoom: 0.5, maxZoom: 1 }}
               minZoom=${0.1}
+              maxZoom=${2}
               className=${'bg-transparent'}
-              panOnScroll=${true}
+              panOnScroll=${panOnScroll}
               zoomOnScroll=${false}
               panOnDrag=${true}
               zoomOnPinch=${true} 

@@ -19,6 +19,7 @@ class JSRenderer:
         theme: str = "CYBERPUNK",
         initial_depth: int = 1,
         theme_debug: bool = False,
+        pan_on_scroll: bool = False,
     ) -> Dict[str, Any]:
         """Transform graph data to React Flow format."""
         nodes = []
@@ -108,5 +109,6 @@ class JSRenderer:
                 "theme_preference": theme,
                 "initial_depth": initial_depth,
                 "theme_debug": theme_debug,
+                "pan_on_scroll": pan_on_scroll,
             },
         }
