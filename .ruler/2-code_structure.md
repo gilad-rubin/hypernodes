@@ -512,10 +512,16 @@ outer.run()  # ✅ Works! No inputs needed
 ## Visualization System Details
 
 The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
+- **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
-- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz_ui.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
+- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
 - **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses `transform_to_react_flow` with handler data).
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
+
+**GraphWalker `traverse_collapsed` parameter (IMPORTANT):**
+- **`traverse_collapsed=False`** (for static Graphviz): Collapsed pipelines remain truly collapsed - no internal structure exposed, no ghost nodes
+- **`traverse_collapsed=True`** (for interactive viz): Pre-fetches internal structure even for collapsed nodes, enabling expand without refetch
+- **Bug Fix (Nov 2024)**: Static Graphviz now uses `traverse_collapsed=False` to prevent ghost text-only nodes appearing in SVG
 
 **UIHandler serialization highlights:**
 - Resolves cross-level edges for nested pipelines (edges point to real inner producers, not wrapper nodes).
@@ -523,3 +529,13 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped input candidates.
 - Supports expansion depth controls (`depth` or interactive expand/collapse) without frontend recomputation.
 - **Input level placement**: Prioritizes deeper (more specific) levels when inputs appear in multiple `unfulfilled_inputs`. This ensures inputs consumed only by nested nodes appear inside the correct container, not at root level.
+
+**Ghost Nodes Issue (FIXED):**
+When `traverse_collapsed=True` was used for static visualizations, collapsed pipelines would expand their internal structure. This created nodes that were referenced in edges but never explicitly added to Graphviz with proper styling. Graphviz would auto-create simple text nodes for these missing references, resulting in "ghost nodes" like:
+```xml
+<g id="node8" class="node">
+<title>retrieve</title>
+<text>retrieve</text>  <!-- No styling! -->
+</g>
+```
+**Solution**: `src/hypernodes/viz/__init__.py` now passes `traverse_collapsed=False` when rendering static Graphviz, ensuring collapsed pipelines stay truly collapsed.

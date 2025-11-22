@@ -427,10 +427,10 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `callbacks.py`: Callback protocol + context + dispatcher
 
 ### Visualization (`src/hypernodes/viz/`)
-- `ui_handler.py`: Backend state manager + serializer for all frontends
+- `ui_handler.py`: Backend state manager + serialization for all frontends
 - `graphviz_ui.py`: Graphviz rendering engine
 - `js_ui.py`: IPyWidget/React Flow rendering helpers
-- `visualization_engine.py`: Pluggable rendering engines (Graphviz, IPyWidget)
+- `visualization_engine.py`: Pluggable engine registry/protocol
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine facade
@@ -556,13 +556,71 @@ outer.run()  # ✅ Works! No inputs needed
 ## Visualization System Details
 
 The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
-- **UIHandler (`ui_handler.py`)**: Backend serializer + state manager powering Graphviz and React Flow frontends. Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with mapping labels.
-- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz_ui.py`) and IPyWidget/React Flow (`js_ui.py`).
-- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses handler data).
-- **Legacy Visualization**: Older helpers in `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
+- **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
+- **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
+- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
+- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses `transform_to_react_flow` with handler data).
+- **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
+
+**GraphWalker `traverse_collapsed` parameter (IMPORTANT):**
+- **`traverse_collapsed=False`** (for static Graphviz): Collapsed pipelines remain truly collapsed - no internal structure exposed, no ghost nodes
+- **`traverse_collapsed=True`** (for interactive viz): Pre-fetches internal structure even for collapsed nodes, enabling expand without refetch
+- **Bug Fix (Nov 2024)**: Static Graphviz now uses `traverse_collapsed=False` to prevent ghost text-only nodes appearing in SVG
 
 **UIHandler serialization highlights:**
-- Resolves cross-level edges for nested pipelines (edges point to inner producers, not wrappers).
+- Resolves cross-level edges for nested pipelines (edges point to real inner producers, not wrapper nodes).
 - Emits mapping labels for input/output remapping (e.g., `"outer → inner"`).
-- Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped inputs.
-- Supports depth controls and interactive expand/collapse without frontend recomputation.
+- Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped input candidates.
+- Supports expansion depth controls (`depth` or interactive expand/collapse) without frontend recomputation.
+- **Input level placement**: Prioritizes deeper (more specific) levels when inputs appear in multiple `unfulfilled_inputs`. This ensures inputs consumed only by nested nodes appear inside the correct container, not at root level.
+
+**Ghost Nodes Issue (FIXED):**
+When `traverse_collapsed=True` was used for static visualizations, collapsed pipelines would expand their internal structure. This created nodes that were referenced in edges but never explicitly added to Graphviz with proper styling. Graphviz would auto-create simple text nodes for these missing references, resulting in "ghost nodes" like:
+```xml
+<g id="node8" class="node">
+<title>retrieve</title>
+<text>retrieve</text>  <!-- No styling! -->
+</g>
+```
+**Solution**: `src/hypernodes/viz/__init__.py` now passes `traverse_collapsed=False` when rendering static Graphviz, ensuring collapsed pipelines stay truly collapsed.
+
+---
+Source: .ruler/visualization_best_practices.md
+---
+# Visualization Best Practices & Lessons Learned
+
+## Key Principles
+
+1.  **Frontend Agnostic Serialization**: Always rely on `GraphSerializer` for computing graph structure (nodes, edges, hierarchy). The rendering engine (Graphviz, Widget) should only handle display concerns.
+2.  **Nested Pipeline Visibility**:
+    *   Inputs to nested pipelines must be visualized at the correct scope (root vs nested).
+    *   Use `GraphSerializer.input_levels` to determine where an input node belongs.
+    *   Ensure `parentNode` in React Flow or clusters in Graphviz respect this hierarchy.
+3.  **Interactive Widget Resilience**:
+    *   **Error Handling**: Javascript errors inside the iframe must be caught and surfaced to the user (not silently fail).
+    *   **Fallback**: Always provide a fallback UI if layout calculation fails (e.g., ELK failure).
+    *   **State Management**: Expansion state of nested nodes must be robust. If a parent collapses, all children (even grandchildren) must be hidden.
+4.  **Layout & Styling**:
+    *   **Auto-Centering**: Trigger `fitView` on resize and layout changes.
+    *   **Theme Matching**: Detect host environment (VSCode) theme and background to blend in seamlessly.
+    *   **Edge Routing**: Use orthogonal or spline routing to avoid edges crossing *behind* nodes.
+    *   **Readability**: Avoid dashed lines for standard data flow. Group inputs logically.
+5.  **Verification**:
+    *   Always verify visualization changes by generating the HTML and inspecting it with a browser (or Playwright tool).
+    *   Check for console errors in the generated HTML.
+    *   Verify correct nesting of nodes (parents vs children).
+
+## Common Pitfalls
+
+*   **Graphviz vs Widget Parity**: Logic for grouping, filtering, and scoping often diverges. Use `GraphSerializer` as the single source of truth.
+*   **Unused Outputs**: Pipelines may declare outputs that aren't used in a specific context. Visualization should filter these to reduce noise, unless explicitly requested.
+*   **Iframe Communication**: Communication between the notebook kernel and the iframe is one-way (HTML injection). State does not persist across re-renders unless handled carefully.
+
+## How to Verify
+
+1.  Create a reproduction script (like `tests/repro_viz_issue.py`) that constructs a representative pipeline.
+2.  Generate the HTML artifact using `PipelineWidget._generate_html()`.
+3.  Open the HTML in a browser and visually inspect:
+    *   Node placement (nesting).
+    *   Edge connections (especially across boundaries).
+    *   Console for errors.

@@ -26,8 +26,8 @@ enabled = true
 output_path = "AGENTS.md"
 
 # [agents.windsurf]
-# enabled = true
-# output_path = ".windsurf/rules/ruler_windsurf_instructions.md"
+# enabled = false
+# output_path = "AGENTS.md"
 
 # [agents.cline]
 # enabled = true

@@ -11,7 +11,12 @@ from ..structures import (
 
 
 class JSRenderer:
-    """Transforms VisualizationGraph to React Flow node/edge structures."""
+    """Transforms VisualizationGraph to React Flow node/edge structures.
+    
+    Layout is performed client-side using ELK (Eclipse Layout Kernel) with
+    the Sugiyama-style layered algorithm, which arranges nodes in hierarchical
+    layers and minimizes edge crossings for clean DAG visualization.
+    """
 
     def render(
         self,
@@ -53,7 +58,7 @@ class JSRenderer:
             elif isinstance(node, PipelineNode):
                 if node.is_expanded:
                     rf_node["type"] = "pipelineGroup"
-                    rf_node["style"] = {"width": 600, "height": 400} # Initial size, ELK will resize
+                    rf_node["style"] = {"width": 600, "height": 400} # Initial size, ELK Sugiyama layout will optimize
                     rf_node["data"].update({
                         "label": node.label,
                         "nodeType": "PIPELINE",

@@ -469,17 +469,41 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const elkGraph = {
               id: 'root',
               layoutOptions: {
+                // Sugiyama-style layered algorithm (like Kedro-viz)
                 'elk.algorithm': 'layered',
                 'elk.direction': 'DOWN',
-                'elk.edgeRouting': 'ORTHOGONAL',
-                'elk.layered.spacing.nodeNodeBetweenLayers': '50',
-                'elk.spacing.nodeNode': '40',
-                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+                
+                // POLYLINE routing for straight edges with gentle curves at corners
+                'elk.edgeRouting': 'POLYLINE',
+                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0', // Gentle curves at corners
+                
+                // Increased spacing to ensure edges don't touch nodes
+                'elk.layered.spacing.nodeNodeBetweenLayers': '80', // Layer separation
+                'elk.spacing.nodeNode': '50', // Space between nodes in same layer
+                'elk.spacing.edgeNode': '50', // Increased from 30 - prevents edge-node contact
+                'elk.spacing.edgeEdge': '20', // Increased from 15 - space between parallel edges
+                
+                // Advanced crossing minimization (Sugiyama algorithm core)
                 'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+                'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+                'elk.layered.thoroughness': '10', // Higher = better quality (default 7)
+                
+                // Node placement for straighter edges
+                'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX', // Better than BRANDES_KOEPF for DAGs
+                'elk.layered.nodePlacement.favorStraightEdges': 'true',
+                
+                // Compaction for tighter, cleaner layout
+                'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+                'elk.layered.compaction.connectedComponents': 'true',
+                
+                // Hierarchical handling for nested pipelines
                 'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
                 'elk.resize.fixed': 'false',
-                // Separate ports for cleaner routing (Task 7)
-                'elk.portConstraints': 'FIXED_ORDER', 
+                
+                // Port and edge aesthetics
+                'elk.portConstraints': 'FIXED_ORDER',
+                'elk.layered.unnecessaryBendpoints': 'false', // Remove redundant bends
+                'elk.layered.mergeEdges': 'false', // Keep edges separate for clarity
               },
               children: rootChildren.map(mapToElk),
               edges: visibleEdges.map(e => ({

@@ -137,75 +137,6 @@ def _strip_svg_prolog(svg_data: str) -> str:
     return "\n".join(lines)
 
 
-def _parse_svg_length(length: Optional[str]) -> Optional[float]:
-    """Convert SVG length strings (pt, in, cm, etc.) to pixels."""
-    if not length:
-        return None
-    try:
-        length = length.strip()
-        unit = "".join(ch for ch in length if ch.isalpha())
-        value_str = "".join(ch for ch in length if (ch.isdigit() or ch in ".-"))
-        value = float(value_str)
-    except ValueError:
-        return None
-
-    unit = unit or "px"
-    unit = unit.lower()
-    if unit == "px":
-        return value
-    if unit == "pt":
-        return value * (96.0 / 72.0)
-    if unit == "in":
-        return value * 96.0
-    if unit == "cm":
-        return value * (96.0 / 2.54)
-    if unit == "mm":
-        return value * (96.0 / 25.4)
-    return value
-
-
-def _make_svg_responsive(svg_data: str, est_width: float = 800, est_height: float = 600) -> str:
-    """Adjust Graphviz SVG output for responsive display inside Jupyter cells."""
-    cleaned_svg = _strip_svg_prolog(svg_data)
-    try:
-        ET.register_namespace("", "http://www.w3.org/2000/svg")
-        root = ET.fromstring(cleaned_svg)
-
-        # We prefer to use the estimated dimensions from LayoutEstimator if available
-        # But we also respect what Graphviz calculated if it's reasonable
-        
-        width_px = _parse_svg_length(root.attrib.get("width"))
-        height_px = _parse_svg_length(root.attrib.get("height"))
-
-        for attr in ("width", "height"):
-            if attr in root.attrib:
-                root.attrib.pop(attr)
-
-        if "viewBox" not in root.attrib:
-            return cleaned_svg
-
-        existing_style = root.attrib.get("style", "")
-        style_bits = [bit for bit in existing_style.split(";") if bit]
-        
-        # Use the larger of Graphviz calculated vs Estimated for container sizing
-        # This ensures we don't crop, but also don't shrink too much
-        final_width = max(width_px or 0, est_width)
-        final_height = max(height_px or 0, est_height)
-        
-        style_bits.append(f"width:{final_width}px")
-        style_bits.append(f"height:{final_height}px")
-        
-        # Ensure it doesn't overflow max width of cell but allows scrolling
-        style_bits.append("max-width:none") 
-        style_bits.append("display:block")
-        
-        root.attrib["style"] = ";".join(dict.fromkeys(style_bits)) + ";"
-
-        return ET.tostring(root, encoding="unicode")
-    except ET.ParseError:
-        return cleaned_svg
-
-
 def _wrap_svg_html(svg_data: str) -> str:
     """Wrap responsive SVG in a scrollable container with theme support."""
     theme_utils = read_viz_asset("theme_utils.js")
@@ -326,8 +257,9 @@ def _wrap_svg_html(svg_data: str) -> str:
 class GraphvizRenderer:
     """Renders VisualizationGraph using Graphviz."""
 
-    def __init__(self, style: str = "default"):
+    def __init__(self, style: str = "default", orient: str = "TB"):
         self.style = DESIGN_STYLES.get(style, DESIGN_STYLES["default"])
+        self.orient = orient if orient in ["TB", "LR", "BT", "RL"] else "TB"
 
     def _post_process_svg(self, svg_data: str) -> str:
         """Replace hex placeholders with CSS variables and inject styles."""
@@ -460,10 +392,10 @@ class GraphvizRenderer:
         
         return mapping
 
-    def render(self, graph_data: VisualizationGraph) -> str:
-        """Render the graph to SVG."""
+    def _build_dot(self, graph_data: VisualizationGraph) -> "graphviz.Digraph":
+        """Build the Graphviz Digraph object."""
         if not GRAPHVIZ_AVAILABLE:
-            return "<div>Graphviz not installed</div>"
+            raise ImportError("Graphviz is not installed")
 
         # Build ID mapping for human-readable identifiers
         self._id_mapping = self._build_id_mapping(graph_data)
@@ -489,17 +421,14 @@ class GraphvizRenderer:
         dot.attr(
             "graph",
             bgcolor=graph_bg,
-            rankdir="TB",
+            rankdir=self.orient,
             splines="spline",  # Smoother lines
-            nodesep="1.05",  # More horizontal space
-            ranksep="1.25",  # More vertical space
+            nodesep="0.6",  # Compact horizontal space
+            ranksep="0.8",  # Compact vertical space
             pad="0.55",
             fontname=self.style.font_name,
             overlap="false",
             outputorder="nodesfirst",
-            # Add size hint to graphviz (though SVG ignores it mostly, it helps ratio)
-            ratio="fill", 
-            size=f"{est_width/96},{est_height/96}!" # Convert pixels to inches for Graphviz
         )
         
         # Pass estimated dimensions to post-processor
@@ -578,14 +507,30 @@ class GraphvizRenderer:
                 self._id_mapping.get(edge.target, edge.target),
                 label=edge.label,
             )
+            
+        return dot
+
+    def compute_layout(self, graph_data: VisualizationGraph) -> Dict[str, Any]:
+        """Compute layout using Graphviz and return positions."""
+        dot = self._build_dot(graph_data)
+        # Use json format to get positions
+        json_data = dot.pipe(format="json").decode("utf-8")
+        import json
+        return json.loads(json_data)
+
+    def render(self, graph_data: VisualizationGraph) -> str:
+        """Render the graph to SVG."""
+        if not GRAPHVIZ_AVAILABLE:
+            return "<div>Graphviz not installed</div>"
 
         try:
+            dot = self._build_dot(graph_data)
             svg_data = dot.pipe(format="svg").decode("utf-8")
 
             # Post-process to swap HEX for VARS
             svg_data = self._post_process_svg(svg_data)
 
-            return _wrap_svg_html(_make_svg_responsive(svg_data, self._est_width, self._est_height))
+            return _wrap_svg_html(_strip_svg_prolog(svg_data))
         except Exception as e:
             return f"<div>Error rendering graph: {e}</div>"
 
@@ -617,15 +562,12 @@ class GraphvizRenderer:
                 title=node.label,
                 subtitle="PIPELINE",
                 style=node_style,
-                is_expandable=True,
             )
 
             # Add URL for interactivity
             container.node(
                 node_id,
                 label=label,
-                URL=f"hypernodes:expand?id={node.id}",
-                tooltip="Click to expand",
             )
 
         elif isinstance(node, DataNode):
@@ -661,7 +603,6 @@ class GraphvizRenderer:
         title: str,
         subtitle: str,
         style: NodeStyle,
-        is_expandable: bool = False,
         is_compact: bool = False,
     ) -> str:
         """Create a clean, professional HTML label mimicking the JS frontend layout."""
@@ -680,6 +621,12 @@ class GraphvizRenderer:
         title_size = "12" if is_compact else "14"
         sub_size = "9" if is_compact else "10"
         padding = "4" if is_compact else "8"
+        
+        # Fixed width for uniform node sizes (approx 250px)
+        # Graphviz HTML tables don't support 'width' on the table itself reliably in all versions,
+        # but we can set width on the main cell.
+        # 250px is a good default size.
+        main_cell_width = "150" if is_compact else "250"
 
         # !!! CRITICAL FIX: Graphviz HTML labels DO NOT support the 'CLASS' attribute on most versions.
         # Attempting to use CLASS causes warnings and they are ignored.
@@ -694,24 +641,14 @@ class GraphvizRenderer:
         accent_color = _color_token_to_hex(style.accent_color, "#4f46e5")
         cluster_text = _color_token_to_hex("var(--hn-cluster-text)", "#475569")
 
-        expand_row = ""
-        if is_expandable:
-            expand_row = f'''
-            <TR>
-                <TD COLSPAN="2" ALIGN="CENTER" CELLPADDING="4">
-                    <FONT POINT-SIZE="9" COLOR="{cluster_text}">Click to expand ↓</FONT>
-                </TD>
-            </TR>
-            '''
-
         # Note: STYLE="ROUNDED" works on TABLE in some versions, but ignored in others.
         # We rely on the outer shape="plain" so the table is the visual node.
         # Tooltips are automatically generated from the node ID by Graphviz.
 
         return f'''<
-        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED">
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED" WIDTH="{main_cell_width}">
             <TR>
-                <TD BORDER="0" CELLPADDING="{padding}">
+                <TD BORDER="0" CELLPADDING="{padding}" WIDTH="{main_cell_width}">
                     <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
                         <TR>
                             <TD VALIGN="TOP" WIDTH="24">
@@ -730,5 +667,4 @@ class GraphvizRenderer:
                     </TABLE>
                 </TD>
             </TR>
-            {expand_row}
         </TABLE>>'''
