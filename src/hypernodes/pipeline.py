@@ -269,7 +269,7 @@ class Pipeline:
         """
         # Handle legacy interactive parameter
         if interactive:
-            from .viz.js_ui import PipelineWidget
+            from .viz.visualization_widget import PipelineWidget
             return PipelineWidget(self, depth=depth, **engine_options)
         
         # For backward compatibility, pass legacy parameters as engine_options

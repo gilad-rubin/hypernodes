@@ -58,3 +58,4 @@ with open(output_path, "w") as f:
     f.write(html_content)
 
 print(f"HTML written to {output_path}")
+

@@ -1,289 +1,6 @@
-import html
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
-
-import ipywidgets as widgets
-
-from .visualization_engine import VisualizationEngine
-
-
-def transform_to_react_flow(
-    serialized_graph: Dict[str, Any],
-    theme: str = "CYBERPUNK",
-    initial_depth: int = 1,
-    theme_debug: bool = False,
-) -> Dict[str, Any]:
-    """Transform serialized graph data to React Flow node/edge structures."""
-    nodes = []
-    edges = []
-
-    # Helper to find group node for a level
-    level_to_group_node = {}
-
-    # Map level_id -> Group Node ID
-    for level in serialized_graph.get("levels", []):
-        pp_node_id = level.get("parent_pipeline_node_id")
-        if pp_node_id:
-            level_to_group_node[level["level_id"]] = pp_node_id
-
-    # --- Pre-processing: Identify Grouped Inputs ---
-    # Use pre-computed groups from serializer
-    grouped_inputs_by_consumer = serialized_graph.get("grouped_inputs", {})
-
-    # Filter groups (min size 2) and track grouped params
-    grouped_param_names = set()
-    for consumer_id, groups in grouped_inputs_by_consumer.items():
-        for group_type in ["bound", "unbound"]:
-            params = groups.get(group_type, [])
-            if len(params) >= 2:
-                grouped_param_names.update(params)
-
-    # Track created data nodes to avoid duplicates: node_id -> { output_name -> data_node_id }
-    node_output_map = {}
-
-    # Determine used outputs (only visualize outputs that are actually connected)
-    edge_sources = set()
-    for edge in serialized_graph.get("edges", []):
-        edge_sources.add(edge["source"])
-
-    # Second pass: Create all nodes (Function Nodes + Data Nodes)
-    for node in serialized_graph.get("nodes", []):
-        node_id = node["id"]
-        node_type = node.get("node_type", "STANDARD")
-
-        # Determine initial expansion state based on depth or pre-calculated state
-        level_id = node.get("level_id", "root")
-        
-        if "is_expanded" in node:
-            is_expanded = node["is_expanded"]
-        else:
-            if level_id == "root":
-                level_depth = 0
-            else:
-                level_depth = level_id.count("__nested_")
-
-            should_expand = level_depth < (initial_depth - 1)
-            is_expanded = node_type == "PIPELINE" and should_expand
-
-        # Determine parent group
-        parent_node_id = level_to_group_node.get(level_id)
-
-        # 1. Create FUNCTION/PIPELINE Node
-        rf_node = {
-            "id": node_id,
-            "type": "pipelineGroup"
-            if (node_type == "PIPELINE" and is_expanded)
-            else "custom",
-            "data": {
-                "label": node.get("label", ""),
-                "nodeType": node_type,
-                "inputs": node.get("inputs", []),
-                "outputs": node.get("output_names", []),  # Kept for metadata
-                "outputTypes": node.get("output_types", []),
-                "theme": theme,
-                "isExpanded": is_expanded,
-            },
-            "position": {"x": 0, "y": 0},
-        }
-
-        if parent_node_id:
-            rf_node["parentNode"] = parent_node_id
-            rf_node["extent"] = "parent"
-
-        if node_type == "PIPELINE" and is_expanded:
-            rf_node["style"] = {"width": 600, "height": 400}
-
-        nodes.append(rf_node)
-
-        # Create Grouped Input Nodes for this consumer
-        if node_id in grouped_inputs_by_consumer:
-            groups = grouped_inputs_by_consumer[node_id]
-            for group_type in ["bound", "unbound"]:
-                params = groups[group_type]
-                if not params:
-                    continue
-
-                group_node_id = f"group_{node_id}_{group_type}"
-                params.sort()
-
-                group_label = "\n".join(params)
-
-                nodes.append(
-                    {
-                        "id": group_node_id,
-                        "type": "custom",
-                        "data": {
-                            "label": group_label,
-                            "nodeType": "INPUT_GROUP",
-                            "inputs": [],
-                            "outputs": [],
-                            "theme": theme,
-                            "isBound": (group_type == "bound"),
-                            "params": params,
-                        },
-                        "position": {"x": 0, "y": 0},
-                        "parentNode": parent_node_id if parent_node_id else None,
-                    }
-                )
-
-                # Create edge from Group -> Consumer
-                edges.append(
-                    {
-                        "id": f"e_{group_node_id}_{node_id}",
-                        "source": group_node_id,
-                        "target": node_id,
-                        "animated": False,
-                        "style": {"stroke": "#64748b", "strokeWidth": 2},
-                        "data": {},
-                    }
-                )
-
-        # 2. Create DATA Nodes for Outputs
-        if not is_expanded:
-            output_names = node.get("output_names", [])
-            output_types = node.get("output_types", [])
-            for idx, out_name in enumerate(output_names):
-                data_node_id = f"data_{node_id}_{out_name}"
-
-                # Register
-                if node_id not in node_output_map:
-                    node_output_map[node_id] = {}
-                node_output_map[node_id][out_name] = data_node_id
-
-                # Create Data Node
-                data_node = {
-                    "id": data_node_id,
-                    "type": "custom",
-                    "data": {
-                        "label": f"{out_name} : {output_types[idx]}" if output_types and idx < len(output_types) else out_name,
-                        "nodeType": "DATA",
-                        "inputs": [],
-                        "outputs": [],
-                        "theme": theme,
-                    },
-                    "position": {"x": 0, "y": 0},
-                    "parentNode": parent_node_id if parent_node_id else None,
-                }
-                nodes.append(data_node)
-
-                # Create Edge: Function -> Data
-                edges.append(
-                    {
-                        "id": f"e_func_data_{node_id}_{out_name}",
-                        "source": node_id,
-                        "target": data_node_id,
-                        "animated": False,
-                        "style": {"stroke": "#94a3b8", "strokeWidth": 2},
-                        "data": {"isDataLink": True},
-                    }
-                )
-
-    # 3. Create INPUT Nodes for Pipeline Inputs
-    input_levels = serialized_graph.get("input_levels", {})
-    input_sources = set()
-    for edge in serialized_graph.get("edges", []):
-        src = edge.get("source")
-        if isinstance(src, str) and src.startswith("input_"):
-            input_sources.add(src)
-
-    for source_id in sorted(input_sources):
-        input_name = source_id.replace("input_", "", 1)
-
-        # Skip if grouped
-        if input_name in grouped_param_names:
-            continue
-
-        target_level = input_levels.get(input_name, "root")
-        parent_node_id = level_to_group_node.get(target_level)
-
-        nodes.append(
-            {
-                "id": source_id,
-                "type": "custom",
-                "data": {
-                    "label": input_name,
-                    "nodeType": "INPUT",
-                    "inputs": [],
-                    "outputs": [input_name],
-                    "theme": theme,
-                },
-                "position": {"x": 0, "y": 0},
-                "parentNode": parent_node_id if parent_node_id else None,
-            }
-        )
-
-    # 4. Create Edges (routing through DataNodes)
-    for edge in serialized_graph.get("edges", []):
-        source = edge["source"]
-        target = edge["target"]
-        edge_id = edge["id"]
-
-        # Skip if source is a grouped input
-        if isinstance(source, str) and source.startswith("input_"):
-            param_name = source.replace("input_", "")
-            if param_name in grouped_param_names:
-                continue
-
-        # Determine if source is a node with DataNode outputs
-        source_data_node = None
-
-        # Extract param name from edge ID if present
-        prefix = f"e_{source}_{target}_"
-        param_name = ""
-        if edge_id.startswith(prefix):
-            param_name = edge_id[len(prefix) :]
-
-        # Try to resolve source to a DataNode
-        if source in node_output_map:
-            outputs = node_output_map[source]
-
-            # 1. Try matching mapping_label source name if available (most accurate)
-            mapping_label = edge.get("mapping_label", "")
-            if mapping_label and "→" in mapping_label:
-                src_part = mapping_label.split("→")[0].strip()
-                if src_part in outputs:
-                    source_data_node = outputs[src_part]
-
-            # 2. Try matching param_name (target input name) to output name
-            if not source_data_node and param_name and param_name in outputs:
-                source_data_node = outputs[param_name]
-
-            # 3. If single output, default to it
-            elif not source_data_node and len(outputs) == 1:
-                source_data_node = list(outputs.values())[0]
-
-        # Final Source/Target
-        final_source = source_data_node if source_data_node else source
-        final_target = target
-
-        rf_edge = {
-            "id": edge_id,
-            "source": final_source,
-            "target": final_target,
-            "animated": False,  # Solid lines (Task 3)
-            "style": {"stroke": "#64748b", "strokeWidth": 2},
-            "data": {},
-        }
-
-        # Hide mapping label? (Task 8)
-        if edge.get("mapping_label"):
-            # rf_edge["label"] = edge["mapping_label"] # Hidden
-            rf_edge["data"]["label"] = edge["mapping_label"]
-
-        edges.append(rf_edge)
-
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "event_index": serialized_graph.get("event_index", {}),
-        "meta": {
-            "theme_preference": theme,
-            "initial_depth": initial_depth,
-            "theme_debug": theme_debug,
-        },
-    }
-
 
 def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     """Generate an HTML document for React Flow rendering.
@@ -297,8 +14,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     def _read_asset(name: str, kind: str) -> Optional[str]:
         """Read an asset file from assets/viz; return None if missing."""
         try:
+            # Adjust path relative to this file: src/hypernodes/viz/js/html_generator.py
+            # Assets are in: assets/viz
+            # So we go up: js -> viz -> hypernodes -> src -> root -> assets
             path = (
-                Path(__file__).resolve().parent.parent.parent.parent
+                Path(__file__).resolve().parent.parent.parent.parent.parent
                 / "assets"
                 / "viz"
                 / name
@@ -552,12 +272,15 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Render Input Node (Compact) ---
         if (data.nodeType === 'INPUT') {
              const isLight = theme === 'light';
+             const isBound = Boolean(data.isBound);
              return html`
-                <div className=${`px-3 py-2 rounded-lg border-2 border-dashed flex items-center gap-2
+                <div className=${`px-3 py-2 rounded-lg border-2 flex items-center gap-2
+                    ${isBound ? 'border-dashed' : 'border-solid'}
                     ${isLight
                         ? 'bg-cyan-50/50 border-cyan-200 text-cyan-800'
                         : 'bg-cyan-950/20 border-cyan-800/50 text-cyan-200'}
                 `}>
+                    <!-- Dashed outline is reserved for bound inputs -->
                     <${Icon} />
                     <span className="text-xs font-bold tracking-wide">${data.label}</span>
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
@@ -618,7 +341,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
         // --- Render Standard Node ---
         const isLight = theme === 'light';
-        const boundInputs = data.inputs.filter(i => i.is_bound).length;
+        const boundInputs = data.inputs ? data.inputs.filter(i => i.is_bound).length : 0;
 
         return html`
           <div className=${`group relative w-[240px] rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme}
@@ -723,16 +446,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 if (n.style && n.style.width) width = n.style.width;
                 if (n.style && n.style.height) height = n.style.height;
 
+                // For compound nodes (with children), let ELK calculate dimensions unless explicit
+                const isCompound = n.children && n.children.length > 0;
+                
                 return {
                   id: n.id,
                   width: width,
                   height: height,
                   children: n.children.length ? n.children.map(mapToElk) : undefined,
                   layoutOptions: {
-                     'elk.padding': '[top=40,left=20,bottom=20,right=20]',
+                     'elk.padding': '[top=20,left=10,bottom=10,right=10]',
                      'elk.spacing.nodeNode': '40',
                      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
                      'elk.direction': 'DOWN',
+                     // Ensure compound nodes are sized by content
+                     'elk.resize.fixed': 'false', 
                   }
                 };
             };
@@ -768,6 +496,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               const traverse = (node, parentX = 0, parentY = 0) => {
                 const x = node.x || 0;
                 const y = node.y || 0;
+                
                 const original = nodes.find(n => n.id === node.id);
                 if (original) {
                   positionedNodes.push({
@@ -974,7 +703,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [themePreference]);
 
         // --- Expansion Logic ---
-        // --- Expansion Logic ---
         const onToggleExpand = useCallback((nodeId) => {
           setNodes((nds) => {
             // Find the node to toggle
@@ -1001,7 +729,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                   ...node,
                   type: willExpand ? 'pipelineGroup' : 'custom',
                   data: { ...node.data, isExpanded: willExpand },
-                  style: willExpand ? { width: 600, height: 400 } : undefined,
+                  style: undefined, // Let ELK handle size
                 };
               }
               
@@ -1104,7 +832,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Resize Handling (Task 2) ---
         useEffect(() => {
             const handleResize = () => {
-                fitView({ padding: 0.2, duration: 200 });
+                fitView({ padding: 0.05, duration: 200, minZoom: 0.6 });
             };
             window.addEventListener('resize', handleResize);
             return () => window.removeEventListener('resize', handleResize);
@@ -1114,7 +842,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         useEffect(() => {
             if (layoutedNodes.length > 0) {
                 // No animation duration for instant appearance
-                window.requestAnimationFrame(() => fitView({ padding: 0.2, duration: 0 }));
+                window.requestAnimationFrame(() => fitView({ padding: 0.05, duration: 0, minZoom: 0.6 }));
             }
         }, [layoutedNodes, fitView]);
 
@@ -1153,6 +881,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               onNodesChange=${onNodesChange}
               onEdgesChange=${onEdgesChange}
               fitView
+              fitViewOptions=${{ minZoom: 0.6 }}
               minZoom=${0.1}
               className=${'bg-transparent'}
               panOnScroll=${true}
@@ -1214,148 +943,3 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
     html_template = html_head + html_body
     return html_template.replace("__GRAPH_JSON__", graph_json)
-
-
-class IPyWidgetEngine(VisualizationEngine):
-    """IPyWidget-based interactive visualization engine."""
-
-    def render(
-        self,
-        serialized_graph: Dict[str, Any],
-        theme: str = "CYBERPUNK",
-        **kwargs: Any,
-    ) -> Any:
-        react_flow_data = transform_to_react_flow(serialized_graph, theme=theme)
-        html_content = generate_widget_html(react_flow_data)
-        return widgets.HTML(value=html_content)
-
-
-class PipelineWidget(widgets.HTML):
-    """
-    Widget for visualizing pipelines inside Jupyter/VS Code notebooks.
-    """
-
-    def __init__(
-        self,
-        pipeline: Any,
-        theme: str = "auto",
-        depth: Optional[int] = 1,
-        group_inputs: bool = True,
-        show_types: bool = True,
-        theme_debug: bool = False,
-        **kwargs: Any,
-    ):
-        from .ui_handler import UIHandler
-        
-        self.pipeline = pipeline
-        self.theme = theme
-        self.depth = depth
-        self.theme_debug = theme_debug
-        
-        # 1. Get Graph Data once
-        handler = UIHandler(
-            self.pipeline,
-            depth=depth,
-            group_inputs=group_inputs,
-            show_output_types=show_types,
-        )
-        serialized_graph = handler.get_full_graph_with_state(include_events=True)
-        
-        # 2. Calculate Height
-        estimated_height = self._calculate_initial_height(serialized_graph)
-        
-        # 3. Generate HTML
-        html_content = self._generate_html(
-            serialized_graph,
-            theme=theme,
-            depth=depth,
-            theme_debug=theme_debug,
-        )
-
-        # Use srcdoc for better compatibility (VS Code, etc.)
-        # We need to escape the HTML for the srcdoc attribute
-        escaped_html = html.escape(html_content, quote=True)
-
-        # CSS fix for VS Code white background on ipywidgets
-        css_fix = """
-        <style>
-        .cell-output-ipywidget-background {
-           background-color: transparent !important;
-        }
-        .jp-OutputArea-output {
-           background-color: transparent;
-        }
-        </style>
-        """
-
-        iframe_html = (
-            f"{css_fix}"
-            f'<iframe srcdoc="{escaped_html}" '
-            f'width="100%" height="{estimated_height}" frameborder="0" '
-            f'style="border: none; width: 100%; height: {estimated_height}px; display: block; background: transparent;" '
-            f'sandbox="allow-scripts allow-same-origin allow-popups allow-forms">'
-            f"</iframe>"
-        )
-        super().__init__(value=iframe_html, **kwargs)
-
-    def _calculate_initial_height(self, graph: Dict[str, Any]) -> int:
-        """Estimate the required height based on graph structure."""
-        try:
-            nodes = graph.get("nodes", [])
-            # Simple heuristic:
-            # 1. Count total nodes
-            # 2. Estimate "width" of the graph (max nodes in parallel?) - hard without layout.
-            # 3. Estimate "depth" of the graph (longest path) - hard without layout.
-            
-            # Better heuristic for ELK Layered (DOWN direction):
-            # Height depends on the number of ranks (levels).
-            # Width depends on the max nodes in a rank.
-            
-            # Let's just count nodes for now as a proxy.
-            num_nodes = len(nodes)
-            
-            base_height = 500
-            row_height = 80 # Approx height per node/row
-            
-            # If we assume a roughly square aspect ratio or a long chain:
-            # Sqrt(N) * row_height might be too small for long chains.
-            # N * row_height might be too tall for wide graphs.
-            
-            # Let's try to find the "levels" in the graph if possible.
-            # The graph has "levels" key which describes the hierarchy, not the layout ranks.
-            
-            # Fallback: Logarithmic/Linear scaling
-            # 10 nodes -> 600px
-            # 50 nodes -> 1000px
-            # 100 nodes -> 1200px
-            
-            if num_nodes <= 10:
-                return 500
-            elif num_nodes <= 30:
-                return 700
-            elif num_nodes <= 50:
-                return 900
-            else:
-                return 1200
-                
-        except Exception:
-            return 600
-
-    def _generate_html(
-        self,
-        graph_data: Dict[str, Any],
-        theme: str = "auto",
-        depth: Optional[int] = 1,
-        theme_debug: bool = False,
-    ) -> str:
-        react_flow_data = transform_to_react_flow(
-            graph_data,
-            theme=theme,
-            initial_depth=depth,
-            theme_debug=theme_debug,
-        )
-        return generate_widget_html(react_flow_data)
-
-    def _repr_html_(self) -> str:
-        """Fallback for environments that prefer raw HTML over widgets."""
-        return self.value

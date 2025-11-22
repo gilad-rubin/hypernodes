@@ -522,3 +522,4 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - Emits mapping labels for input/output remapping (e.g., `"outer → inner"`).
 - Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped input candidates.
 - Supports expansion depth controls (`depth` or interactive expand/collapse) without frontend recomputation.
+- **Input level placement**: Prioritizes deeper (more specific) levels when inputs appear in multiple `unfulfilled_inputs`. This ensures inputs consumed only by nested nodes appear inside the correct container, not at root level.
