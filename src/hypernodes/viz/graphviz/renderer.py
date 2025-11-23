@@ -58,23 +58,23 @@ CSS_VAR_FALLBACKS: Dict[str, str] = {
     "--hn-cluster-border": "#cbd5e1",
     "--hn-cluster-text": "#475569",
     "--hn-cluster-fill": "#f8fafc",
-    "--hn-func-accent": "#4f46e5",
+    "--hn-func-accent": "#6366f1",
     "--hn-func-text": "#ffffff",
     "--hn-func-bg": "#eef2ff",
-    "--hn-pipe-accent": "#d97706",
+    "--hn-pipe-accent": "#f59e0b",
     "--hn-pipe-accent-text": "#ffffff",
     "--hn-pipe-bg": "#fffbeb",
-    "--hn-pipe-border": "#fcd34d",
+    "--hn-pipe-border": "#f59e0b",
     "--hn-pipe-text": "#451a03",
-    "--hn-dual-accent": "#c026d3",
+    "--hn-dual-accent": "#d946ef",
     "--hn-dual-accent-text": "#ffffff",
     "--hn-dual-bg": "#fdf4ff",
-    "--hn-dual-border": "#f0abfc",
+    "--hn-dual-border": "#d946ef",
     "--hn-dual-text": "#4a044e",
-    "--hn-data-bg": "#f1f5f9",
-    "--hn-data-border": "#94a3b8",
+    "--hn-data-bg": "#f8fafc",
+    "--hn-data-border": "#64748b",
     "--hn-data-text": "#334155",
-    "--hn-data-accent": "#475569",
+    "--hn-data-accent": "#64748b",
 }
 
 
@@ -272,60 +272,60 @@ class GraphvizRenderer:
         style_block = """
         <style>
             :root {
-                --hn-surface-bg: #f8fafc;
-                --hn-edge: #64748b;
-                --hn-node-bg: #ffffff;
-                --hn-node-border: #e2e8f0;
-                --hn-node-text: #1e293b;
-                --hn-cluster-border: #cbd5e1;
+                --hn-surface-bg: #ffffff;
+                --hn-edge: #94a3b8;
+                --hn-node-bg: #eef2ff;
+                --hn-node-border: #6366f1;
+                --hn-node-text: #0f172a;
+                --hn-cluster-border: #e2e8f0;
                 --hn-cluster-text: #475569;
-                --hn-cluster-fill: var(--hn-surface-bg);
-                --hn-func-accent: #4f46e5;
+                --hn-cluster-fill: #f8fafc;
+                --hn-func-accent: #6366f1;
                 --hn-func-text: #ffffff;
                 --hn-func-bg: #eef2ff;
-                --hn-pipe-accent: #d97706;
+                --hn-pipe-accent: #f59e0b;
                 --hn-pipe-accent-text: #ffffff;
                 --hn-pipe-bg: #fffbeb;
-                --hn-pipe-border: #fcd34d;
-                --hn-pipe-text: #451a03;
-                --hn-dual-accent: #c026d3;
+                --hn-pipe-border: #f59e0b;
+                --hn-pipe-text: #0f172a;
+                --hn-dual-accent: #d946ef;
                 --hn-dual-accent-text: #ffffff;
                 --hn-dual-bg: #fdf4ff;
-                --hn-dual-border: #f0abfc;
-                --hn-dual-text: #4a044e;
-                --hn-data-bg: #f1f5f9;
-                --hn-data-border: #94a3b8;
+                --hn-dual-border: #d946ef;
+                --hn-dual-text: #0f172a;
+                --hn-data-bg: #f8fafc;
+                --hn-data-border: #64748b;
                 --hn-data-text: #334155;
-                --hn-data-accent: #475569;
+                --hn-data-accent: #64748b;
             }
             
             @media (prefers-color-scheme: dark) {
                 :root {
-                    --hn-surface-bg: #020617;
-                    --hn-edge: #94a3b8;
-                    --hn-node-bg: #1e293b;
-                    --hn-node-border: #334155;
+                    --hn-surface-bg: #0B1120;
+                    --hn-edge: #475569;
+                    --hn-node-bg: #1e1b4b;
+                    --hn-node-border: #818cf8;
                     --hn-node-text: #f1f5f9;
-                    --hn-cluster-border: #334155;
-                    --hn-cluster-text: #cbd5e1;
-                    --hn-cluster-fill: var(--hn-surface-bg);
-                    --hn-func-accent: #6366f1;
+                    --hn-cluster-border: #1e293b;
+                    --hn-cluster-text: #94a3b8;
+                    --hn-cluster-fill: #0f172a;
+                    --hn-func-accent: #818cf8;
                     --hn-func-text: #ffffff;
                     --hn-func-bg: #1e1b4b;
                     --hn-pipe-accent: #fbbf24;
-                    --hn-pipe-accent-text: #1f2937;
+                    --hn-pipe-accent-text: #ffffff;
                     --hn-pipe-bg: #451a03;
-                    --hn-pipe-border: #78350f;
-                    --hn-pipe-text: #fde68a;
+                    --hn-pipe-border: #fbbf24;
+                    --hn-pipe-text: #f1f5f9;
                     --hn-dual-accent: #e879f9;
-                    --hn-dual-accent-text: #1f2937;
+                    --hn-dual-accent-text: #ffffff;
                     --hn-dual-bg: #4a044e;
-                    --hn-dual-border: #86198f;
-                    --hn-dual-text: #fdf4ff;
+                    --hn-dual-border: #e879f9;
+                    --hn-dual-text: #f1f5f9;
                     --hn-data-bg: #0f172a;
-                    --hn-data-border: #334155;
-                    --hn-data-text: #94a3b8;
-                    --hn-data-accent: #475569;
+                    --hn-data-border: #94a3b8;
+                    --hn-data-text: #cbd5e1;
+                    --hn-data-accent: #94a3b8;
                 }
             }
             
@@ -627,11 +627,10 @@ class GraphvizRenderer:
         sub_size = "9" if is_compact else "10"
         padding = "4" if is_compact else "8"
         
-        # Fixed width for uniform node sizes (approx 250px)
+        # Fixed width for uniform node sizes
         # Graphviz HTML tables don't support 'width' on the table itself reliably in all versions,
         # but we can set width on the main cell.
-        # 250px is a good default size.
-        main_cell_width = "150" if is_compact else "250"
+        main_cell_width = "200" if is_compact else "240"
 
         # !!! CRITICAL FIX: Graphviz HTML labels DO NOT support the 'CLASS' attribute on most versions.
         # Attempting to use CLASS causes warnings and they are ignored.
@@ -644,31 +643,21 @@ class GraphvizRenderer:
         border_color = _color_token_to_hex(style.border_color, "#cbd5e1")
         text_color = _color_token_to_hex(style.text_color, "#0f172a")
         accent_color = _color_token_to_hex(style.accent_color, "#4f46e5")
-        cluster_text = _color_token_to_hex("var(--hn-cluster-text)", "#475569")
 
         # Note: STYLE="ROUNDED" works on TABLE in some versions, but ignored in others.
         # We rely on the outer shape="plain" so the table is the visual node.
         # Tooltips are automatically generated from the node ID by Graphviz.
-
+        
+        # Simpler, cleaner layout without icon
+        # Using border color to indicate type
+        
         return f'''<
         <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED" WIDTH="{main_cell_width}">
             <TR>
                 <TD BORDER="0" CELLPADDING="{padding}" WIDTH="{main_cell_width}">
                     <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
-                        <TR>
-                            <TD VALIGN="TOP" WIDTH="24">
-                                <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6" BGCOLOR="{accent_color}" STYLE="ROUNDED">
-                                    <TR><TD></TD></TR>
-                                </TABLE>
-                            </TD>
-                            <TD WIDTH="8"></TD>
-                            <TD VALIGN="MIDDLE">
-                                <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
-                                    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="{sub_size}" COLOR="{accent_color}"><B>{subtitle}</B></FONT></TD></TR>
-                                    <TR><TD ALIGN="LEFT"><B><FONT POINT-SIZE="{title_size}" COLOR="{text_color}">{title}</FONT></B></TD></TR>
-                                </TABLE>
-                            </TD>
-                        </TR>
+                        <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="{sub_size}" COLOR="{accent_color}"><B>{subtitle}</B></FONT></TD></TR>
+                        <TR><TD ALIGN="LEFT"><B><FONT POINT-SIZE="{title_size}" COLOR="{text_color}">{title}</FONT></B></TD></TR>
                     </TABLE>
                 </TD>
             </TR>

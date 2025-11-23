@@ -2,7 +2,9 @@
 import json
 from typing import List, Any
 from hypernodes import node, Pipeline
-from hypernodes.viz.js_ui import PipelineWidget
+from hypernodes.viz.ui_handler import UIHandler
+from hypernodes.viz.js.renderer import JSRenderer
+from hypernodes.viz.js.html_generator import generate_widget_html
 
 # Mock types
 class VectorStore: pass
@@ -50,12 +52,16 @@ metrics_pipeline = Pipeline([batch_node, compute_metrics])
 # Generate HTML
 print("Generating visualization HTML...")
 # passing depth=3 to verify that it expands correctly initially
-widget = PipelineWidget(metrics_pipeline, depth=3)
-html_content = widget._generate_html(depth=3)
+handler = UIHandler(metrics_pipeline, depth=3)
+graph_data = handler.get_visualization_data()
+renderer = JSRenderer()
+react_flow_data = renderer.render(graph_data)
+html_content = generate_widget_html(react_flow_data)
 
 output_path = "tests/viz_output.html"
 with open(output_path, "w") as f:
     f.write(html_content)
 
 print(f"HTML written to {output_path}")
+
 

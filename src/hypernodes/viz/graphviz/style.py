@@ -14,13 +14,13 @@ class NodeStyle:
 class GraphvizStyle:
     """Styling configuration for pipeline visualizations."""
     # Base settings
-    font_name: str = "Inter, Helvetica, Arial, sans-serif"
-    font_size: int = 12
-    edge_font_size: int = 10
+    font_name: str = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font_size: int = 14
+    edge_font_size: int = 11
     background_color: str = "#F8FAFC"  # Very light slate/gray
     edge_color: str = "#64748b"  # Slate-500
-    edge_penwidth: str = "1.2"
-    arrow_size: str = "0.7"
+    edge_penwidth: str = "1.5"
+    arrow_size: str = "0.8"
     
     # Cluster settings
     cluster_border_color: str = "#cbd5e1"
@@ -29,16 +29,16 @@ class GraphvizStyle:
     
     # Node styles
     function_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#FFFFFF", border_color="#cbd5e1", text_color="#0f172a", accent_color="#4f46e5"  # Indigo-600
+        bg_color="#FFFFFF", border_color="#6366f1", text_color="#1e293b", accent_color="#6366f1"  # Indigo
     ))
     pipeline_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#fffbeb", border_color="#fcd34d", text_color="#451a03", accent_color="#d97706"  # Amber-600
+        bg_color="#FFFFFF", border_color="#f59e0b", text_color="#1e293b", accent_color="#f59e0b"  # Amber
     ))
     dual_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#fdf4ff", border_color="#f0abfc", text_color="#4a044e", accent_color="#c026d3"  # Fuchsia-600
+        bg_color="#FFFFFF", border_color="#d946ef", text_color="#1e293b", accent_color="#d946ef"  # Fuchsia
     ))
     data_node: NodeStyle = field(default_factory=lambda: NodeStyle(
-        bg_color="#e2e8f0", border_color="#94a3b8", text_color="#334155", accent_color="#475569"  # Slate-600
+        bg_color="#FFFFFF", border_color="#64748b", text_color="#1e293b", accent_color="#64748b"  # Slate
     ))
     
     # Legacy compatibility properties
@@ -94,42 +94,42 @@ AUTO_THEME = GraphvizStyle(
 )
 
 LIGHT_THEME = GraphvizStyle(
-    background_color="#F8FAFC",
-    edge_color="#64748b",
-    cluster_fill_color="#FFFFFF",
-    cluster_border_color="#cbd5e1",
+    background_color="#ffffff",
+    edge_color="#94a3b8",
+    cluster_fill_color="#f8fafc",
+    cluster_border_color="#e2e8f0",
     function_node=NodeStyle(
-        bg_color="#FFFFFF", border_color="#cbd5e1", text_color="#0f172a", accent_color="#4f46e5", accent_text_color="#ffffff"
+        bg_color="#eef2ff", border_color="#6366f1", text_color="#0f172a", accent_color="#6366f1", accent_text_color="#ffffff"
     ),
     pipeline_node=NodeStyle(
-        bg_color="#fffbeb", border_color="#fcd34d", text_color="#451a03", accent_color="#d97706", accent_text_color="#ffffff"
+        bg_color="#fffbeb", border_color="#f59e0b", text_color="#0f172a", accent_color="#f59e0b", accent_text_color="#ffffff"
     ),
     dual_node=NodeStyle(
-        bg_color="#fdf4ff", border_color="#f0abfc", text_color="#4a044e", accent_color="#c026d3", accent_text_color="#ffffff"
+        bg_color="#fdf4ff", border_color="#d946ef", text_color="#0f172a", accent_color="#d946ef", accent_text_color="#ffffff"
     ),
     data_node=NodeStyle(
-        bg_color="#f1f5f9", border_color="#94a3b8", text_color="#334155", accent_color="#475569", accent_text_color="#ffffff"
+        bg_color="#f8fafc", border_color="#64748b", text_color="#334155", accent_color="#64748b", accent_text_color="#ffffff"
     )
 )
 
 # Dark theme adapted for the professional look
 DARK_THEME = GraphvizStyle(
-    background_color="#020617", # Slate-950
-    edge_color="#475569", # Slate-600
-    cluster_fill_color="#0f172a", # Slate-900
-    cluster_border_color="#334155", # Slate-700
-    cluster_label_color="#cbd5e1",
+    background_color="#0B1120", # Deep dark blue/slate
+    edge_color="#475569",
+    cluster_fill_color="#0f172a",
+    cluster_border_color="#1e293b",
+    cluster_label_color="#94a3b8",
     function_node=NodeStyle(
-        bg_color="#1e293b", border_color="#334155", text_color="#f1f5f9", accent_color="#6366f1", accent_text_color="#ffffff"
+        bg_color="#1e1b4b", border_color="#818cf8", text_color="#f8fafc", accent_color="#818cf8", accent_text_color="#ffffff"
     ),
     pipeline_node=NodeStyle(
-        bg_color="#2a1b08", border_color="#78350f", text_color="#f1f5f9", accent_color="#d97706", accent_text_color="#ffffff"
+        bg_color="#451a03", border_color="#fbbf24", text_color="#f8fafc", accent_color="#fbbf24", accent_text_color="#ffffff"
     ),
     dual_node=NodeStyle(
-        bg_color="#2e1025", border_color="#86198f", text_color="#f1f5f9", accent_color="#c026d3", accent_text_color="#ffffff"
+        bg_color="#4a044e", border_color="#e879f9", text_color="#f8fafc", accent_color="#e879f9", accent_text_color="#ffffff"
     ),
     data_node=NodeStyle(
-        bg_color="#0f172a", border_color="#334155", text_color="#94a3b8", accent_color="#475569", accent_text_color="#e2e8f0"
+        bg_color="#0f172a", border_color="#94a3b8", text_color="#cbd5e1", accent_color="#94a3b8", accent_text_color="#e2e8f0"
     )
 )
 

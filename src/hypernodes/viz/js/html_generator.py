@@ -136,7 +136,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }));
       }
 
-      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, EdgeLabelRenderer, useReactFlow, Panel } = RF;
+      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, getSmoothStepPath, EdgeLabelRenderer, useReactFlow, Panel } = RF;
       const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
       const html = htm.bind(React.createElement);
@@ -256,15 +256,15 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         if (data.nodeType === 'DATA') {
             const isLight = theme === 'light';
             return html`
-                <div className=${`px-3 py-1.5 rounded-full border shadow-sm flex items-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                <div className=${`px-3 py-1.5 w-full rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
                 `}>
                      <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icon} /></span>
-                     <span className="text-xs font-mono font-medium">${data.label}</span>
-                     <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" />
-                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
+                     <span className="text-xs font-mono font-medium truncate">${data.label}</span>
+                     <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-2px' }} />
+                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
             `;
         }
@@ -344,7 +344,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const boundInputs = data.inputs ? data.inputs.filter(i => i.is_bound).length : 0;
 
         return html`
-          <div className=${`group relative w-[240px] rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme}
+          <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme}
                ${isLight 
                  ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200`
                  : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/10`}
@@ -427,7 +427,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
             
             const mapToElk = (n) => {
-                let width = 320;
+                let width = 240;
                 let height = 90;
                 
                 if (n.data?.nodeType === 'DATA') {
@@ -475,7 +475,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 
                 // POLYLINE routing for straight edges with gentle curves at corners
                 'elk.edgeRouting': 'POLYLINE',
-                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0', // Gentle curves at corners
+                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0',
                 
                 // Increased spacing to ensure edges don't touch nodes
                 'elk.layered.spacing.nodeNodeBetweenLayers': '80', // Layer separation
