@@ -61,9 +61,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     {_read_asset("custom.css", "css") or ""}
     <style>
         /* Reset and Base Styles */
-        body {{ margin: 0; overflow: auto; background: transparent; color: #e5e7eb; font-family: 'Inter', system-ui, -apple-system, sans-serif; }}
+        body {{ margin: 0; overflow: hidden; background: transparent; color: #e5e7eb; font-family: 'Inter', system-ui, -apple-system, sans-serif; }}
         .react-flow__attribution {{ display: none; }}
-        #root {{ min-height: 100vh; min-width: 100vw; background: transparent; display: flex; align-items: flex-start; justify-content: center; }}
+        #root {{ height: 100vh; width: 100vw; background: transparent; display: flex; align-items: flex-start; justify-content: center; }}
         #fallback {{ font-size: 13px; letter-spacing: 0.4px; color: #94a3b8; }}
         
         /* Canvas Outline */
@@ -256,7 +256,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         if (data.nodeType === 'DATA') {
             const isLight = theme === 'light';
             return html`
-                <div className=${`px-3 py-1.5 w-full rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
@@ -269,21 +269,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             `;
         }
 
-        // --- Render Input Node (Compact) ---
+        // --- Render Input Node (Compact - styled as DATA) ---
         if (data.nodeType === 'INPUT') {
              const isLight = theme === 'light';
              const isBound = Boolean(data.isBound);
+             // Reuse DATA node styling but preserve dashed border for bound inputs
              return html`
-                <div className=${`px-3 py-2 rounded-lg border-2 flex items-center gap-2
-                    ${isBound ? 'border-dashed' : 'border-solid'}
-                    ${isLight
-                        ? 'bg-cyan-50/50 border-cyan-200 text-cyan-800'
-                        : 'bg-cyan-950/20 border-cyan-800/50 text-cyan-200'}
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                    ${isBound ? 'border-dashed' : ''}
+                    ${isLight 
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
                 `}>
-                    <!-- Dashed outline is reserved for bound inputs -->
-                    <${Icon} />
-                    <span className="text-xs font-bold tracking-wide">${data.label}</span>
-                    <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
+                    <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} /></span>
+                    <span className="text-xs font-mono font-medium truncate">${data.label}</span>
+                    <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
              `;
         }
@@ -295,20 +295,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
              const isBound = data.isBound;
              
              return html`
-                <div className=${`px-3 py-2 rounded-lg border-2 flex flex-col gap-1 min-w-[120px]
-                    ${isBound ? 'border-dashed' : 'border-solid'}
+                <div className=${`px-3 py-2 w-full relative rounded-xl border shadow-sm flex flex-col gap-1 min-w-[120px] transition-all duration-200 hover:-translate-y-0.5
+                    ${isBound ? 'border-dashed' : ''}
                     ${isLight
-                        ? 'bg-cyan-50/50 border-cyan-200 text-cyan-800'
-                        : 'bg-cyan-950/20 border-cyan-800/50 text-cyan-200'}
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
                 `}>
-                    <div className="flex items-center gap-2 mb-1 pb-1 border-b border-cyan-500/20">
-                        <${Icon} className="w-3 h-3" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">Inputs</span>
-                    </div>
                     ${params.map(p => html`
-                        <div className="text-xs font-mono leading-tight">${p}</div>
+                        <div className="flex items-center gap-2">
+                            <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} className="w-3 h-3" /></span>
+                            <div className="text-xs font-mono leading-tight truncate">${p}</div>
+                        </div>
                     `)}
-                    <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
+                    <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
              `;
         }
@@ -405,6 +404,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const [layoutedEdges, setLayoutedEdges] = useState([]);
         const [layoutError, setLayoutError] = useState(null);
         const [graphHeight, setGraphHeight] = useState(600);
+        const [graphWidth, setGraphWidth] = useState(600);
 
         useEffect(() => {
           if (!nodes.length) return;
@@ -434,9 +434,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     width = 160;
                     height = 40;
                     if (n.data.label) width = Math.max(120, n.data.label.length * 8 + 40);
-                } else if (n.data?.nodeType === 'INPUT') {
-                    width = 180;
-                    height = 50;
+                } else                 if (n.data?.nodeType === 'INPUT') {
+                    width = 160;
+                    height = 40;
                 } else if (n.data?.nodeType === 'INPUT_GROUP') {
                     width = 200;
                     // Dynamic height based on number of inputs
@@ -456,9 +456,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                   height: height,
                   children: n.children.length ? n.children.map(mapToElk) : undefined,
                   layoutOptions: {
-                     'elk.padding': '[top=20,left=10,bottom=10,right=10]',
-                     'elk.spacing.nodeNode': '40',
-                     'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+                     'elk.padding': '[top=40,left=20,bottom=20,right=20]',
+                     'elk.spacing.nodeNode': '20',
+                     'elk.layered.spacing.nodeNodeBetweenLayers': '40',
                      'elk.direction': 'DOWN',
                      // Ensure compound nodes are sized by content
                      'elk.resize.fixed': 'false', 
@@ -478,10 +478,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0',
                 
                 // Increased spacing to ensure edges don't touch nodes
-                'elk.layered.spacing.nodeNodeBetweenLayers': '80', // Layer separation
-                'elk.spacing.nodeNode': '50', // Space between nodes in same layer
-                'elk.spacing.edgeNode': '50', // Increased from 30 - prevents edge-node contact
-                'elk.spacing.edgeEdge': '20', // Increased from 15 - space between parallel edges
+                'elk.layered.spacing.nodeNodeBetweenLayers': '50', // Layer separation (reduced)
+                'elk.spacing.nodeNode': '20', // Space between nodes in same layer (reduced)
+                'elk.spacing.edgeNode': '40', // Increased from 30 - prevents edge-node contact
+                'elk.spacing.edgeEdge': '15', // Increased from 15 - space between parallel edges
                 
                 // Advanced crossing minimization (Sugiyama algorithm core)
                 'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
@@ -541,6 +541,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               setLayoutedNodes(positionedNodes);
               setLayoutedEdges(visibleEdges);
               if (graph.height) setGraphHeight(graph.height);
+              if (graph.width) setGraphWidth(graph.width);
             })
             .catch((err) => {
                 console.error('ELK layout error', err);
@@ -555,7 +556,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
         }, [nodes, edges]);
 
-        return { layoutedNodes, layoutedEdges, layoutError, graphHeight };
+        return { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth };
       };
 
       const initialData = JSON.parse(document.getElementById('graph-data').textContent || '{"nodes":[],"edges":[]}');
@@ -880,23 +881,25 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             return newEdges;
         }, [nodes, edges]);
 
-        const { layoutedNodes, layoutedEdges, layoutError, graphHeight } = useLayout(nodes, visibleEdges);
+        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(nodes, visibleEdges);
         const { fitView } = useReactFlow();
 
         // --- Iframe Resize Logic (Task 2) ---
         useEffect(() => {
-            if (graphHeight) {
-                const desiredHeight = Math.max(600, graphHeight + 100);
+            if (graphHeight && graphWidth) {
+                const desiredHeight = Math.max(400, graphHeight + 50);
+                const desiredWidth = Math.max(400, graphWidth + 50);
                 try {
-                    // Try to resize the hosting iframe to avoid internal scrollbars
+                    // Try to resize the hosting iframe to avoid internal scrollbars and excess padding
                     if (window.frameElement) {
                         window.frameElement.style.height = desiredHeight + 'px';
+                        window.frameElement.style.width = desiredWidth + 'px';
                     }
                 } catch (e) {
                     // Ignore cross-origin errors or missing frameElement
                 }
             }
-        }, [graphHeight]);
+        }, [graphHeight, graphWidth]);
 
         // --- Resize Handling (Task 2) ---
         useEffect(() => {
@@ -941,7 +944,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         return html`
           <div 
             className=${`w-full relative overflow-hidden transition-colors duration-300`}
-            style=${{ backgroundColor: bgColor, height: Math.max(window.innerHeight - 20, graphHeight + 100) + 'px' }}
+            style=${{ backgroundColor: bgColor, height: '100vh', width: '100vw' }}
           >
             <!-- Background Grid -->
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>
@@ -954,7 +957,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               onNodesChange=${onNodesChange}
               onEdgesChange=${onEdgesChange}
               fitView
-              fitViewOptions=${{ padding: 0.1, minZoom: 0.5, maxZoom: 1 }}
+              fitViewOptions=${{ padding: 0.02, minZoom: 0.5, maxZoom: 1 }}
               minZoom=${0.1}
               maxZoom=${2}
               className=${'bg-transparent'}

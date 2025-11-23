@@ -40,6 +40,9 @@ class GraphvizStyle:
     data_node: NodeStyle = field(default_factory=lambda: NodeStyle(
         bg_color="#FFFFFF", border_color="#64748b", text_color="#1e293b", accent_color="#64748b"  # Slate
     ))
+    input_node: NodeStyle = field(default_factory=lambda: NodeStyle(
+        bg_color="#FFFFFF", border_color="#64748b", text_color="#1e293b", accent_color="#64748b"  # Default to Slate
+    ))
     
     # Legacy compatibility properties
     @property
@@ -57,41 +60,52 @@ class GraphvizStyle:
 
 # --- Themes ---
 
-AUTO_THEME = GraphvizStyle(
+# Simple/Elegant Theme (Airflow-inspired)
+SIMPLE_THEME = GraphvizStyle(
     background_color="var(--hn-surface-bg)",
     edge_color="var(--hn-edge)",
     cluster_fill_color="var(--hn-cluster-fill)",
     cluster_border_color="var(--hn-cluster-border)",
     cluster_label_color="var(--hn-cluster-text)",
     function_node=NodeStyle(
-        bg_color="var(--hn-node-bg)",
-        border_color="var(--hn-node-border)",
-        text_color="var(--hn-node-text)",
-        accent_color="var(--hn-func-accent)",
+        bg_color="var(--hn-func-bg)",
+        border_color="var(--hn-func-border)",
+        text_color="var(--hn-func-text)",
+        accent_color="var(--hn-func-border)", # Not used in simple mode
         accent_text_color="var(--hn-func-text)",
     ),
     pipeline_node=NodeStyle(
         bg_color="var(--hn-pipe-bg)",
         border_color="var(--hn-pipe-border)",
         text_color="var(--hn-pipe-text)",
-        accent_color="var(--hn-pipe-accent)",
-        accent_text_color="var(--hn-pipe-accent-text)",
+        accent_color="var(--hn-pipe-border)",
+        accent_text_color="var(--hn-pipe-text)",
     ),
     dual_node=NodeStyle(
         bg_color="var(--hn-dual-bg)",
         border_color="var(--hn-dual-border)",
         text_color="var(--hn-dual-text)",
-        accent_color="var(--hn-dual-accent)",
-        accent_text_color="var(--hn-dual-accent-text)",
+        accent_color="var(--hn-dual-border)",
+        accent_text_color="var(--hn-dual-text)",
     ),
     data_node=NodeStyle(
         bg_color="var(--hn-data-bg)",
         border_color="var(--hn-data-border)",
         text_color="var(--hn-data-text)",
-        accent_color="var(--hn-data-accent)",
+        accent_color="var(--hn-data-border)",
         accent_text_color="var(--hn-data-text)",
     ),
+    input_node=NodeStyle(
+        bg_color="var(--hn-input-bg)",
+        border_color="var(--hn-input-border)",
+        text_color="var(--hn-input-text)",
+        accent_color="var(--hn-input-border)",
+        accent_text_color="var(--hn-input-text)",
+    ),
 )
+
+AUTO_THEME = SIMPLE_THEME  # Make simple the default
+
 
 LIGHT_THEME = GraphvizStyle(
     background_color="#ffffff",
@@ -99,37 +113,59 @@ LIGHT_THEME = GraphvizStyle(
     cluster_fill_color="#f8fafc",
     cluster_border_color="#e2e8f0",
     function_node=NodeStyle(
-        bg_color="#eef2ff", border_color="#6366f1", text_color="#0f172a", accent_color="#6366f1", accent_text_color="#ffffff"
+        bg_color="#dbeafe", border_color="#93c5fd", text_color="#1e3a8a", accent_color="#2563eb", accent_text_color="#ffffff"
     ),
     pipeline_node=NodeStyle(
-        bg_color="#fffbeb", border_color="#f59e0b", text_color="#0f172a", accent_color="#f59e0b", accent_text_color="#ffffff"
+        bg_color="#fef3c7", border_color="#fde68a", text_color="#78350f", accent_color="#d97706", accent_text_color="#ffffff"
     ),
     dual_node=NodeStyle(
-        bg_color="#fdf4ff", border_color="#d946ef", text_color="#0f172a", accent_color="#d946ef", accent_text_color="#ffffff"
+        bg_color="#f3e8ff", border_color="#e9d5ff", text_color="#6b21a8", accent_color="#9333ea", accent_text_color="#ffffff"
     ),
     data_node=NodeStyle(
-        bg_color="#f8fafc", border_color="#64748b", text_color="#334155", accent_color="#64748b", accent_text_color="#ffffff"
+        bg_color="#f3f4f6", border_color="#d1d5db", text_color="#374151", accent_color="#4b5563", accent_text_color="#ffffff"
     )
 )
 
 # Dark theme adapted for the professional look
 DARK_THEME = GraphvizStyle(
-    background_color="#0B1120", # Deep dark blue/slate
-    edge_color="#475569",
-    cluster_fill_color="#0f172a",
-    cluster_border_color="#1e293b",
-    cluster_label_color="#94a3b8",
+    background_color="#18181b", # Zinc-950
+    edge_color="#71717a", # Zinc-500
+    cluster_fill_color="#27272a", # Zinc-800
+    cluster_border_color="#3f3f46", # Zinc-700
+    cluster_label_color="#a1a1aa", # Zinc-400
     function_node=NodeStyle(
-        bg_color="#1e1b4b", border_color="#818cf8", text_color="#f8fafc", accent_color="#818cf8", accent_text_color="#ffffff"
+        bg_color="#27272a", border_color="#3f3f46", text_color="#f4f4f5", accent_color="#a1a1aa", accent_text_color="#18181b"
     ),
     pipeline_node=NodeStyle(
-        bg_color="#451a03", border_color="#fbbf24", text_color="#f8fafc", accent_color="#fbbf24", accent_text_color="#ffffff"
+        bg_color="#27272a", border_color="#d97706", text_color="#fef3c7", accent_color="#fbbf24", accent_text_color="#18181b"
     ),
     dual_node=NodeStyle(
-        bg_color="#4a044e", border_color="#e879f9", text_color="#f8fafc", accent_color="#e879f9", accent_text_color="#ffffff"
+        bg_color="#27272a", border_color="#c026d3", text_color="#fdf4ff", accent_color="#e879f9", accent_text_color="#18181b"
     ),
     data_node=NodeStyle(
-        bg_color="#0f172a", border_color="#94a3b8", text_color="#cbd5e1", accent_color="#94a3b8", accent_text_color="#e2e8f0"
+        bg_color="#27272a", border_color="#52525b", text_color="#e4e4e7", accent_color="#71717a", accent_text_color="#18181b"
+    )
+)
+
+# Kedro-inspired theme
+KEDRO_THEME = GraphvizStyle(
+    font_name="Titillium Web, sans-serif",
+    background_color="#111111",
+    edge_color="#6f6f6f",
+    cluster_fill_color="#212121",
+    cluster_border_color="#444444",
+    cluster_label_color="#cccccc",
+    function_node=NodeStyle(
+        bg_color="#212121", border_color="#212121", text_color="#e0e0e0", accent_color="#e0e0e0", accent_text_color="#111111"
+    ),
+    pipeline_node=NodeStyle(
+        bg_color="#212121", border_color="#f59e0b", text_color="#e0e0e0", accent_color="#f59e0b", accent_text_color="#111111"
+    ),
+    dual_node=NodeStyle(
+        bg_color="#212121", border_color="#c026d3", text_color="#e0e0e0", accent_color="#e879f9", accent_text_color="#111111"
+    ),
+    data_node=NodeStyle(
+        bg_color="#212121", border_color="#e0e0e0", text_color="#e0e0e0", accent_color="#e0e0e0", accent_text_color="#111111"
     )
 )
 
@@ -142,8 +178,10 @@ LEGACY_DEFAULT = GraphvizStyle(
 )
 
 DESIGN_STYLES: Dict[str, GraphvizStyle] = {
-    "default": AUTO_THEME,  # Modern default (auto-detect)
-    "auto": AUTO_THEME,
+    "default": SIMPLE_THEME,
+    "simple": SIMPLE_THEME,
+    "kedro": KEDRO_THEME,
+    "auto": SIMPLE_THEME,
     "light": LIGHT_THEME,
     "dark": DARK_THEME,
     "legacy": LEGACY_DEFAULT,

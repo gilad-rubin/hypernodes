@@ -19,7 +19,7 @@ from ..structures import (
     VizNode,
 )
 from ..utils import read_viz_asset
-from .style import DESIGN_STYLES, NodeStyle
+from .style import DESIGN_STYLES
 
 COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
     "var(--hn-node-bg)": "#100001",
@@ -31,6 +31,7 @@ COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
     "var(--hn-func-accent)": "#100010",
     "var(--hn-func-text)": "#100011",
     "var(--hn-func-bg)": "#100012",
+    "var(--hn-func-border)": "#100013",
     "var(--hn-pipe-accent)": "#100020",
     "var(--hn-pipe-accent-text)": "#100021",
     "var(--hn-pipe-bg)": "#100022",
@@ -45,6 +46,10 @@ COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
     "var(--hn-data-border)": "#100041",
     "var(--hn-data-text)": "#100042",
     "var(--hn-data-accent)": "#100043",
+    "var(--hn-input-bg)": "#100044",
+    "var(--hn-input-border)": "#100045",
+    "var(--hn-input-text)": "#100046",
+    "var(--hn-input-accent)": "#100047",
     "var(--hn-surface-bg)": "#100050",
     "var(--hn-cluster-fill)": "#100051",
 }
@@ -58,23 +63,28 @@ CSS_VAR_FALLBACKS: Dict[str, str] = {
     "--hn-cluster-border": "#cbd5e1",
     "--hn-cluster-text": "#475569",
     "--hn-cluster-fill": "#f8fafc",
-    "--hn-func-accent": "#6366f1",
+    "--hn-func-accent": "#2563eb",
     "--hn-func-text": "#ffffff",
-    "--hn-func-bg": "#eef2ff",
-    "--hn-pipe-accent": "#f59e0b",
+    "--hn-func-bg": "#dbeafe",
+    "--hn-func-border": "#93c5fd",
+    "--hn-pipe-accent": "#d97706",
     "--hn-pipe-accent-text": "#ffffff",
-    "--hn-pipe-bg": "#fffbeb",
-    "--hn-pipe-border": "#f59e0b",
-    "--hn-pipe-text": "#451a03",
-    "--hn-dual-accent": "#d946ef",
+    "--hn-pipe-bg": "#fef3c7",
+    "--hn-pipe-border": "#fde68a",
+    "--hn-pipe-text": "#78350f",
+    "--hn-dual-accent": "#9333ea",
     "--hn-dual-accent-text": "#ffffff",
-    "--hn-dual-bg": "#fdf4ff",
-    "--hn-dual-border": "#d946ef",
-    "--hn-dual-text": "#4a044e",
-    "--hn-data-bg": "#f8fafc",
-    "--hn-data-border": "#64748b",
-    "--hn-data-text": "#334155",
-    "--hn-data-accent": "#64748b",
+    "--hn-dual-bg": "#f3e8ff",
+    "--hn-dual-border": "#e9d5ff",
+    "--hn-dual-text": "#6b21a8",
+    "--hn-data-bg": "#f3f4f6",
+    "--hn-data-border": "#d1d5db",
+    "--hn-data-text": "#374151",
+    "--hn-data-accent": "#4b5563",
+    "--hn-input-bg": "#e0f2fe",
+    "--hn-input-border": "#7dd3fc",
+    "--hn-input-text": "#0c4a6e",
+    "--hn-input-accent": "#0284c7",
 }
 
 
@@ -156,56 +166,67 @@ def _wrap_svg_html(svg_data: str) -> str:
             
             const THEME_VARS = {{
                 light: {{
-                    '--hn-surface-bg': '#f8fafc',
-                    '--hn-edge': '#64748b',
+                    '--hn-surface-bg': '#ffffff',
+                    '--hn-edge': '#94a3b8',
                     '--hn-node-bg': '#ffffff',
                     '--hn-node-border': '#e2e8f0',
                     '--hn-node-text': '#0f172a',
                     '--hn-cluster-border': '#cbd5e1',
                     '--hn-cluster-text': '#475569',
-                    '--hn-func-accent': '#4f46e5',
-                    '--hn-func-text': '#ffffff',
-                    '--hn-func-bg': '#eef2ff',
-                    '--hn-pipe-accent': '#d97706',
-                    '--hn-pipe-accent-text': '#ffffff',
-                    '--hn-pipe-bg': '#fffbeb',
-                    '--hn-pipe-border': '#fcd34d',
-                    '--hn-pipe-text': '#451a03',
-                    '--hn-dual-accent': '#c026d3',
+                    '--hn-func-accent': '#10b981',
+                    '--hn-func-text': '#065f46',
+                    '--hn-func-bg': '#d1fae5',
+                    '--hn-func-border': '#10b981',
+                    '--hn-pipe-accent': '#a855f7',
+                    '--hn-pipe-accent-text': '#1e3a8a',
+                    '--hn-pipe-bg': '#f3e8ff',
+                    '--hn-pipe-border': '#a855f7',
+                    '--hn-pipe-text': '#581c87',
+                    '--hn-dual-accent': '#9333ea',
                     '--hn-dual-accent-text': '#ffffff',
-                    '--hn-dual-bg': '#fdf4ff',
-                    '--hn-dual-border': '#f0abfc',
-                    '--hn-dual-text': '#4a044e',
+                    '--hn-dual-bg': '#f3e8ff',
+                    '--hn-dual-border': '#c026d3',
+                    '--hn-dual-text': '#6b21a8',
                     '--hn-data-bg': '#f1f5f9',
-                    '--hn-data-border': '#94a3b8',
+                    '--hn-data-border': '#64748b',
                     '--hn-data-text': '#334155',
-                    '--hn-data-accent': '#475569'
+                    '--hn-data-accent': '#475569',
+                    '--hn-input-bg': '#bae6fd',
+                    '--hn-input-border': '#38bdf8',
+                    '--hn-input-text': '#0c4a6e',
+                    '--hn-input-accent': '#0284c7'
                 }},
                 dark: {{
-                    '--hn-surface-bg': '#020617',
-                    '--hn-edge': '#94a3b8',
-                    '--hn-node-bg': '#1e293b',
-                    '--hn-node-border': '#334155',
-                    '--hn-node-text': '#f1f5f9',
-                    '--hn-cluster-border': '#334155',
-                    '--hn-cluster-text': '#cbd5e1',
-                    '--hn-func-accent': '#6366f1',
-                    '--hn-func-text': '#ffffff',
-                    '--hn-func-bg': '#1e1b4b',
-                    '--hn-pipe-accent': '#fbbf24',
-                    '--hn-pipe-accent-text': '#1f2937',
-                    '--hn-pipe-bg': '#451a03',
-                    '--hn-pipe-border': '#78350f',
-                    '--hn-pipe-text': '#fde68a',
+                    '--hn-surface-bg': '#18181b',
+                    '--hn-edge': '#71717a',
+                    '--hn-node-bg': '#27272a',
+                    '--hn-node-border': '#3f3f46',
+                    '--hn-node-text': '#f4f4f5',
+                    '--hn-cluster-border': '#3f3f46',
+                    '--hn-cluster-text': '#a1a1aa',
+                    '--hn-cluster-fill': #27272a',
+                    '--hn-func-accent': '#10b981',
+                    '--hn-func-text': '#d1fae5',
+                    '--hn-func-bg': '#064e3b',
+                    '--hn-func-border': '#10b981',
+                    '--hn-pipe-accent': '#a855f7',
+                    '--hn-pipe-accent-text': '#dbeafe',
+                    '--hn-pipe-bg': '#581c87',
+                    '--hn-pipe-border': '#a855f7',
+                    '--hn-pipe-text': '#f3e8ff',
                     '--hn-dual-accent': '#e879f9',
-                    '--hn-dual-accent-text': '#1f2937',
+                    '--hn-dual-accent-text': '#fdf4ff',
                     '--hn-dual-bg': '#4a044e',
-                    '--hn-dual-border': '#86198f',
+                    '--hn-dual-border': '#c026d3',
                     '--hn-dual-text': '#fdf4ff',
-                    '--hn-data-bg': '#0f172a',
-                    '--hn-data-border': '#334155',
-                    '--hn-data-text': '#94a3b8',
-                    '--hn-data-accent': '#475569'
+                    '--hn-data-bg': '#27272a',
+                    '--hn-data-border': '#94a3b8',
+                    '--hn-data-text': '#e4e4e7',
+                    '--hn-data-accent': '#71717a',
+                    '--hn-input-bg': '#082f49',
+                    '--hn-input-border': '#0ea5e9',
+                    '--hn-input-text': '#e0f2fe',
+                    '--hn-input-accent': '#38bdf8'
                 }}
             }};
 
@@ -213,7 +234,7 @@ def _wrap_svg_html(svg_data: str) -> str:
                 const detected = detectHostTheme();
                 const theme = detected.theme;
                 const vars = THEME_VARS[theme] || THEME_VARS.light;
-                const surface = detected.background || vars['--hn-surface-bg'] || (theme === 'dark' ? '#020617' : '#f8fafc');
+                const surface = detected.background || vars['--hn-surface-bg'] || (theme === 'dark' ? '#020617' : '#ffffff');
 
                 container.style.backgroundColor = surface;
                 container.style.setProperty('--hn-surface-bg', surface);
@@ -269,63 +290,74 @@ class GraphvizRenderer:
             svg_data = pattern.sub(var_str, svg_data)
 
         # 2. Inject CSS Variables Definition
+        # NOTE: These defaults are just fallbacks. The JS script overwrites them.
         style_block = """
         <style>
             :root {
                 --hn-surface-bg: #ffffff;
                 --hn-edge: #94a3b8;
-                --hn-node-bg: #eef2ff;
-                --hn-node-border: #6366f1;
+                --hn-node-bg: #ffffff;
+                --hn-node-border: #e2e8f0;
                 --hn-node-text: #0f172a;
-                --hn-cluster-border: #e2e8f0;
+                --hn-cluster-border: #cbd5e1;
                 --hn-cluster-text: #475569;
                 --hn-cluster-fill: #f8fafc;
-                --hn-func-accent: #6366f1;
-                --hn-func-text: #ffffff;
-                --hn-func-bg: #eef2ff;
-                --hn-pipe-accent: #f59e0b;
-                --hn-pipe-accent-text: #ffffff;
-                --hn-pipe-bg: #fffbeb;
-                --hn-pipe-border: #f59e0b;
-                --hn-pipe-text: #0f172a;
-                --hn-dual-accent: #d946ef;
+                --hn-func-accent: #10b981;
+                --hn-func-text: #065f46;
+                --hn-func-bg: #d1fae5;
+                --hn-func-border: #10b981;
+                --hn-pipe-accent: #a855f7;
+                --hn-pipe-accent-text: #1e3a8a;
+                --hn-pipe-bg: #f3e8ff;
+                --hn-pipe-border: #a855f7;
+                --hn-pipe-text: #581c87;
+                --hn-dual-accent: #9333ea;
                 --hn-dual-accent-text: #ffffff;
-                --hn-dual-bg: #fdf4ff;
-                --hn-dual-border: #d946ef;
-                --hn-dual-text: #0f172a;
-                --hn-data-bg: #f8fafc;
+                --hn-dual-bg: #f3e8ff;
+                --hn-dual-border: #c026d3;
+                --hn-dual-text: #6b21a8;
+                --hn-data-bg: #f1f5f9;
                 --hn-data-border: #64748b;
                 --hn-data-text: #334155;
-                --hn-data-accent: #64748b;
+                --hn-data-accent: #475569;
+                --hn-input-bg: #bae6fd;
+                --hn-input-border: #38bdf8;
+                --hn-input-text: #0c4a6e;
+                --hn-input-accent: #0284c7;
             }
             
             @media (prefers-color-scheme: dark) {
                 :root {
-                    --hn-surface-bg: #0B1120;
-                    --hn-edge: #475569;
-                    --hn-node-bg: #1e1b4b;
-                    --hn-node-border: #818cf8;
-                    --hn-node-text: #f1f5f9;
-                    --hn-cluster-border: #1e293b;
-                    --hn-cluster-text: #94a3b8;
-                    --hn-cluster-fill: #0f172a;
-                    --hn-func-accent: #818cf8;
-                    --hn-func-text: #ffffff;
-                    --hn-func-bg: #1e1b4b;
-                    --hn-pipe-accent: #fbbf24;
-                    --hn-pipe-accent-text: #ffffff;
-                    --hn-pipe-bg: #451a03;
-                    --hn-pipe-border: #fbbf24;
-                    --hn-pipe-text: #f1f5f9;
+                    --hn-surface-bg: #18181b;
+                    --hn-edge: #71717a;
+                    --hn-node-bg: #27272a;
+                    --hn-node-border: #3f3f46;
+                    --hn-node-text: #f4f4f5;
+                    --hn-cluster-border: #3f3f46;
+                    --hn-cluster-text: #a1a1aa;
+                    --hn-cluster-fill: #27272a;
+                    --hn-func-accent: #10b981;
+                    --hn-func-text: #d1fae5;
+                    --hn-func-bg: #064e3b;
+                    --hn-func-border: #10b981;
+                    --hn-pipe-accent: #a855f7;
+                    --hn-pipe-accent-text: #dbeafe;
+                    --hn-pipe-bg: #581c87;
+                    --hn-pipe-border: #a855f7;
+                    --hn-pipe-text: #f3e8ff;
                     --hn-dual-accent: #e879f9;
-                    --hn-dual-accent-text: #ffffff;
+                    --hn-dual-accent-text: #fdf4ff;
                     --hn-dual-bg: #4a044e;
-                    --hn-dual-border: #e879f9;
-                    --hn-dual-text: #f1f5f9;
-                    --hn-data-bg: #0f172a;
+                    --hn-dual-border: #c026d3;
+                    --hn-dual-text: #fdf4ff;
+                    --hn-data-bg: #27272a;
                     --hn-data-border: #94a3b8;
-                    --hn-data-text: #cbd5e1;
-                    --hn-data-accent: #94a3b8;
+                    --hn-data-text: #e4e4e7;
+                    --hn-data-accent: #71717a;
+                    --hn-input-bg: #082f49;
+                    --hn-input-border: #0ea5e9;
+                    --hn-input-text: #e0f2fe;
+                    --hn-input-accent: #38bdf8;
                 }
             }
             
@@ -355,14 +387,14 @@ class GraphvizRenderer:
 
     def _build_id_mapping(self, graph_data: VisualizationGraph) -> Dict[str, str]:
         """Build a mapping from raw node IDs to human-readable Graphviz identifiers.
-        
+
         This ensures that tooltips and internal SVG IDs use descriptive names
         instead of raw Python object IDs. These IDs become the SVG <title> elements
         which appear as tooltips when hovering over nodes.
         """
         mapping = {}
         used_ids = set()
-        
+
         for node in graph_data.nodes:
             # Generate base readable ID - use actual names without prefixes
             # since these become tooltips
@@ -378,17 +410,17 @@ class GraphvizRenderer:
             else:
                 # Fallback for unknown types
                 readable_id = f"node_{abs(hash(node.id)) % 100000}"
-            
+
             # Ensure uniqueness by appending counter if needed
             base_id = readable_id
             counter = 1
             while readable_id in used_ids:
                 readable_id = f"{base_id}_{counter}"
                 counter += 1
-            
+
             used_ids.add(readable_id)
             mapping[node.id] = readable_id
-        
+
         return mapping
 
     def _build_dot(self, graph_data: VisualizationGraph) -> "graphviz.Digraph":
@@ -398,12 +430,12 @@ class GraphvizRenderer:
 
         # Build ID mapping for human-readable identifiers
         self._id_mapping = self._build_id_mapping(graph_data)
-        
+
         # Estimate layout dimensions to set initial container size
         # This mimics the behavior in the interactive JS widget
         estimator = LayoutEstimator(graph_data)
         est_width, est_height = estimator.estimate()
-        
+
         # Enforce minimums
         est_height = max(400, est_height)
         est_width = max(600, est_width)
@@ -412,9 +444,15 @@ class GraphvizRenderer:
 
         graph_bg = _color_token_to_hex(self.style.background_color, "transparent")
         edge_color = _color_token_to_hex(self.style.edge_color, "#64748b")
-        cluster_border_color = _color_token_to_hex(self.style.cluster_border_color, "#cbd5e1")
-        cluster_label_color = _color_token_to_hex(self.style.cluster_label_color, "#475569")
-        cluster_fill_color = _color_token_to_hex(self.style.cluster_fill_color, "transparent")
+        cluster_border_color = _color_token_to_hex(
+            self.style.cluster_border_color, "#cbd5e1"
+        )
+        cluster_label_color = _color_token_to_hex(
+            self.style.cluster_label_color, "#475569"
+        )
+        cluster_fill_color = _color_token_to_hex(
+            self.style.cluster_fill_color, "transparent"
+        )
 
         # Enhanced Graph Attributes
         dot.attr(
@@ -429,7 +467,7 @@ class GraphvizRenderer:
             overlap="false",
             outputorder="nodesfirst",
         )
-        
+
         # Pass estimated dimensions to post-processor
         self._est_width = est_width
         self._est_height = est_height
@@ -437,13 +475,15 @@ class GraphvizRenderer:
         # Enhanced Node Attributes
         dot.attr(
             "node",
-            shape="plain",  # Use plain shape because HTML label handles the box
+            shape="box",  # Default shape, will be overridden
             fontname=self.style.font_name,
             fontsize=str(self.style.font_size),
-            margin="0",  # No margin around the HTML table
+            margin="0.2,0.1",  # Padding inside node
             # Ensure no default colors interfere
             color="transparent",
             fillcolor="transparent",
+            style="filled,rounded",
+            height="0.55",  # Increased to 0.55 as requested
         )
 
         # Enhanced Edge Attributes
@@ -468,6 +508,15 @@ class GraphvizRenderer:
                 nodes_by_parent[parent] = []
             nodes_by_parent[parent].append(node)
 
+        # Identify input nodes (DataNodes with no incoming edges)
+        # Need edge targets
+        target_ids = {e.target for e in graph_data.edges}
+        self._input_ids = {
+            n.id
+            for n in graph_data.nodes
+            if isinstance(n, (DataNode, GroupDataNode)) and n.id not in target_ids
+        }
+
         # Recursive function to add nodes and clusters
         def add_nodes_recursive(parent_id: Optional[str], container):
             if parent_id not in nodes_by_parent:
@@ -482,7 +531,10 @@ class GraphvizRenderer:
                         c.attr(style="rounded,dashed")
                         c.attr(color=cluster_border_color)
                         c.attr(fontcolor=cluster_label_color)
-                        if cluster_fill_color and cluster_fill_color not in {"transparent", "none"}:
+                        if cluster_fill_color and cluster_fill_color not in {
+                            "transparent",
+                            "none",
+                        }:
                             c.attr(bgcolor=cluster_fill_color)
                             c.attr(fillcolor=cluster_fill_color)
                             c.attr(style="rounded,filled,dashed")
@@ -506,7 +558,7 @@ class GraphvizRenderer:
                 self._id_mapping.get(edge.target, edge.target),
                 label=edge.label,
             )
-            
+
         return dot
 
     def compute_layout(self, graph_data: VisualizationGraph) -> Dict[str, Any]:
@@ -515,13 +567,14 @@ class GraphvizRenderer:
             raise ImportError("Graphviz is not installed")
 
         dot = self._build_dot(graph_data)
-        
+
         # Render to JSON
         # format='json' returns a bytes object containing JSON
-        json_bytes = dot.pipe(format='json')
-        
+        json_bytes = dot.pipe(format="json")
+
         import json
-        return json.loads(json_bytes.decode('utf-8'))
+
+        return json.loads(json_bytes.decode("utf-8"))
 
     def render(self, graph_data: VisualizationGraph) -> str:
         """Render the graph to SVG."""
@@ -543,122 +596,59 @@ class GraphvizRenderer:
         """Add a single node to the graph."""
         # Use mapped ID instead of raw node.id
         node_id = self._id_mapping.get(node.id, node.id)
-        
+
+        # Determine style
         if isinstance(node, FunctionNode):
-            node_style = (
+            style_conf = (
                 self.style.dual_node
                 if isinstance(node, DualNode)
                 else self.style.function_node
             )
-            subtitle = "DUAL NODE" if isinstance(node, DualNode) else "FUNCTION"
+            shape = "box"
+            style_attr = "filled,rounded"  # Keep rounded
+            label = node.label
 
-            label = self._create_clean_label(
-                title=node.label, subtitle=subtitle, style=node_style
+        elif isinstance(node, PipelineNode):
+            style_conf = self.style.pipeline_node
+            shape = "box"
+            style_attr = "filled,rounded"  # Keep rounded
+            label = node.label
+
+        elif isinstance(node, (DataNode, GroupDataNode)):
+            # Check if it is an input node
+            if node.id in getattr(self, "_input_ids", set()):
+                style_conf = getattr(self.style, "input_node", self.style.data_node)
+            else:
+                style_conf = self.style.data_node
+            
+            # Data nodes as rounded rectangles (more rounded)
+            shape = "box"
+            style_attr = "filled,rounded"
+            label = (
+                node.name
+                if isinstance(node, DataNode)
+                else f"Inputs ({len(node.nodes)})"
             )
 
-            container.node(
-                node_id,
-                label=label,
-            )
+        else:
+            style_conf = self.style.data_node
+            shape = "box"
+            style_attr = "filled"
+            label = str(node.id)
 
-        elif isinstance(node, PipelineNode):  # Collapsed
-            node_style = self.style.pipeline_node
-            label = self._create_clean_label(
-                title=node.label,
-                subtitle="PIPELINE",
-                style=node_style,
-            )
+        # Convert colors to hex placeholders
+        bg = _color_token_to_hex(style_conf.bg_color, "#FFFFFF")
+        border = _color_token_to_hex(style_conf.border_color, "#000000")
+        text = _color_token_to_hex(style_conf.text_color, "#000000")
 
-            # Add URL for interactivity
-            container.node(
-                node_id,
-                label=label,
-            )
-
-        elif isinstance(node, DataNode):
-            node_style = self.style.data_node
-            label = self._create_clean_label(
-                title=node.name,
-                subtitle=node.type_hint or "Data",
-                style=node_style,
-                is_compact=True,
-            )
-
-            container.node(
-                node_id,
-                label=label,
-            )
-
-        elif isinstance(node, GroupDataNode):
-            node_style = self.style.data_node
-            label = self._create_clean_label(
-                title="Inputs",
-                subtitle=f"{len(node.nodes)} items",
-                style=node_style,
-                is_compact=True,
-            )
-
-            container.node(
-                node_id,
-                label=label,
-            )
-
-    def _create_clean_label(
-        self,
-        title: str,
-        subtitle: str,
-        style: NodeStyle,
-        is_compact: bool = False,
-    ) -> str:
-        """Create a clean, professional HTML label mimicking the JS frontend layout."""
-
-        def escape(s):
-            return (
-                s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                if s
-                else ""
-            )
-
-        title = escape(title)
-        subtitle = escape(subtitle)
-
-        # Sizing
-        title_size = "12" if is_compact else "14"
-        sub_size = "9" if is_compact else "10"
-        padding = "4" if is_compact else "8"
-        
-        # Fixed width for uniform node sizes
-        # Graphviz HTML tables don't support 'width' on the table itself reliably in all versions,
-        # but we can set width on the main cell.
-        main_cell_width = "200" if is_compact else "240"
-
-        # !!! CRITICAL FIX: Graphviz HTML labels DO NOT support the 'CLASS' attribute on most versions.
-        # Attempting to use CLASS causes warnings and they are ignored.
-        # We must use the HEX placeholder swapping strategy.
-
-        # 1. Define unique hex placeholder codes for each semantic variable so Graphviz accepts them.
-        # The placeholders are swapped for CSS variables after rendering.
-
-        bg_color = _color_token_to_hex(style.bg_color, "#FFFFFF")
-        border_color = _color_token_to_hex(style.border_color, "#cbd5e1")
-        text_color = _color_token_to_hex(style.text_color, "#0f172a")
-        accent_color = _color_token_to_hex(style.accent_color, "#4f46e5")
-
-        # Note: STYLE="ROUNDED" works on TABLE in some versions, but ignored in others.
-        # We rely on the outer shape="plain" so the table is the visual node.
-        # Tooltips are automatically generated from the node ID by Graphviz.
-        
-        # Simpler, cleaner layout without icon
-        # Using border color to indicate type
-        
-        return f'''<
-        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="0" BGCOLOR="{bg_color}" COLOR="{border_color}" STYLE="ROUNDED" WIDTH="{main_cell_width}">
-            <TR>
-                <TD BORDER="0" CELLPADDING="{padding}" WIDTH="{main_cell_width}">
-                    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
-                        <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="{sub_size}" COLOR="{accent_color}"><B>{subtitle}</B></FONT></TD></TR>
-                        <TR><TD ALIGN="LEFT"><B><FONT POINT-SIZE="{title_size}" COLOR="{text_color}">{title}</FONT></B></TD></TR>
-                    </TABLE>
-                </TD>
-            </TR>
-        </TABLE>>'''
+        container.node(
+            node_id,
+            label=label,
+            shape=shape,
+            style=style_attr,
+            color=border,
+            fillcolor=bg,
+            fontcolor=text,
+            penwidth="2.0",  # slightly thicker border for elegance
+            # width and height are dynamic by default or constrained by global node attributes
+        )

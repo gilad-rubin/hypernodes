@@ -77,11 +77,12 @@ class PipelineWidget(widgets.HTML):
 
         # We set the iframe size to the estimated size
         # This ensures the notebook cell expands to fit the graph
+        # Width is set to the estimated width to avoid excessive padding for narrow graphs
         iframe_html = (
             f"{css_fix}"
             f'<iframe srcdoc="{escaped_html}" '
             f'width="{est_width}" height="{est_height}" frameborder="0" '
-            f'style="border: none; width: 100%; min-width: {est_width}px; height: {est_height}px; display: block; background: transparent;" '
+            f'style="border: none; width: {est_width}px; max-width: 100%; height: {est_height}px; display: block; background: transparent;" '
             f'sandbox="allow-scripts allow-same-origin allow-popups allow-forms">'
             f"</iframe>"
         )
