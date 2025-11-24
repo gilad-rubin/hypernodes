@@ -40,7 +40,7 @@ from .node import Node, node
 from .pipeline import Pipeline
 from .viz import (
     DESIGN_STYLES,
-    GraphvizStyle,
+    GraphvizTheme,
     visualize,
 )
 
@@ -70,7 +70,7 @@ __all__ = [
     "PipelineCallback",
     "CallbackContext",
     # Visualization
-    "GraphvizStyle",
+    "GraphvizTheme",
     "DESIGN_STYLES",
     "visualize",
     # Exceptions

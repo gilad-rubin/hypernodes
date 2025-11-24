@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+
 def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     """Generate an HTML document for React Flow rendering.
 

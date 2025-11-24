@@ -12,13 +12,13 @@ from ..structures import (
     VizEdge,
     VizNode,
 )
-from .style import DESIGN_STYLES, GraphvizStyle
+from .style import DESIGN_STYLES, GraphvizTheme
 
 
 class GraphvizRenderer:
     """Renders VisualizationGraph to Graphviz SVG via DOT format."""
 
-    def __init__(self, style: Union[str, GraphvizStyle] = "default"):
+    def __init__(self, style: Union[str, GraphvizTheme] = "default"):
         if isinstance(style, str):
             self.style = DESIGN_STYLES.get(style, DESIGN_STYLES["default"])
         else:
@@ -38,7 +38,7 @@ class GraphvizRenderer:
             self._add_line(f'{k}="{v}";')
 
         # Node attributes
-        node_attrs = ", ".join(f'{k}="{v}"' for k, v in self.style.node_attr.items())
+        node_attrs = ", ".join(f'{k}="{v}"' for k, v in self.style.node_attr_defaults.items())
         self._add_line(f"node [{node_attrs}];")
 
         # Edge attributes
@@ -115,11 +115,11 @@ class GraphvizRenderer:
         label = node.label
 
         # Get config for pipeline to use its colors for the cluster
-        config = self.style.node_configs.get("pipeline", self.style.node_configs["function"])
+        config = self.style.node_styles.get("pipeline", self.style.node_styles["function"])
         
         # Style for cluster
-        color = config.outline_color
-        font_color = config.text_color
+        color = config.color.outline
+        font_color = config.color.text
 
         self._add_line(f'subgraph "{cluster_name}" {{')
         self._indent_level += 1
@@ -150,8 +150,8 @@ class GraphvizRenderer:
         elif isinstance(node, GroupDataNode):
             config_key = "bound_group" if node.is_bound else "group"
 
-        config = self.style.node_configs.get(
-            config_key, self.style.node_configs["data"]
+        config = self.style.node_styles.get(
+            config_key, self.style.node_styles["data"]
         )
 
         rows = []
@@ -164,7 +164,7 @@ class GraphvizRenderer:
                     label += f" : {type_hint}"
 
                 label_html = self._format_label_html(
-                    label, color=config.text_color, is_bold=config.is_bold
+                    label, color=config.color.text, is_bold=config.is_bold
                 )
                 rows.append(
                     f'<TR><TD ALIGN="CENTER" BALIGN="CENTER">{label_html}</TD></TR>'
@@ -177,7 +177,7 @@ class GraphvizRenderer:
                 label += f" : {type_hint}"
 
             label_html = self._format_label_html(
-                label, color=config.text_color, is_bold=config.is_bold
+                label, color=config.color.text, is_bold=config.is_bold
             )
             rows.append(
                 f'<TR><TD ALIGN="CENTER" BALIGN="CENTER">{label_html}</TD></TR>'
@@ -190,7 +190,7 @@ class GraphvizRenderer:
 >"""
         # margin="0.1" to reduce space between label and border
         self._add_line(
-            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.fill_color}", color="{config.outline_color}", margin="{config.margin}"];'
+            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
         )
 
     def _render_combined_node(
@@ -204,13 +204,13 @@ class GraphvizRenderer:
         elif isinstance(node, DualNode):
             config_key = "dual"
 
-        config = self.style.node_configs.get(
-            config_key, self.style.node_configs["function"]
+        config = self.style.node_styles.get(
+            config_key, self.style.node_styles["function"]
         )
 
         node_label = self._get_label(node)
         node_label_html = self._format_label_html(
-            node_label, color=config.text_color, is_bold=config.is_bold
+            node_label, color=config.color.text, is_bold=config.is_bold
         )
 
         rows = []
@@ -232,7 +232,7 @@ class GraphvizRenderer:
                     out_label_esc += f" : <I>{html.escape(type_hint)}</I>"
 
                 # Use same text color - outputs are typically not bold unless specified otherwise
-                out_label_html = f'<FONT COLOR="{config.text_color}">{out_label_esc}</FONT>'
+                out_label_html = f'<FONT COLOR="{config.color.text}">{out_label_esc}</FONT>'
 
                 port_id = self._get_port_id(out)
                 rows.append(
@@ -245,7 +245,7 @@ class GraphvizRenderer:
 </TABLE>
 >"""
         self._add_line(
-            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.fill_color}", color="{config.outline_color}", margin="{config.margin}"];'
+            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
         )
 
     def _render_edge(self, edge: VizEdge, node_map: Dict[str, VizNode]):
@@ -271,9 +271,10 @@ class GraphvizRenderer:
         ):
             return
 
-        # Connect from bottom (:s) to top (:n)
-        gv_source = f'"{actual_source_id}":s'
-        gv_target = f'"{target_id}":n'
+        # Connect using standard graphviz routing (smart placement)
+        # Removed :s and :n to allow cleaner arrows not forced to center
+        gv_source = f'"{actual_source_id}"'
+        gv_target = f'"{target_id}"'
 
         self._add_line(f"{gv_source} -> {gv_target};")
 

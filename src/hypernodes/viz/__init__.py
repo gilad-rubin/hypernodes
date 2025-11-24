@@ -4,7 +4,7 @@ from typing import Any, Optional, Union
 
 from ..pipeline import Pipeline
 from .graphviz.renderer import GraphvizRenderer
-from .graphviz.style import DESIGN_STYLES, GraphvizStyle
+from .graphviz.style import DESIGN_STYLES, GraphvizTheme
 from .js.renderer import JSRenderer
 from .ui_handler import UIHandler
 

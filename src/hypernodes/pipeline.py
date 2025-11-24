@@ -258,7 +258,7 @@ class Pipeline:
             group_inputs: Whether to group inputs in the frontend (graphviz)
             show_legend: Whether to show a legend explaining node types
             show_types: Whether to show type hints and default values
-            style: Style name from DESIGN_STYLES or GraphvizStyle object
+            style: Style name from DESIGN_STYLES or GraphvizTheme object
             show_mapping_labels: Graphviz-only flag to display mapping labels on edges
             return_type: "auto", "graphviz", or "html"
             interactive: If True, uses ipywidget engine
