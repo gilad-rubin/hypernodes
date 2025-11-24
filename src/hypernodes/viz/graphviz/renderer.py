@@ -38,7 +38,9 @@ class GraphvizRenderer:
             self._add_line(f'{k}="{v}";')
 
         # Node attributes
-        node_attrs = ", ".join(f'{k}="{v}"' for k, v in self.style.node_attr_defaults.items())
+        node_attrs = ", ".join(
+            f'{k}="{v}"' for k, v in self.style.node_attr_defaults.items()
+        )
         self._add_line(f"node [{node_attrs}];")
 
         # Edge attributes
@@ -115,21 +117,25 @@ class GraphvizRenderer:
         label = node.label
 
         # Get config for pipeline to use its colors for the cluster
-        config = self.style.node_styles.get("pipeline", self.style.node_styles["function"])
-        
+        config = self.style.node_styles.get(
+            "pipeline", self.style.node_styles["function"]
+        )
+
         # Style for cluster
-        color = config.color.outline
+        color = "#000000"  # Force black outline for nested pipelines
         font_color = config.color.text
 
         self._add_line(f'subgraph "{cluster_name}" {{')
         self._indent_level += 1
 
         self._add_line(f'label="{label}";')
-        self._add_line('style="rounded";')  # Solid outline, transparent background
+        self._add_line('style="rounded,bold";')  # Solid outline, transparent background
         self._add_line(f'color="{color}";')
         self._add_line(f'fontcolor="{font_color}";')
         self._add_line(f'fontname="{self.style.font_name}";')
         self._add_line('margin="20";')
+        # Add explicit penwidth for boldness
+        self._add_line('penwidth="1.0";')
 
         # Recurse
         self._render_scope(node.id)
@@ -150,9 +156,7 @@ class GraphvizRenderer:
         elif isinstance(node, GroupDataNode):
             config_key = "bound_group" if node.is_bound else "group"
 
-        config = self.style.node_styles.get(
-            config_key, self.style.node_styles["data"]
-        )
+        config = self.style.node_styles.get(config_key, self.style.node_styles["data"])
 
         rows = []
         if isinstance(node, GroupDataNode):
@@ -232,7 +236,9 @@ class GraphvizRenderer:
                     out_label_esc += f" : <I>{html.escape(type_hint)}</I>"
 
                 # Use same text color - outputs are typically not bold unless specified otherwise
-                out_label_html = f'<FONT COLOR="{config.color.text}">{out_label_esc}</FONT>'
+                out_label_html = (
+                    f'<FONT COLOR="{config.color.text}">{out_label_esc}</FONT>'
+                )
 
                 port_id = self._get_port_id(out)
                 rows.append(
