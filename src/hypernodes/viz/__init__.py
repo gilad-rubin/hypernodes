@@ -36,7 +36,9 @@ def visualize(
             return GraphvizWidget(pipeline, depth=depth, theme=kwargs.get("style", "default"), **kwargs)
             
         # Static rendering
-        handler = UIHandler(pipeline, depth=depth)
+        # Default group_inputs to True for Graphviz unless explicitly disabled
+        group_inputs = kwargs.get("group_inputs", True)
+        handler = UIHandler(pipeline, depth=depth, group_inputs=group_inputs)
         # For static Graphviz, don't traverse collapsed pipelines (they should remain truly collapsed)
         graph_data = handler.get_visualization_data(traverse_collapsed=False)
         

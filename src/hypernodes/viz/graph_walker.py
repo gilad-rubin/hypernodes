@@ -62,13 +62,27 @@ class GraphWalker:
         
         # 1. Register bound inputs as DataNodes in the current scope
         for param_name, value in pipeline.bound_inputs.items():
+            # Extract type hint from any node in the pipeline that uses this parameter
+            type_hint = None
+            for node in graph.execution_order:
+                if hasattr(node, "func"):
+                    try:
+                        hints = get_type_hints(node.func)
+                        if param_name in hints:
+                            type_str = str(hints[param_name]).replace("typing.", "").replace("<class '", "").replace("'>", "")
+                            type_hint = self._simplify_type_string(type_str)
+                            break
+                    except Exception:
+                        pass
+            
             data_node_id = f"data_{prefix}bound_{param_name}"
             data_node = DataNode(
                 id=data_node_id,
                 parent_id=parent_id,
                 name=param_name,
                 is_bound=True,
-                source_id=None # Bound value, no source node
+                source_id=None, # Bound value, no source node
+                type_hint=type_hint
             )
             nodes_out.append(data_node)
             scope[param_name] = data_node_id
@@ -276,11 +290,23 @@ class GraphWalker:
                             break
                     
                     if not exists:
+                        # Extract type hint for input
+                        type_hint = None
+                        if hasattr(node, "func"):
+                            try:
+                                hints = get_type_hints(node.func)
+                                if actual_arg in hints:
+                                    type_str = str(hints[actual_arg]).replace("typing.", "").replace("<class '", "").replace("'>", "")
+                                    type_hint = self._simplify_type_string(type_str)
+                            except Exception:
+                                pass
+
                         input_node = DataNode(
                             id=input_node_id,
                             parent_id=nodes_out[-1].parent_id if nodes_out else None,
                             name=actual_arg,
-                            is_bound=False
+                            is_bound=False,
+                            type_hint=type_hint
                         )
                         nodes_out.append(input_node)
                         scope[actual_arg] = input_node_id
