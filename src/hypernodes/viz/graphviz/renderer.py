@@ -122,7 +122,7 @@ class GraphvizRenderer:
         self._indent_level += 1
 
         self._add_line(f'label="{label}";')
-        self._add_line('style="rounded,dashed";')
+        self._add_line('style="rounded";')  # Solid outline, transparent background
         self._add_line(f'color="{color}";')
         self._add_line(f'fontcolor="{font_color}";')
         self._add_line(f'fontname="{self.style.font_name}";')

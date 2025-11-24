@@ -70,7 +70,7 @@ CATEGORY20 = [
     "#bcbd22",
     "#dbdb8d",  # 16,17: Olive
     "#17becf",
-    "#dbdb8d",  # 18,19: Cyan
+    "#9edae5",  # 18,19: Cyan
 ]
 
 # Default node configurations
@@ -109,11 +109,12 @@ DEFAULT_STYLE = GraphvizStyle(
     edge_font_size=10,
     graph_attr={
         "rankdir": "TB",
-        "ranksep": "1.3",  # More vertical space
-        "nodesep": "1.05",  # More horizontal space
-        # "splines": "true",  # Smoother lines
-        "pad": "0.55",
+        "ranksep": "0.8",  # More vertical space
+        "nodesep": "0.7",  # More horizontal space
+        "splines": "spline",  # Orthogonal lines for straighter edges
+        "pad": "0.3",
         "overlap": "false",
+        "bgcolor": "transparent",  # Restore transparent background
     },
     node_attr={
         "shape": "plain",
@@ -125,9 +126,10 @@ DEFAULT_STYLE = GraphvizStyle(
     edge_attr={
         "fontname": "Helvetica",
         "fontsize": "10",
-        "penwidth": "1.01",
+        "penwidth": "1.2",  # Match previous penwidth
         "color": "#555555",
-        "arrowsize": "0.8",
+        "arrowsize": "0.7",  # Match previous arrowsize
+        "arrowhead": "vee",  # Match previous arrowhead
     },
     node_configs=DEFAULT_NODE_CONFIGS,
 )
