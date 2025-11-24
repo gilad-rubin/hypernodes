@@ -10,27 +10,13 @@ class NodeConfig:
     style: str = "filled,rounded"
     is_bold: bool = False
     margin: str = "0.1"
+    fill_color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    text_color: str = "#000000"
 
 
 @dataclass
 class GraphvizStyle:
-    # Colors
-    arg_node_color: str
-    arg_outline_color: str
-    arg_text_color: str
-    func_node_color: str
-    func_outline_color: str
-    func_text_color: str
-    nested_func_node_color: str
-    nested_func_outline_color: str
-    nested_func_text_color: str
-    bound_node_color: str
-    bound_outline_color: str
-    bound_text_color: str
-    group_node_color: str
-    group_outline_color: str
-    group_text_color: str
-
     # Edges
     edge_color: str
 
@@ -75,45 +61,74 @@ CATEGORY20 = [
 
 # Default node configurations
 DEFAULT_NODE_CONFIGS = {
-    "function": NodeConfig(shape="box", style="filled,rounded", is_bold=True),
-    "pipeline": NodeConfig(shape="box", style="filled,rounded", is_bold=True),
-    "dual": NodeConfig(shape="box", style="filled,rounded", is_bold=True),
-    "data": NodeConfig(shape="box", style="filled,rounded", is_bold=False),
-    "bound_data": NodeConfig(shape="box", style="filled,rounded,dashed", is_bold=False),
-    "group": NodeConfig(shape="box", style="filled,rounded", is_bold=False),
+    "function": NodeConfig(
+        shape="box",
+        style="filled,rounded",
+        is_bold=True,
+        fill_color=CATEGORY20[1],  # Light Blue
+        outline_color=CATEGORY20[0],  # Dark Blue
+        text_color="black",
+    ),
+    "pipeline": NodeConfig(
+        shape="box",
+        style="filled,rounded",
+        is_bold=True,
+        fill_color=CATEGORY20[9],  # Light Purple
+        outline_color=CATEGORY20[8],  # Dark Purple
+        text_color="black",
+    ),
+    "dual": NodeConfig(
+        shape="box",
+        style="filled,rounded",
+        is_bold=True,
+        fill_color=CATEGORY20[1],  # Light Blue (Same as function for now)
+        outline_color=CATEGORY20[0],  # Dark Blue
+        text_color="black",
+    ),
+    "data": NodeConfig(
+        shape="box",
+        style="filled,rounded",
+        is_bold=False,
+        fill_color=CATEGORY20[5],  # Light Green
+        outline_color=CATEGORY20[4],  # Dark Green
+        text_color="black",
+    ),
+    "bound_data": NodeConfig(
+        shape="box",
+        style="filled,rounded,dashed",
+        is_bold=False,
+        fill_color=CATEGORY20[7],  # Light Red
+        outline_color=CATEGORY20[6],  # Dark Red
+        text_color="black",
+    ),
+    "group": NodeConfig(
+        shape="box",
+        style="filled,rounded",
+        is_bold=False,
+        fill_color=CATEGORY20[5],  # Light Green
+        outline_color=CATEGORY20[4],  # Dark Green
+        text_color="black",
+    ),
     "bound_group": NodeConfig(
-        shape="box", style="filled,rounded,dashed", is_bold=False
+        shape="box",
+        style="filled,rounded,dashed",
+        is_bold=False,
+        fill_color=CATEGORY20[7],  # Light Red
+        outline_color=CATEGORY20[6],  # Dark Red
+        text_color="black",
     ),
 }
 
 # Mapping to semantic roles using Light variants for background, Dark for outline
 DEFAULT_STYLE = GraphvizStyle(
-    arg_node_color=CATEGORY20[5],  # Light Green
-    arg_outline_color=CATEGORY20[4],  # Dark Green
-    arg_text_color="black",
-    func_node_color=CATEGORY20[1],  # Light Blue
-    func_outline_color=CATEGORY20[0],  # Dark Blue
-    func_text_color="black",
-    nested_func_node_color=CATEGORY20[9],  # Light Purple
-    nested_func_outline_color=CATEGORY20[8],  # Dark Purple
-    nested_func_text_color="black",
-    bound_node_color=CATEGORY20[7],  # Light Red
-    bound_outline_color=CATEGORY20[6],  # Dark Red
-    bound_text_color="black",
-    group_node_color=CATEGORY20[5],  # Light Green (same as arg)
-    group_outline_color=CATEGORY20[4],  # Dark Green
-    group_text_color="black",
     edge_color="#555555",
     font_name="Helvetica",
     font_size=12,
     edge_font_size=10,
     graph_attr={
-        "rankdir": "TB",
+        # "rankdir": "TB",
         "ranksep": "0.8",  # More vertical space
-        "nodesep": "0.7",  # More horizontal space
-        "splines": "spline",  # Orthogonal lines for straighter edges
-        "pad": "0.3",
-        "overlap": "false",
+        "nodesep": "0.5",  # More horizontal space
         "bgcolor": "transparent",  # Restore transparent background
     },
     node_attr={
