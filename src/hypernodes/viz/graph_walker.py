@@ -349,51 +349,61 @@ class GraphWalker:
         self._handle_output_connections(node, node_id, nodes_out, edges_out, scope, parent_pipeline)
 
     def _group_data_nodes(self, nodes: List[VizNode], edges: List[VizEdge]) -> tuple[List[VizNode], List[VizEdge]]:
-        """Group DataNodes that are inputs to the same node."""
-        # Map consumer_id -> list of input DataNodes
-        consumer_inputs: Dict[str, List[DataNode]] = {}
-        data_node_map = {n.id: n for n in nodes if isinstance(n, DataNode)}
-        
+        """Group DataNodes that share source, target set, and bound state."""
+        data_nodes: Dict[str, DataNode] = {
+            n.id: n for n in nodes if isinstance(n, DataNode)
+        }
+
+        # Build outgoing target sets for each data node
+        targets_map: Dict[str, set[str]] = {n_id: set() for n_id in data_nodes}
         for edge in edges:
-            if edge.source in data_node_map:
-                consumer_id = edge.target
-                data_node = data_node_map[edge.source]
-                
-                if data_node.source_id is None:
-                    if consumer_id not in consumer_inputs:
-                        consumer_inputs[consumer_id] = []
-                    consumer_inputs[consumer_id].append(data_node)
+            if edge.source in data_nodes:
+                targets_map[edge.source].add(edge.target)
+
+        # Bucket by (source_id, targets, is_bound)
+        groups: Dict[tuple[Optional[str], tuple[str, ...], bool], List[DataNode]] = {}
+        for dn_id, dn in data_nodes.items():
+            key = (
+                dn.source_id,
+                tuple(sorted(targets_map.get(dn_id, []))),
+                dn.is_bound,
+            )
+            groups.setdefault(key, []).append(dn)
 
         new_nodes = list(nodes)
         new_edges = list(edges)
-        
-        for consumer_id, input_nodes in consumer_inputs.items():
-            # Group by is_bound
-            bound_group = [n for n in input_nodes if n.is_bound]
-            unbound_group = [n for n in input_nodes if not n.is_bound]
-            
-            for group, is_bound in [(bound_group, True), (unbound_group, False)]:
-                if len(group) >= 2:
-                    # Create GroupDataNode
-                    group_id = f"group_{consumer_id}_{'bound' if is_bound else 'unbound'}"
-                    group_node = GroupDataNode(
-                        id=group_id,
-                        parent_id=group[0].parent_id,
-                        nodes=group,
-                        is_bound=is_bound
-                    )
-                    new_nodes.append(group_node)
-                    
-                    # Remove individual DataNodes
-                    for n in group:
-                        if n in new_nodes:
-                            new_nodes.remove(n)
-                        
-                    # Add edge Group -> Consumer
-                    new_edges.append(VizEdge(source=group_id, target=consumer_id))
-                    
-                    # Remove old edges
-                    new_edges = [e for e in new_edges if not (e.target == consumer_id and e.source in [n.id for n in group])]
+
+        for (source_id, targets, is_bound), group in groups.items():
+            if len(group) < 2:
+                continue
+
+            group_id = f"group_{source_id or 'input'}_{abs(hash((source_id, targets, is_bound))) % 100000}"
+            group_node = GroupDataNode(
+                id=group_id,
+                parent_id=group[0].parent_id,
+                nodes=group,
+                is_bound=is_bound,
+                source_id=source_id,
+            )
+
+            grouped_ids = {g.id for g in group}
+            new_nodes = [n for n in new_nodes if getattr(n, "id", None) not in grouped_ids]
+            new_nodes.append(group_node)
+
+            # Remove edges touching grouped data nodes
+            new_edges = [
+                e
+                for e in new_edges
+                if e.source not in grouped_ids and e.target not in grouped_ids
+            ]
+
+            # Source -> group
+            if source_id:
+                new_edges.append(VizEdge(source=source_id, target=group_id))
+
+            # Group -> targets
+            for tgt in targets:
+                new_edges.append(VizEdge(source=group_id, target=tgt))
 
         return new_nodes, new_edges
 

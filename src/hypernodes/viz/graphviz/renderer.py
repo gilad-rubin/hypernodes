@@ -1,4 +1,5 @@
 import re
+import html
 from typing import Any, Dict, List, Optional
 
 try:
@@ -17,6 +18,7 @@ from ..structures import (
     PipelineNode,
     VisualizationGraph,
     VizNode,
+    VizEdge,
 )
 from ..utils import read_viz_asset
 from .style import DESIGN_STYLES
@@ -52,39 +54,47 @@ COLOR_TOKEN_TO_PLACEHOLDER: Dict[str, str] = {
     "var(--hn-input-accent)": "#100047",
     "var(--hn-surface-bg)": "#100050",
     "var(--hn-cluster-fill)": "#100051",
+    "var(--hn-group-bg)": "#100052",
+    "var(--hn-group-border)": "#100053",
+    "var(--hn-group-text)": "#100054",
+    "var(--hn-group-accent)": "#100055",
 }
 
 CSS_VAR_FALLBACKS: Dict[str, str] = {
     "--hn-surface-bg": "#f8fafc",
     "--hn-edge": "#94a3b8",
-    "--hn-node-bg": "#ffffff",
-    "--hn-node-border": "#e2e8f0",
+    "--hn-node-bg": "#f8fbff",
+    "--hn-node-border": "#d6e3f0",
     "--hn-node-text": "#0f172a",
-    "--hn-cluster-border": "#cbd5e1",
+    "--hn-cluster-border": "#d5deea",
     "--hn-cluster-text": "#475569",
-    "--hn-cluster-fill": "#f8fafc",
-    "--hn-func-accent": "#2563eb",
-    "--hn-func-text": "#ffffff",
-    "--hn-func-bg": "#dbeafe",
-    "--hn-func-border": "#93c5fd",
-    "--hn-pipe-accent": "#d97706",
-    "--hn-pipe-accent-text": "#ffffff",
-    "--hn-pipe-bg": "#fef3c7",
-    "--hn-pipe-border": "#fde68a",
-    "--hn-pipe-text": "#78350f",
-    "--hn-dual-accent": "#9333ea",
-    "--hn-dual-accent-text": "#ffffff",
-    "--hn-dual-bg": "#f3e8ff",
-    "--hn-dual-border": "#e9d5ff",
-    "--hn-dual-text": "#6b21a8",
-    "--hn-data-bg": "#f3f4f6",
-    "--hn-data-border": "#d1d5db",
-    "--hn-data-text": "#374151",
-    "--hn-data-accent": "#4b5563",
-    "--hn-input-bg": "#e0f2fe",
-    "--hn-input-border": "#7dd3fc",
-    "--hn-input-text": "#0c4a6e",
-    "--hn-input-accent": "#0284c7",
+    "--hn-cluster-fill": "#f3f6fb",
+    "--hn-func-accent": "#5b6ee1",
+    "--hn-func-text": "#0f172a",
+    "--hn-func-bg": "#e8edff",
+    "--hn-func-border": "#5b6ee1",
+    "--hn-pipe-accent": "#f4a11f",
+    "--hn-pipe-accent-text": "#0f172a",
+    "--hn-pipe-bg": "#fff3d9",
+    "--hn-pipe-border": "#f4a11f",
+    "--hn-pipe-text": "#0f172a",
+    "--hn-dual-accent": "#d66ae0",
+    "--hn-dual-accent-text": "#0f172a",
+    "--hn-dual-bg": "#ffe8fb",
+    "--hn-dual-border": "#d66ae0",
+    "--hn-dual-text": "#0f172a",
+    "--hn-data-bg": "#edf2f7",
+    "--hn-data-border": "#5f6b8a",
+    "--hn-data-text": "#0f172a",
+    "--hn-data-accent": "#5f6b8a",
+    "--hn-input-bg": "#e3f5ff",
+    "--hn-input-border": "#28a4e2",
+    "--hn-input-text": "#0f172a",
+    "--hn-input-accent": "#1c9ad6",
+    "--hn-group-bg": "#eef2ff",
+    "--hn-group-border": "#c7d2fe",
+    "--hn-group-text": "#312e81",
+    "--hn-group-accent": "#818cf8",
 }
 
 
@@ -108,6 +118,71 @@ def _build_hex_to_var_map() -> Dict[str, str]:
 
 
 HEX_TO_VAR = _build_hex_to_var_map()
+
+
+def _wrap_text_lines(text: str, max_chars: int = 24) -> List[str]:
+    """
+    Soft-wrap text for HTML-like Graphviz labels.
+    Break on underscores, hyphens, and whitespace while avoiding leading separators.
+    """
+    if text is None:
+        return [""]
+
+    tokens = re.split(r"([_\-\s]+)", text)
+    lines: List[str] = []
+    current = ""
+
+    for tok in tokens:
+        if not tok:
+            continue
+
+        token = " " if tok.strip() == "" else tok
+        # Flush the line if adding the token would exceed the limit
+        if current and len(current) + len(token) > max_chars:
+            lines.append(current.strip())
+            current = ""
+            token = token.lstrip("_- ").lstrip()
+
+        # If the token itself is too long, hard-split it
+        while len(token) > max_chars:
+            lines.append(token[:max_chars].strip())
+            token = token[max_chars:]
+
+        current += token
+
+    if current.strip():
+        lines.append(current.strip())
+
+    return lines or [""]
+
+
+def _collapse_output_nodes(graph_data: VisualizationGraph) -> VisualizationGraph:
+    """Remove output data nodes (with source_id) and rewire edges to producers."""
+    data_nodes: Dict[str, DataNode] = {
+        n.id: n for n in graph_data.nodes if isinstance(n, DataNode) and n.source_id
+    }
+    if not data_nodes:
+        return graph_data
+
+    output_ids = set(data_nodes.keys())
+    new_nodes = [n for n in graph_data.nodes if n.id not in output_ids]
+    new_edges: List[VizEdge] = []
+
+    for edge in graph_data.edges:
+        src = edge.source
+        tgt = edge.target
+
+        if src in output_ids:
+            src = data_nodes[src].source_id or src
+        if tgt in output_ids:
+            tgt = data_nodes[tgt].source_id or tgt
+
+        if src == tgt:
+            continue
+
+        new_edges.append(VizEdge(source=src, target=tgt, label=edge.label))
+
+    return VisualizationGraph(nodes=new_nodes, edges=new_edges)
 
 
 def _color_token_to_hex(value: Optional[str], fallback: str = "#000000") -> str:
@@ -148,7 +223,7 @@ def _strip_svg_prolog(svg_data: str) -> str:
 
 def _wrap_svg_html(svg_data: str) -> str:
     """Wrap responsive SVG in a scrollable container with theme support."""
-    theme_utils = read_viz_asset("theme_utils.js")
+    theme_utils = read_viz_asset("theme_utils.js") or ""
 
     # Unique ID for this visualization to avoid conflicts
     import uuid
@@ -160,107 +235,180 @@ def _wrap_svg_html(svg_data: str) -> str:
     (function() {{
         {theme_utils}
         
+        const debugLog = (...args) => console.debug('[HN-Graphviz]', ...args);
+        debugLog('theme utils loaded', Boolean(window.HyperNodesTheme));
+        
         const container = document.getElementById("{viz_id}");
-        if (container && window.HyperNodesTheme) {{
-            const {{ detectHostTheme }} = window.HyperNodesTheme;
-            
-            const THEME_VARS = {{
-                light: {{
-                    '--hn-surface-bg': '#ffffff',
-                    '--hn-edge': '#94a3b8',
-                    '--hn-node-bg': '#ffffff',
-                    '--hn-node-border': '#e2e8f0',
-                    '--hn-node-text': '#0f172a',
-                    '--hn-cluster-border': '#cbd5e1',
-                    '--hn-cluster-text': '#475569',
-                    '--hn-func-accent': '#10b981',
-                    '--hn-func-text': '#065f46',
-                    '--hn-func-bg': '#d1fae5',
-                    '--hn-func-border': '#10b981',
-                    '--hn-pipe-accent': '#a855f7',
-                    '--hn-pipe-accent-text': '#1e3a8a',
-                    '--hn-pipe-bg': '#f3e8ff',
-                    '--hn-pipe-border': '#a855f7',
-                    '--hn-pipe-text': '#581c87',
-                    '--hn-dual-accent': '#9333ea',
-                    '--hn-dual-accent-text': '#ffffff',
-                    '--hn-dual-bg': '#f3e8ff',
-                    '--hn-dual-border': '#c026d3',
-                    '--hn-dual-text': '#6b21a8',
-                    '--hn-data-bg': '#f1f5f9',
-                    '--hn-data-border': '#64748b',
-                    '--hn-data-text': '#334155',
-                    '--hn-data-accent': '#475569',
-                    '--hn-input-bg': '#bae6fd',
-                    '--hn-input-border': '#38bdf8',
-                    '--hn-input-text': '#0c4a6e',
-                    '--hn-input-accent': '#0284c7'
-                }},
-                dark: {{
-                    '--hn-surface-bg': '#18181b',
-                    '--hn-edge': '#71717a',
-                    '--hn-node-bg': '#27272a',
-                    '--hn-node-border': '#3f3f46',
-                    '--hn-node-text': '#f4f4f5',
-                    '--hn-cluster-border': '#3f3f46',
-                    '--hn-cluster-text': '#a1a1aa',
-                    '--hn-cluster-fill': #27272a',
-                    '--hn-func-accent': '#10b981',
-                    '--hn-func-text': '#d1fae5',
-                    '--hn-func-bg': '#064e3b',
-                    '--hn-func-border': '#10b981',
-                    '--hn-pipe-accent': '#a855f7',
-                    '--hn-pipe-accent-text': '#dbeafe',
-                    '--hn-pipe-bg': '#581c87',
-                    '--hn-pipe-border': '#a855f7',
-                    '--hn-pipe-text': '#f3e8ff',
-                    '--hn-dual-accent': '#e879f9',
-                    '--hn-dual-accent-text': '#fdf4ff',
-                    '--hn-dual-bg': '#4a044e',
-                    '--hn-dual-border': '#c026d3',
-                    '--hn-dual-text': '#fdf4ff',
-                    '--hn-data-bg': '#27272a',
-                    '--hn-data-border': '#94a3b8',
-                    '--hn-data-text': '#e4e4e7',
-                    '--hn-data-accent': '#71717a',
-                    '--hn-input-bg': '#082f49',
-                    '--hn-input-border': '#0ea5e9',
-                    '--hn-input-text': '#e0f2fe',
-                    '--hn-input-accent': '#38bdf8'
-                }}
-            }};
+        if (!container) {{
+            debugLog('container not found');
+            return;
+        }}
 
-            function applyTheme() {{
-                const detected = detectHostTheme();
-                const theme = detected.theme;
-                const vars = THEME_VARS[theme] || THEME_VARS.light;
-                const surface = detected.background || vars['--hn-surface-bg'] || (theme === 'dark' ? '#020617' : '#ffffff');
-
-                container.style.backgroundColor = surface;
-                container.style.setProperty('--hn-surface-bg', surface);
-                container.style.setProperty('--hn-cluster-fill', surface);
-
-                Object.entries(vars).forEach(([key, val]) => {{
-                    if (key === '--hn-surface-bg') return;
-                    container.style.setProperty(key, val);
-                }});
+        const themeApi = window.HyperNodesTheme || {{}};
+        const detectHostTheme = typeof themeApi.detectHostTheme === 'function'
+            ? themeApi.detectHostTheme
+            : null;
+        
+        const THEME_VARS = {{
+            light: {{
+                '--hn-surface-bg': '#f8fafc',
+                '--hn-edge': '#94a3b8',
+                '--hn-node-bg': '#f8fbff',
+                '--hn-node-border': '#d6e3f0',
+                '--hn-node-text': '#0f172a',
+                '--hn-cluster-border': '#d5deea',
+                '--hn-cluster-fill': '#f3f6fb',
+                '--hn-cluster-text': '#475569',
+                '--hn-func-bg': '#e8edff',
+                '--hn-func-border': '#5b6ee1',
+                '--hn-func-text': '#0f172a',
+                '--hn-pipe-bg': '#fff3d9',
+                '--hn-pipe-border': '#f4a11f',
+                '--hn-pipe-text': '#0f172a',
+                '--hn-dual-bg': '#ffe8fb',
+                '--hn-dual-border': '#d66ae0',
+                '--hn-dual-text': '#0f172a',
+                '--hn-data-bg': '#edf2f7',
+                '--hn-data-border': '#5f6b8a',
+                '--hn-data-text': '#0f172a',
+                '--hn-input-bg': '#e3f5ff',
+                '--hn-input-border': '#28a4e2',
+                '--hn-input-text': '#0f172a',
+                '--hn-group-bg': '#eef2ff',
+                '--hn-group-border': '#c7d2fe',
+                '--hn-group-text': '#312e81'
+            }},
+            dark: {{
+                '--hn-surface-bg': '#0b1021',
+                '--hn-edge': '#7c8aa5',
+                '--hn-node-bg': '#111827',
+                '--hn-node-border': '#334155',
+                '--hn-node-text': '#e5e7eb',
+                '--hn-cluster-border': '#334155',
+                '--hn-cluster-fill': '#111827',
+                '--hn-cluster-text': '#cbd5e1',
+                '--hn-func-bg': '#0f1b3d',
+                '--hn-func-border': '#8c9bff',
+                '--hn-func-text': '#e8edff',
+                '--hn-pipe-bg': '#25160a',
+                '--hn-pipe-border': '#ffb454',
+                '--hn-pipe-text': '#fff3dc',
+                '--hn-dual-bg': '#1c0f24',
+                '--hn-dual-border': '#ff7bff',
+                '--hn-dual-text': '#ffeefe',
+                '--hn-data-bg': '#0b1d2c',
+                '--hn-data-border': '#67e8f9',
+                '--hn-data-text': '#e2e8f0',
+                '--hn-input-bg': '#0b314c',
+                '--hn-input-border': '#48c8ff',
+                '--hn-input-text': '#e0f2ff',
+                '--hn-group-bg': '#1f2937',
+                '--hn-group-border': '#475569',
+                '--hn-group-text': '#e5e7eb'
             }}
+        }};
+
+        const applyVars = (target, vars) => {{
+            if (!target || !target.style) return;
+            Object.entries(vars).forEach(([key, value]) => {{
+                target.style.setProperty(key, value);
+            }});
+        }};
+
+        function chooseTheme() {{
+            const host = detectHostTheme ? detectHostTheme() : null;
+            if (host) debugLog('host theme result:', host);
+            const hostTheme = host?.theme;
+            const hostBg = host?.background;
+            const fallbackTheme = (() => {{
+                if (window.matchMedia) {{
+                    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+                    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+                }}
+                return 'dark';
+            }})();
+            debugLog('fallback theme:', fallbackTheme);
+            return {{
+                theme: hostTheme || fallbackTheme,
+                background: hostBg,
+            }};
+        }}
+
+        function applyTheme() {{
+            const {{ theme, background }} = chooseTheme();
+            const vars = THEME_VARS[theme] || THEME_VARS.light;
+            const surface = background || vars['--hn-surface-bg'];
+            const clusterFill = vars['--hn-cluster-fill'];
+            debugLog('applyTheme selection:', {{ theme, surface, clusterFill, keys: Object.keys(vars) }});
+
+            container.style.backgroundColor = surface;
+            container.style.setProperty('--hn-surface-bg', surface);
+            container.style.setProperty('--hn-cluster-fill', clusterFill);
+            container.dataset.hnTheme = theme;
+
+            const svg = container.querySelector('svg');
+            if (svg) {{
+                applyVars(svg, vars);
+                svg.style.backgroundColor = surface;
+                
+                const updateAttr = (selector, attr) => {{
+                    svg.querySelectorAll(selector).forEach(el => {{
+                        const current = el.getAttribute(attr);
+                        if (!current || !current.startsWith('var(')) return;
+                        const varName = current.match(/var\\(([^,)]+)/)?.[1];
+                        const replacement = varName ? vars[varName] : null;
+                        if (replacement) {{
+                            el.setAttribute(attr, replacement);
+                        }}
+                    }});
+                }};
+
+                svg.querySelectorAll('polygon[fill]').forEach(el => {{
+                    const currentFill = el.getAttribute('fill');
+                    const varName = currentFill && currentFill.startsWith('var(')
+                        ? currentFill.match(/var\\(([^,)]+)/)?.[1]
+                        : null;
+
+                    if (varName) {{
+                        const replacement = vars[varName];
+                        if (replacement) {{
+                            el.setAttribute('fill', replacement);
+                        }}
+                        if (varName === '--hn-cluster-fill' && el.closest('g[class*=\"cluster\"]')) {{
+                            el.setAttribute('fill', clusterFill);
+                        }}
+                    }}
+                }});
+                
+                updateAttr('ellipse[fill]', 'fill');
+                updateAttr('path[stroke]', 'stroke');
+                updateAttr('text[fill]', 'fill');
+
+                try {{
+                    const containerBg = getComputedStyle(container).backgroundColor;
+                    const svgBg = getComputedStyle(svg).backgroundColor;
+                    debugLog('post-apply backgrounds:', {{ containerBg, svgBg }});
+                }} catch (err) {{
+                    debugLog('background read failed:', err);
+                }}
+            }}
+        }}
             
             applyTheme();
             
-            // Observe theme changes
-            try {{
-                const parentDoc = window.parent?.document;
-                if (parentDoc) {{
-                    const observer = new MutationObserver(applyTheme);
-                    observer.observe(parentDoc.body, {{ attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind', 'style'] }});
-                }}
-            }} catch(e) {{}}
+            // Observe VSCode attribute changes (Method 3)
+            const observer = new MutationObserver(applyTheme);
+            observer.observe(document.body, {{ 
+                attributes: true, 
+                attributeFilter: ['class', 'data-vscode-theme-kind'] 
+            }});
+            observer.observe(document.documentElement, {{ 
+                attributes: true, 
+                attributeFilter: ['style'] 
+            }});
             
-            // Media query listener
-            if (window.matchMedia) {{
-                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
-            }}
+            // Poll every 500ms as safety net
+            setInterval(applyTheme, 500);
         }}
     }})();
     </script>
@@ -294,70 +442,78 @@ class GraphvizRenderer:
         style_block = """
         <style>
             :root {
-                --hn-surface-bg: #ffffff;
+                --hn-surface-bg: #f8fafc;
                 --hn-edge: #94a3b8;
-                --hn-node-bg: #ffffff;
-                --hn-node-border: #e2e8f0;
+                --hn-node-bg: #f8fbff;
+                --hn-node-border: #d6e3f0;
                 --hn-node-text: #0f172a;
-                --hn-cluster-border: #cbd5e1;
+                --hn-cluster-border: #d5deea;
                 --hn-cluster-text: #475569;
-                --hn-cluster-fill: #f8fafc;
-                --hn-func-accent: #10b981;
-                --hn-func-text: #065f46;
-                --hn-func-bg: #d1fae5;
-                --hn-func-border: #10b981;
-                --hn-pipe-accent: #a855f7;
-                --hn-pipe-accent-text: #1e3a8a;
-                --hn-pipe-bg: #f3e8ff;
-                --hn-pipe-border: #a855f7;
-                --hn-pipe-text: #581c87;
-                --hn-dual-accent: #9333ea;
-                --hn-dual-accent-text: #ffffff;
-                --hn-dual-bg: #f3e8ff;
-                --hn-dual-border: #c026d3;
-                --hn-dual-text: #6b21a8;
-                --hn-data-bg: #f1f5f9;
-                --hn-data-border: #64748b;
-                --hn-data-text: #334155;
-                --hn-data-accent: #475569;
-                --hn-input-bg: #bae6fd;
-                --hn-input-border: #38bdf8;
-                --hn-input-text: #0c4a6e;
-                --hn-input-accent: #0284c7;
+                --hn-cluster-fill: #f3f6fb;
+                --hn-func-accent: #5b6ee1;
+                --hn-func-text: #0f172a;
+                --hn-func-bg: #e8edff;
+                --hn-func-border: #5b6ee1;
+                --hn-pipe-accent: #f4a11f;
+                --hn-pipe-accent-text: #0f172a;
+                --hn-pipe-bg: #fff3d9;
+                --hn-pipe-border: #f4a11f;
+                --hn-pipe-text: #0f172a;
+                --hn-dual-accent: #d66ae0;
+                --hn-dual-accent-text: #0f172a;
+                --hn-dual-bg: #ffe8fb;
+                --hn-dual-border: #d66ae0;
+                --hn-dual-text: #0f172a;
+                --hn-data-bg: #edf2f7;
+                --hn-data-border: #5f6b8a;
+                --hn-data-text: #0f172a;
+                --hn-data-accent: #5f6b8a;
+                --hn-input-bg: #e3f5ff;
+                --hn-input-border: #28a4e2;
+                --hn-input-text: #0f172a;
+                --hn-input-accent: #1c9ad6;
+                --hn-group-bg: #eef2ff;
+                --hn-group-border: #c7d2fe;
+                --hn-group-text: #312e81;
+                --hn-group-accent: #818cf8;
             }
             
             @media (prefers-color-scheme: dark) {
                 :root {
-                    --hn-surface-bg: #18181b;
-                    --hn-edge: #71717a;
-                    --hn-node-bg: #27272a;
-                    --hn-node-border: #3f3f46;
-                    --hn-node-text: #f4f4f5;
-                    --hn-cluster-border: #3f3f46;
-                    --hn-cluster-text: #a1a1aa;
-                    --hn-cluster-fill: #27272a;
-                    --hn-func-accent: #10b981;
-                    --hn-func-text: #d1fae5;
-                    --hn-func-bg: #064e3b;
-                    --hn-func-border: #10b981;
-                    --hn-pipe-accent: #a855f7;
-                    --hn-pipe-accent-text: #dbeafe;
-                    --hn-pipe-bg: #581c87;
-                    --hn-pipe-border: #a855f7;
-                    --hn-pipe-text: #f3e8ff;
-                    --hn-dual-accent: #e879f9;
-                    --hn-dual-accent-text: #fdf4ff;
-                    --hn-dual-bg: #4a044e;
-                    --hn-dual-border: #c026d3;
-                    --hn-dual-text: #fdf4ff;
-                    --hn-data-bg: #27272a;
-                    --hn-data-border: #94a3b8;
-                    --hn-data-text: #e4e4e7;
-                    --hn-data-accent: #71717a;
-                    --hn-input-bg: #082f49;
-                    --hn-input-border: #0ea5e9;
-                    --hn-input-text: #e0f2fe;
-                    --hn-input-accent: #38bdf8;
+                    --hn-surface-bg: #0b1021;
+                    --hn-edge: #7c8aa5;
+                    --hn-node-bg: #111827;
+                    --hn-node-border: #334155;
+                    --hn-node-text: #e5e7eb;
+                    --hn-cluster-border: #334155;
+                    --hn-cluster-text: #cbd5e1;
+                    --hn-cluster-fill: #111827;
+                    --hn-func-accent: #8c9bff;
+                    --hn-func-text: #e8edff;
+                    --hn-func-bg: #0f1b3d;
+                    --hn-func-border: #8c9bff;
+                    --hn-pipe-accent: #ffb454;
+                    --hn-pipe-accent-text: #fff3dc;
+                    --hn-pipe-bg: #25160a;
+                    --hn-pipe-border: #ffb454;
+                    --hn-pipe-text: #fff3dc;
+                    --hn-dual-accent: #ff7bff;
+                    --hn-dual-accent-text: #ffeefe;
+                    --hn-dual-bg: #1c0f24;
+                    --hn-dual-border: #ff7bff;
+                    --hn-dual-text: #ffeefe;
+                    --hn-data-bg: #0b1d2c;
+                    --hn-data-border: #67e8f9;
+                    --hn-data-text: #e2e8f0;
+                    --hn-data-accent: #67e8f9;
+                    --hn-input-bg: #0b314c;
+                    --hn-input-border: #48c8ff;
+                    --hn-input-text: #e0f2ff;
+                    --hn-input-accent: #48c8ff;
+                    --hn-group-bg: #1f2937;
+                    --hn-group-border: #475569;
+                    --hn-group-text: #e5e7eb;
+                    --hn-group-accent: #475569;
                 }
             }
             
@@ -472,17 +628,27 @@ class GraphvizRenderer:
         self._est_width = est_width
         self._est_height = est_height
 
+        # Map node_id -> produced outputs for label decoration (use pre-collapse data)
+        self._outputs_map: Dict[str, List[str]] = {}
+        for n in graph_data.nodes:
+            if isinstance(n, DataNode) and n.source_id:
+                self._outputs_map.setdefault(n.source_id, []).append(n.name)
+
+        # Collapse output data nodes (hide produced outputs)
+        graph_data = _collapse_output_nodes(graph_data)
+
         # Enhanced Node Attributes
         dot.attr(
             "node",
             shape="box",  # Default shape, will be overridden
             fontname=self.style.font_name,
             fontsize=str(self.style.font_size),
-            margin="0.2,0.1",  # Padding inside node
+            margin="0.18,0.09",  # Base padding (reduced)
             # Ensure no default colors interfere
             color="transparent",
             fillcolor="transparent",
             style="filled,rounded",
+            fixedsize="false",
             height="0.55",  # Increased to 0.55 as requested
         )
 
@@ -614,21 +780,22 @@ class GraphvizRenderer:
             style_attr = "filled,rounded"  # Keep rounded
             label = node.label
 
-        elif isinstance(node, (DataNode, GroupDataNode)):
+        elif isinstance(node, GroupDataNode):
+            style_conf = getattr(self.style, "group_node", self.style.data_node)
+            shape = "box"
+            style_attr = "filled,rounded,dashed"
+            label = f"Inputs ({len(node.nodes)})"
+
+        elif isinstance(node, DataNode):
             # Check if it is an input node
             if node.id in getattr(self, "_input_ids", set()):
                 style_conf = getattr(self.style, "input_node", self.style.data_node)
             else:
                 style_conf = self.style.data_node
-            
-            # Data nodes as rounded rectangles (more rounded)
+
             shape = "box"
             style_attr = "filled,rounded"
-            label = (
-                node.name
-                if isinstance(node, DataNode)
-                else f"Inputs ({len(node.nodes)})"
-            )
+            label = node.name
 
         else:
             style_conf = self.style.data_node
@@ -640,6 +807,65 @@ class GraphvizRenderer:
         bg = _color_token_to_hex(style_conf.bg_color, "#FFFFFF")
         border = _color_token_to_hex(style_conf.border_color, "#000000")
         text = _color_token_to_hex(style_conf.text_color, "#000000")
+        font_sz = str(self.style.font_size)
+
+        # Unified padding for all nodes
+        # Use minimal margin to ensure accurate centering via HTML padding
+        extra_attrs = {"margin": "0.03"}
+        if isinstance(node, (DataNode, GroupDataNode)):
+            extra_attrs["height"] = "0.5"
+
+        # HTML-like labels for producers with outputs
+        produced = self._outputs_map.get(node.id, [])
+        if produced and not isinstance(node, (DataNode, GroupDataNode)):
+            def _render_lines(lines: List[str], bold: bool = False, padding: str = "10") -> str:
+                if not lines:
+                    return ""
+                start = "<B>" if bold else ""
+                end = "</B>" if bold else ""
+                return "".join(
+                    f'<TR><TD ALIGN="CENTER" BALIGN="CENTER" VALIGN="MIDDLE" CELLPADDING="{padding}">'
+                    f'<FONT POINT-SIZE="{font_sz}">{start}{html.escape(line)}{end}</FONT>'
+                    "</TD></TR>"
+                    for line in lines
+                )
+
+            title_lines = _wrap_text_lines(label)
+            output_lines: List[str] = []
+            for p in produced:
+                output_lines.extend(_wrap_text_lines(p))
+
+            divider_color = "#94a3b8"
+            label = (
+                '<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0" ALIGN="CENTER">'
+                f"{_render_lines(title_lines, bold=True, padding='10')}"
+                '<TR><TD ALIGN="CENTER" BALIGN="CENTER" VALIGN="MIDDLE" CELLPADDING="8">'
+                '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0" WIDTH="100%">'
+                f'<TR><TD HEIGHT="1" WIDTH="100%" BGCOLOR="{divider_color}"></TD></TR>'
+                "</TABLE>"
+                "</TD></TR>"
+                f"{_render_lines(output_lines, bold=False, padding='10')}"
+                "</TABLE>>"
+            )
+        else:
+            label_lines = _wrap_text_lines(label)
+
+            def _render_simple(lines: List[str], bold: bool = False) -> str:
+                start = "<B>" if bold else ""
+                end = "</B>" if bold else ""
+                return "".join(
+                    f'<TR><TD ALIGN="CENTER" BALIGN="CENTER" VALIGN="MIDDLE" CELLPADDING="10">'
+                    f'<FONT POINT-SIZE="{font_sz}">{start}{html.escape(line)}{end}</FONT>'
+                    "</TD></TR>"
+                    for line in lines
+                )
+
+            is_emphasized = isinstance(node, (FunctionNode, PipelineNode))
+            label = (
+                '<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0" ALIGN="CENTER">'
+                f"{_render_simple(label_lines, bold=is_emphasized)}"
+                "</TABLE>>"
+            )
 
         container.node(
             node_id,
@@ -650,5 +876,5 @@ class GraphvizRenderer:
             fillcolor=bg,
             fontcolor=text,
             penwidth="2.0",  # slightly thicker border for elegance
-            # width and height are dynamic by default or constrained by global node attributes
+            **extra_attrs
         )

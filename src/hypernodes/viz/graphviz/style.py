@@ -43,6 +43,9 @@ class GraphvizStyle:
     input_node: NodeStyle = field(default_factory=lambda: NodeStyle(
         bg_color="#FFFFFF", border_color="#64748b", text_color="#1e293b", accent_color="#64748b"  # Default to Slate
     ))
+    group_node: NodeStyle = field(default_factory=lambda: NodeStyle(
+        bg_color="#F8FAFC", border_color="#94a3b8", text_color="#0f172a", accent_color="#94a3b8"  # Grouped inputs
+    ))
     
     # Legacy compatibility properties
     @property
@@ -102,6 +105,13 @@ SIMPLE_THEME = GraphvizStyle(
         accent_color="var(--hn-input-border)",
         accent_text_color="var(--hn-input-text)",
     ),
+    group_node=NodeStyle(
+        bg_color="var(--hn-group-bg)",
+        border_color="var(--hn-group-border)",
+        text_color="var(--hn-group-text)",
+        accent_color="var(--hn-group-border)",
+        accent_text_color="var(--hn-group-text)",
+    ),
 )
 
 AUTO_THEME = SIMPLE_THEME  # Make simple the default
@@ -123,6 +133,12 @@ LIGHT_THEME = GraphvizStyle(
     ),
     data_node=NodeStyle(
         bg_color="#f3f4f6", border_color="#d1d5db", text_color="#374151", accent_color="#4b5563", accent_text_color="#ffffff"
+    ),
+    input_node=NodeStyle(
+        bg_color="#e0f2fe", border_color="#7dd3fc", text_color="#0c4a6e", accent_color="#0284c7", accent_text_color="#ffffff"
+    ),
+    group_node=NodeStyle(
+        bg_color="#eef2ff", border_color="#c7d2fe", text_color="#312e81", accent_color="#818cf8", accent_text_color="#312e81"
     )
 )
 
@@ -144,6 +160,12 @@ DARK_THEME = GraphvizStyle(
     ),
     data_node=NodeStyle(
         bg_color="#27272a", border_color="#52525b", text_color="#e4e4e7", accent_color="#71717a", accent_text_color="#18181b"
+    ),
+    input_node=NodeStyle(
+        bg_color="#0b314c", border_color="#48c8ff", text_color="#e0f2fe", accent_color="#38bdf8", accent_text_color="#0b1021"
+    ),
+    group_node=NodeStyle(
+        bg_color="#1f2937", border_color="#475569", text_color="#e5e7eb", accent_color="#475569", accent_text_color="#e5e7eb"
     )
 )
 

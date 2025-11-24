@@ -82,7 +82,7 @@ class PipelineWidget(widgets.HTML):
             f"{css_fix}"
             f'<iframe srcdoc="{escaped_html}" '
             f'width="{est_width}" height="{est_height}" frameborder="0" '
-            f'style="border: none; width: {est_width}px; max-width: 100%; height: {est_height}px; display: block; background: transparent;" '
+            f'style="border: none; width: {est_width}px; max-width: 100%; height: {est_height}px; display: block; background: transparent; margin: 0 auto;" '
             f'sandbox="allow-scripts allow-same-origin allow-popups allow-forms">'
             f"</iframe>"
         )
