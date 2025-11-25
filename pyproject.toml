@@ -80,6 +80,9 @@ examples = [
     "pytrec-eval>=0.5",
     "rank-bm25>=0.2.2",
 ]
+dev = [
+    "numpy>=2.3.4",
+]
 
 [project.urls]
 Homepage = "https://github.com/gilad-rubin/hypernodes"

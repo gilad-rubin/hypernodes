@@ -3,18 +3,27 @@
 Tracks imports, UDF definitions, and other state needed to generate executable Daft code.
 """
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+
+if TYPE_CHECKING:
+    from hypernodes.integrations.daft.engine import DaftEngine
 
 
 class CodeGenContext:
-    """Tracks state for generating Daft code."""
+    """Tracks state for generating Daft code.
+    
+    Attributes:
+        engine: Reference to the DaftEngine for creating operations during code generation.
+                This is needed for nested pipelines to recursively generate code for inner nodes.
+    """
 
-    def __init__(self):
+    def __init__(self, engine: Optional["DaftEngine"] = None):
         self._imports: Set[Tuple[str, str]] = set()  # (module, name)
         self._udf_definitions: List[str] = []
         self._stateful_inputs: Dict[str, Any] = {}
         self._udf_counter = 0
         self._row_id_counter = 0
+        self.engine = engine  # Reference to engine for nested pipeline code generation
 
     def add_import(self, module: str, name: str) -> None:
         """Add an import."""

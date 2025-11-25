@@ -1026,6 +1026,9 @@ batch = [
 daft = [
     { name = "daft" },
 ]
+dev = [
+    { name = "numpy" },
+]
 examples = [
     { name = "colbert-ai" },
     { name = "daft" },
@@ -1087,6 +1090,7 @@ requires-dist = [
     { name = "nbformat", marker = "extra == 'all'", specifier = ">=5.10.4" },
     { name = "nbformat", marker = "extra == 'notebook'", specifier = ">=5.10.4" },
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.5.0" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=2.3.4" },
     { name = "numpy", marker = "extra == 'examples'", specifier = ">=2.3.4" },
     { name = "pandas", marker = "extra == 'examples'", specifier = ">=2.3.3" },
     { name = "plotly", marker = "extra == 'all'", specifier = ">=5.18.0" },
@@ -1102,7 +1106,7 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'all'", specifier = ">=4.67.1" },
     { name = "tqdm", marker = "extra == 'telemetry'", specifier = ">=4.67.1" },
 ]
-provides-extras = ["batch", "daft", "viz", "notebook", "telemetry", "all", "modal", "examples"]
+provides-extras = ["batch", "daft", "viz", "notebook", "telemetry", "all", "modal", "examples", "dev"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -19,13 +19,13 @@ def test_codegen_execution_correctness_simple():
 
     pipeline = Pipeline(nodes=[add_one])
     
-    # Use list input for Daft compatibility
+    # Use list input for Daft compatibility (N-row DataFrame)
     inputs = {"x": [1, 2, 3]}
     
     engine = DaftEngine()
     
-    # 1. Generate Code
-    code = engine.generate_code(pipeline, inputs)
+    # 1. Generate Code (mode="map" for multi-row DataFrame)
+    code = engine.generate_code(pipeline, inputs, mode="map")
     print("Generated Code:\n", code)
     
     # 2. Execute Code
@@ -61,8 +61,8 @@ def test_codegen_execution_correctness_batch():
     # Force batch usage
     engine = DaftEngine(use_batch_udf=True)
     
-    # 1. Generate Code
-    code = engine.generate_code(pipeline, inputs)
+    # 1. Generate Code (mode="map" for multi-row DataFrame)
+    code = engine.generate_code(pipeline, inputs, mode="map")
     print("Generated Batch Code:\n", code)
     
     # 2. Execute Code

@@ -399,31 +399,65 @@ class DaftEngine(Engine):
             return final_results
 
     def generate_code(
-        self, pipeline: "Pipeline", inputs: Optional[Dict[str, Any]] = None
+        self, pipeline: "Pipeline", inputs: Optional[Dict[str, Any]] = None,
+        mode: str = "run"
     ) -> str:
-        """Generate Daft code for the pipeline."""
-        context = CodeGenContext()
+        """Generate Daft code for the pipeline.
+        
+        Args:
+            pipeline: The pipeline to generate code for.
+            inputs: Optional input values. If not provided, the code will include
+                   the input structure with placeholder values based on pipeline.graph.root_args.
+            mode: Execution mode for input handling:
+                  - "run": Creates 1-row DataFrame (all values wrapped in lists)
+                  - "map": Creates N-row DataFrame (lists become multiple rows)
+        """
+        context = CodeGenContext(engine=self)
 
-        # 1. Setup Inputs
+        # 1. Setup Inputs - use pipeline.graph.root_args to get input names even without values
         df_var = "df"
-        available_columns = set(inputs.keys()) if inputs else set()
+        
+        # Get required input names from pipeline
+        input_names = set(pipeline.graph.root_args)
+        
+        # If inputs provided, use them; otherwise use input_names with placeholder values
+        if inputs:
+            available_columns = set(inputs.keys())
+        else:
+            available_columns = input_names
 
         operation_lines = []
 
         # Generate input loading code
         if inputs:
-            # Handle scalar inputs by wrapping them in lists
-            # This mirrors how we handle inputs in _build_dataframe
-            processed_inputs = {}
-            for k, v in inputs.items():
-                if isinstance(v, list):
-                    processed_inputs[k] = v
-                else:
-                    processed_inputs[k] = [v]
+            if mode == "run":
+                # For run(): Wrap ALL values in lists - creates 1-row DataFrame
+                # This mirrors _build_dataframe: {k: [v] for k, v in inputs.items()}
+                # Important: even list values get wrapped, so [1,2,3] becomes [[1,2,3]]
+                # This ensures list columns can be exploded in nested pipeline map_over
+                processed_inputs = {k: [v] for k, v in inputs.items()}
+            else:
+                # For map(): Keep list inputs as lists - creates N-row DataFrame
+                # Scalars still get wrapped in lists
+                processed_inputs = {}
+                for k, v in inputs.items():
+                    if isinstance(v, list):
+                        processed_inputs[k] = v
+                    else:
+                        processed_inputs[k] = [v]
 
             inputs_str = repr(processed_inputs)
             operation_lines.append("# Load inputs")
             operation_lines.append(f"{df_var} = daft.from_pydict({inputs_str})")
+        elif input_names:
+            # No values provided, but we know the input names from the pipeline
+            # Generate a template with placeholder comments
+            placeholder_dict = {name: f"[...]  # {name} values" for name in sorted(input_names)}
+            operation_lines.append("# Load inputs (replace placeholders with actual data)")
+            operation_lines.append(f"{df_var} = daft.from_pydict({{")
+            for name in sorted(input_names):
+                operation_lines.append(f'    "{name}": [...],  # Add {name} values here')
+            operation_lines.append("})")
         else:
             operation_lines.append(f"{df_var} = daft.from_pydict({{}})")
 

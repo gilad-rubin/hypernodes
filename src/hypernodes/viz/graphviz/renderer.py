@@ -12,7 +12,7 @@ from ..structures import (
     VizEdge,
     VizNode,
 )
-from .style import DESIGN_STYLES, GraphvizTheme
+from .style import DESIGN_STYLES, GraphvizTheme, UNIVERSAL_OUTLINE
 
 
 class GraphvizRenderer:
@@ -116,14 +116,9 @@ class GraphvizRenderer:
         cluster_name = f"cluster_{abs(hash(node.id))}"
         label = node.label
 
-        # Get config for pipeline to use its colors for the cluster
-        config = self.style.node_styles.get(
-            "pipeline", self.style.node_styles["function"]
-        )
-
-        # Style for cluster
-        color = "#000000"  # Force black outline for nested pipelines
-        font_color = config.color.text
+        # Style for cluster - use universal outline for light/dark mode compatibility
+        # Both outline and label use same color since label is on transparent background
+        color = UNIVERSAL_OUTLINE
 
         self._add_line(f'subgraph "{cluster_name}" {{')
         self._indent_level += 1
@@ -131,11 +126,11 @@ class GraphvizRenderer:
         self._add_line(f'label="{label}";')
         self._add_line('style="rounded,bold";')  # Solid outline, transparent background
         self._add_line(f'color="{color}";')
-        self._add_line(f'fontcolor="{font_color}";')
+        self._add_line(f'fontcolor="{color}";')  # Same as outline for dark mode visibility
         self._add_line(f'fontname="{self.style.font_name}";')
         self._add_line('margin="20";')
-        # Add explicit penwidth for boldness
-        self._add_line('penwidth="1.0";')
+        # Bolder penwidth for visibility
+        self._add_line('penwidth="2.0";')
 
         # Recurse
         self._render_scope(node.id)

@@ -2,136 +2,139 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 
+# Universal outline/edge color - visible in both light and dark modes
+UNIVERSAL_OUTLINE = "#94a3b8"  # Tailwind slate-400 - lighter for dark mode visibility
+
+
 @dataclass(frozen=True)
 class ColorPair:
     """Represents a color scheme for a node (fill, outline, text)."""
 
     fill: str
-    outline: str
-    text: str = "#000000"
+    outline: str = UNIVERSAL_OUTLINE
+    text: str = "#334155"  # Tailwind slate-700 - dark enough for pastel fills
 
 
 class Palettes:
     """Standard color palettes (based on d3.category20)."""
 
-    # Pairs are (Light Fill, Dark Outline)
-    # All outlines standardized to black
-    BLUE = ColorPair(fill="#aec7e8", outline="#000000")
-    ORANGE = ColorPair(fill="#ffbb78", outline="#000000")
-    GREEN = ColorPair(fill="#98df8a", outline="#000000")
-    RED = ColorPair(fill="#ff9896", outline="#000000")
-    PURPLE = ColorPair(fill="#c5b0d5", outline="#000000")
-    BROWN = ColorPair(fill="#c49c94", outline="#000000")
-    PINK = ColorPair(fill="#f7b6d2", outline="#000000")
-    GREY = ColorPair(fill="#c7c7c7", outline="#000000")
-    OLIVE = ColorPair(fill="#dbdb8d", outline="#000000")
-    CYAN = ColorPair(fill="#9edae5", outline="#000000")
+    # Pairs are (Light Fill, Universal Outline)
+    BLUE = ColorPair(fill="#aec7e8")
+    ORANGE = ColorPair(fill="#ffbb78")
+    GREEN = ColorPair(fill="#98df8a")
+    RED = ColorPair(fill="#ff9896")
+    PURPLE = ColorPair(fill="#c5b0d5")
+    BROWN = ColorPair(fill="#c49c94")
+    PINK = ColorPair(fill="#f7b6d2")
+    GREY = ColorPair(fill="#c7c7c7")
+    OLIVE = ColorPair(fill="#dbdb8d")
+    CYAN = ColorPair(fill="#9edae5")
 
 
 class PastelPalettes:
     """Legacy pastel color combinations (kept for backwards compatibility)."""
 
-    # All outlines standardized to black
+    # All outlines use universal slate color
 
     # 1. Original Pastel Bright (The favorite)
-    ORIGINAL_BLUE = ColorPair(fill="#87CEEB", outline="#000000")
-    ORIGINAL_PLUM = ColorPair(fill="#DDA0DD", outline="#000000")
-    ORIGINAL_GREEN = ColorPair(fill="#98FB98", outline="#000000")
+    ORIGINAL_BLUE = ColorPair(fill="#87CEEB")
+    ORIGINAL_PLUM = ColorPair(fill="#DDA0DD")
+    ORIGINAL_GREEN = ColorPair(fill="#98FB98")
 
     # 2. Cotton Candy
-    CANDY_PINK = ColorPair(fill="#FFB7B2", outline="#000000")
-    CANDY_BLUE = ColorPair(fill="#A0C4FF", outline="#000000")
-    CANDY_YELLOW = ColorPair(fill="#FFFFB5", outline="#000000")
+    CANDY_PINK = ColorPair(fill="#FFB7B2")
+    CANDY_BLUE = ColorPair(fill="#A0C4FF")
+    CANDY_YELLOW = ColorPair(fill="#FFFFB5")
 
     # 3. Minty Fresh
-    MINT_MAIN = ColorPair(fill="#B5EAD7", outline="#000000")
-    MINT_SEC = ColorPair(fill="#C7CEEA", outline="#000000")
-    MINT_ACCENT = ColorPair(fill="#E2F0CB", outline="#000000")
+    MINT_MAIN = ColorPair(fill="#B5EAD7")
+    MINT_SEC = ColorPair(fill="#C7CEEA")
+    MINT_ACCENT = ColorPair(fill="#E2F0CB")
 
     # 4. Sunset Haze
-    HAZE_PEACH = ColorPair(fill="#FFDAC1", outline="#000000")
-    HAZE_LILAC = ColorPair(fill="#E0BBE4", outline="#000000")
-    HAZE_GOLD = ColorPair(fill="#FDFD96", outline="#000000")
+    HAZE_PEACH = ColorPair(fill="#FFDAC1")
+    HAZE_LILAC = ColorPair(fill="#E0BBE4")
+    HAZE_GOLD = ColorPair(fill="#FDFD96")
 
     # 5. Ocean Breeze
-    BREEZE_TEAL = ColorPair(fill="#9bf6ff", outline="#000000")
-    BREEZE_BLUE = ColorPair(fill="#a0c4ff", outline="#000000")
-    BREEZE_SAND = ColorPair(fill="#fff1e6", outline="#000000")
+    BREEZE_TEAL = ColorPair(fill="#9bf6ff")
+    BREEZE_BLUE = ColorPair(fill="#a0c4ff")
+    BREEZE_SAND = ColorPair(fill="#fff1e6")
 
     # 6. Lavender Fields
-    LAV_MAIN = ColorPair(fill="#E6E6FA", outline="#000000")
-    LAV_SEC = ColorPair(fill="#D8BFD8", outline="#000000")
-    LAV_ACCENT = ColorPair(fill="#F0FFF0", outline="#000000")
+    LAV_MAIN = ColorPair(fill="#E6E6FA")
+    LAV_SEC = ColorPair(fill="#D8BFD8")
+    LAV_ACCENT = ColorPair(fill="#F0FFF0")
 
     # 7. Rose Garden
-    ROSE_MAIN = ColorPair(fill="#ffc6ff", outline="#000000")
-    ROSE_SEC = ColorPair(fill="#bdb2ff", outline="#000000")
-    ROSE_ACCENT = ColorPair(fill="#caffbf", outline="#000000")
+    ROSE_MAIN = ColorPair(fill="#ffc6ff")
+    ROSE_SEC = ColorPair(fill="#bdb2ff")
+    ROSE_ACCENT = ColorPair(fill="#caffbf")
 
     # 8. Peaches & Cream
-    PEACH_MAIN = ColorPair(fill="#FFDAB9", outline="#000000")
-    PEACH_SEC = ColorPair(fill="#FFE4B5", outline="#000000")
-    PEACH_ACCENT = ColorPair(fill="#FFFACD", outline="#000000")
+    PEACH_MAIN = ColorPair(fill="#FFDAB9")
+    PEACH_SEC = ColorPair(fill="#FFE4B5")
+    PEACH_ACCENT = ColorPair(fill="#FFFACD")
 
     # 9. Baby Blues
-    BABY_MAIN = ColorPair(fill="#B0E0E6", outline="#000000")
-    BABY_SEC = ColorPair(fill="#ADD8E6", outline="#000000")
-    BABY_ACCENT = ColorPair(fill="#E0FFFF", outline="#000000")
+    BABY_MAIN = ColorPair(fill="#B0E0E6")
+    BABY_SEC = ColorPair(fill="#ADD8E6")
+    BABY_ACCENT = ColorPair(fill="#E0FFFF")
 
     # 10. Spring Meadow
-    MEADOW_MAIN = ColorPair(fill="#90EE90", outline="#000000")
-    MEADOW_SEC = ColorPair(fill="#87CEFA", outline="#000000")
-    MEADOW_ACCENT = ColorPair(fill="#FFFFE0", outline="#000000")
+    MEADOW_MAIN = ColorPair(fill="#90EE90")
+    MEADOW_SEC = ColorPair(fill="#87CEFA")
+    MEADOW_ACCENT = ColorPair(fill="#FFFFE0")
 
     # 11. Coral Reef
-    CORAL_MAIN = ColorPair(fill="#F08080", outline="#000000")
-    CORAL_SEC = ColorPair(fill="#20B2AA", outline="#000000")
-    CORAL_ACCENT = ColorPair(fill="#E0FFFF", outline="#000000")
+    CORAL_MAIN = ColorPair(fill="#F08080")
+    CORAL_SEC = ColorPair(fill="#20B2AA")
+    CORAL_ACCENT = ColorPair(fill="#E0FFFF")
 
     # 12. Nordic Frost
-    NORDIC_MAIN = ColorPair(fill="#D3D3D3", outline="#000000")
-    NORDIC_SEC = ColorPair(fill="#B0C4DE", outline="#000000")
-    NORDIC_ACCENT = ColorPair(fill="#F5F5F5", outline="#000000")
+    NORDIC_MAIN = ColorPair(fill="#D3D3D3")
+    NORDIC_SEC = ColorPair(fill="#B0C4DE")
+    NORDIC_ACCENT = ColorPair(fill="#F5F5F5")
 
     # 13. Lemonade
-    LEMON_MAIN = ColorPair(fill="#FFFACD", outline="#000000")
-    LEMON_SEC = ColorPair(fill="#FF69B4", outline="#000000")
-    LEMON_ACCENT = ColorPair(fill="#E0FFFF", outline="#000000")
+    LEMON_MAIN = ColorPair(fill="#FFFACD")
+    LEMON_SEC = ColorPair(fill="#FF69B4")
+    LEMON_ACCENT = ColorPair(fill="#E0FFFF")
 
     # 14. Vintage Paper
-    VINTAGE_MAIN = ColorPair(fill="#FAEBD7", outline="#000000")
-    VINTAGE_SEC = ColorPair(fill="#D2B48C", outline="#000000")
-    VINTAGE_ACCENT = ColorPair(fill="#F5DEB3", outline="#000000")
+    VINTAGE_MAIN = ColorPair(fill="#FAEBD7")
+    VINTAGE_SEC = ColorPair(fill="#D2B48C")
+    VINTAGE_ACCENT = ColorPair(fill="#F5DEB3")
 
     # 15. Soft Berry
-    BERRY_MAIN = ColorPair(fill="#D8BFD8", outline="#000000")
-    BERRY_SEC = ColorPair(fill="#DDA0DD", outline="#000000")
-    BERRY_ACCENT = ColorPair(fill="#FFE4E1", outline="#000000")
+    BERRY_MAIN = ColorPair(fill="#D8BFD8")
+    BERRY_SEC = ColorPair(fill="#DDA0DD")
+    BERRY_ACCENT = ColorPair(fill="#FFE4E1")
 
     # 16. Glacier
-    GLACIER_MAIN = ColorPair(fill="#AFEEEE", outline="#000000")
-    GLACIER_SEC = ColorPair(fill="#E0FFFF", outline="#000000")
-    GLACIER_ACCENT = ColorPair(fill="#F0F8FF", outline="#000000")
+    GLACIER_MAIN = ColorPair(fill="#AFEEEE")
+    GLACIER_SEC = ColorPair(fill="#E0FFFF")
+    GLACIER_ACCENT = ColorPair(fill="#F0F8FF")
 
     # 17. Sandstone
-    SAND_MAIN = ColorPair(fill="#F4A460", outline="#000000")
-    SAND_SEC = ColorPair(fill="#DEB887", outline="#000000")
-    SAND_ACCENT = ColorPair(fill="#FFF8DC", outline="#000000")
+    SAND_MAIN = ColorPair(fill="#F4A460")
+    SAND_SEC = ColorPair(fill="#DEB887")
+    SAND_ACCENT = ColorPair(fill="#FFF8DC")
 
     # 18. Periwinkle
-    PERI_MAIN = ColorPair(fill="#CCCCFF", outline="#000000")
-    PERI_SEC = ColorPair(fill="#B0C4DE", outline="#000000")
-    PERI_ACCENT = ColorPair(fill="#E6E6FA", outline="#000000")
+    PERI_MAIN = ColorPair(fill="#CCCCFF")
+    PERI_SEC = ColorPair(fill="#B0C4DE")
+    PERI_ACCENT = ColorPair(fill="#E6E6FA")
 
     # 19. Eucalyptus
-    EUC_MAIN = ColorPair(fill="#8FBC8F", outline="#000000")
-    EUC_SEC = ColorPair(fill="#66CDAA", outline="#000000")
-    EUC_ACCENT = ColorPair(fill="#F5FFFA", outline="#000000")
+    EUC_MAIN = ColorPair(fill="#8FBC8F")
+    EUC_SEC = ColorPair(fill="#66CDAA")
+    EUC_ACCENT = ColorPair(fill="#F5FFFA")
 
     # 20. Mauve
-    MAUVE_MAIN = ColorPair(fill="#E0B0FF", outline="#000000")
-    MAUVE_SEC = ColorPair(fill="#D8BFD8", outline="#000000")
-    MAUVE_ACCENT = ColorPair(fill="#FFF0F5", outline="#000000")
+    MAUVE_MAIN = ColorPair(fill="#E0B0FF")
+    MAUVE_SEC = ColorPair(fill="#D8BFD8")
+    MAUVE_ACCENT = ColorPair(fill="#FFF0F5")
 
 
 @dataclass
@@ -165,7 +168,7 @@ class GraphvizTheme:
     font_name: str = "Helvetica"
     base_font_size: int = 12
     edge_font_size: int = 10
-    edge_color: str = "#555555"
+    edge_color: str = UNIVERSAL_OUTLINE  # Works in light & dark mode
 
     # Graphviz Attributes
     graph_attr: Dict[str, str] = field(default_factory=dict)
@@ -229,27 +232,59 @@ def create_custom_theme(
 
 
 class SelectedColors:
-    """User selected custom colors (soft Tailwind-inspired)."""
+    """
+    NEW Default: User's chosen pastel palette.
+    
+    - Inputs: #B0EEB9 (mint green)
+    - Pipelines: #EBBCF6 (soft lavender pink)  
+    - Functions: #A3D5FC (sky blue)
+    """
 
-    # All outlines standardized to black (#000000)
+    # Function nodes: sky blue
+    FUNCTION = ColorPair(fill="#A3D5FC")
 
-    # Function nodes: soft blue
-    FUNCTION = ColorPair(
-        fill="#87D3F9",  # Sky Blue
-        outline="#000000",
-    )
+    # Pipeline nodes: soft lavender pink
+    PIPELINE = ColorPair(fill="#EBBCF6")
 
-    # Pipeline nodes: soft violet
-    PIPELINE = ColorPair(
-        fill="#D5BCFE",  # Plum
-        outline="#000000",
-    )
+    # Input / data nodes: mint green
+    INPUT = ColorPair(fill="#B0EEB9")
 
-    # Input / data nodes: soft amber
-    INPUT = ColorPair(
-        fill="#FFC661",  # Mint Green
-        outline="#000000",
-    )
+
+class LegacyColors:
+    """
+    Previous default colors (preserved for backwards compatibility).
+    Use style="legacy" to switch back.
+    """
+
+    FUNCTION = ColorPair(fill="#87D3F9")  # Sky Blue
+    PIPELINE = ColorPair(fill="#D5BCFE")  # Plum
+    INPUT = ColorPair(fill="#FFC661")     # Amber
+
+
+class UserColorPalette:
+    """
+    User-provided colors for creating theme variations.
+    These are the colors you specified for mixing/matching.
+    """
+    
+    # Greens
+    MINT_GREEN = ColorPair(fill="#B0EEB9")      # Your input color
+    BRIGHT_MINT = ColorPair(fill="#b7f5ce")     # Lighter mint
+    TAILWIND_GREEN = ColorPair(fill="#86efac")  # Tailwind green-300
+    
+    # Blues  
+    SKY_BLUE = ColorPair(fill="#A3D5FC")        # Your function color
+    BRIGHT_CYAN = ColorPair(fill="#9ee0ff")     # Bright cyan
+    TAILWIND_BLUE = ColorPair(fill="#7dd3fc")   # Tailwind sky-300
+    
+    # Purples/Pinks
+    LAVENDER = ColorPair(fill="#EBBCF6")        # Your pipeline color
+    SOFT_PURPLE = ColorPair(fill="#e7b3ff")     # Soft purple
+    
+    # Warm colors
+    SOFT_YELLOW = ColorPair(fill="#FBE897")     # Soft yellow
+    SOFT_CORAL = ColorPair(fill="#FBC7C7")      # Soft coral/orange
+    TAILWIND_ORANGE = ColorPair(fill="#fdba74") # Tailwind orange-300
 
 
 class DagPalettes:
@@ -260,38 +295,38 @@ class DagPalettes:
     """
 
     # 1. Nord Soft — muted professional
-    NORD_FUNC = ColorPair(fill="#88C0D0", outline="#000000")
-    NORD_PIPE = ColorPair(fill="#A3BE8C", outline="#000000")
-    NORD_INPUT = ColorPair(fill="#E5E9F0", outline="#000000")
+    NORD_FUNC = ColorPair(fill="#88C0D0")
+    NORD_PIPE = ColorPair(fill="#A3BE8C")
+    NORD_INPUT = ColorPair(fill="#E5E9F0")
 
     # 2. Soft Candy — blue/pink/lilac pastels
-    CANDY_FUNC = ColorPair(fill="#BDE0FE", outline="#000000")
-    CANDY_PIPE = ColorPair(fill="#FFC8DD", outline="#000000")
-    CANDY_INPUT = ColorPair(fill="#CDB4DB", outline="#000000")
+    CANDY_FUNC = ColorPair(fill="#BDE0FE")
+    CANDY_PIPE = ColorPair(fill="#FFC8DD")
+    CANDY_INPUT = ColorPair(fill="#CDB4DB")
 
     # 3. Warm Flow — sunset oranges & corals
-    WARM_FUNC = ColorPair(fill="#F8AD9D", outline="#000000")
-    WARM_PIPE = ColorPair(fill="#FFDAB9", outline="#000000")
-    WARM_INPUT = ColorPair(fill="#FBC4AB", outline="#000000")
+    WARM_FUNC = ColorPair(fill="#F8AD9D")
+    WARM_PIPE = ColorPair(fill="#FFDAB9")
+    WARM_INPUT = ColorPair(fill="#FBC4AB")
 
     # 4. Tropical Ocean — teal + coral
-    TROPIC_FUNC = ColorPair(fill="#A5FFD6", outline="#000000")
-    TROPIC_PIPE = ColorPair(fill="#84DCC6", outline="#000000")
-    TROPIC_INPUT = ColorPair(fill="#FFA69E", outline="#000000")
+    TROPIC_FUNC = ColorPair(fill="#A5FFD6")
+    TROPIC_PIPE = ColorPair(fill="#84DCC6")
+    TROPIC_INPUT = ColorPair(fill="#FFA69E")
 
     # 5. Sunrise — blue + apricot + lemon
-    SUNRISE_FUNC = ColorPair(fill="#79ADDC", outline="#000000")
-    SUNRISE_PIPE = ColorPair(fill="#FFC09F", outline="#000000")
-    SUNRISE_INPUT = ColorPair(fill="#FFEE93", outline="#000000")
+    SUNRISE_FUNC = ColorPair(fill="#79ADDC")
+    SUNRISE_PIPE = ColorPair(fill="#FFC09F")
+    SUNRISE_INPUT = ColorPair(fill="#FFEE93")
 
-    # 6. Tailwind Soft — matches SelectedColors (for consistency)
-    TW_FUNC = SelectedColors.FUNCTION
-    TW_PIPE = SelectedColors.PIPELINE
-    TW_INPUT = SelectedColors.INPUT
+    # 6. Legacy - matches the old default
+    LEGACY_FUNC = LegacyColors.FUNCTION
+    LEGACY_PIPE = LegacyColors.PIPELINE
+    LEGACY_INPUT = LegacyColors.INPUT
 
 
 def create_default_theme() -> GraphvizTheme:
-    """Factory for the default HyperNodes theme (Tailwind-soft)."""
+    """Factory for the default HyperNodes theme (new pastel palette)."""
     return create_custom_theme(
         SelectedColors.FUNCTION, SelectedColors.PIPELINE, SelectedColors.INPUT
     )
@@ -302,39 +337,105 @@ DEFAULT_THEME = create_default_theme()
 
 # Theme Registry using curated DAG palettes
 DESIGN_STYLES: Dict[str, GraphvizTheme] = {
-    # Default uses the Tailwind-soft SelectedColors
+    # ========== DEFAULT ==========
     "default": DEFAULT_THEME,
-    # 1. Tailwind Soft – light SaaS/dashboard vibe
-    "tailwind_soft": create_custom_theme(
-        DagPalettes.TW_FUNC,
-        DagPalettes.TW_PIPE,
-        DagPalettes.TW_INPUT,
+    
+    # ========== LEGACY (your previous default) ==========
+    "legacy": create_custom_theme(
+        LegacyColors.FUNCTION,
+        LegacyColors.PIPELINE,
+        LegacyColors.INPUT,
     ),
-    # 2. Nord Soft – muted, serious, great on light or slightly tinted backgrounds
+    
+    # ========== VARIATIONS WITH YOUR COLORS ==========
+    
+    # Variation 1: Bright Mint + Cyan + Soft Purple
+    "bright_mint": create_custom_theme(
+        UserColorPalette.BRIGHT_CYAN,      # func: #9ee0ff
+        UserColorPalette.SOFT_PURPLE,      # pipe: #e7b3ff  
+        UserColorPalette.BRIGHT_MINT,      # input: #b7f5ce
+    ),
+    
+    # Variation 2: Yellow + Green + Purple (warm accents)
+    "sunny": create_custom_theme(
+        UserColorPalette.MINT_GREEN,       # func: #B0EEB9
+        UserColorPalette.LAVENDER,         # pipe: #EBBCF6
+        UserColorPalette.SOFT_YELLOW,      # input: #FBE897
+    ),
+    
+    # Variation 3: Coral + Orange + Blue
+    "coral_sunset": create_custom_theme(
+        UserColorPalette.SKY_BLUE,         # func: #A3D5FC
+        UserColorPalette.SOFT_CORAL,       # pipe: #FBC7C7
+        UserColorPalette.TAILWIND_ORANGE,  # input: #fdba74
+    ),
+    
+    # Variation 4: Tailwind pastels (green, blue, orange)
+    "tailwind_pastel": create_custom_theme(
+        UserColorPalette.TAILWIND_BLUE,    # func: #7dd3fc
+        UserColorPalette.TAILWIND_ORANGE,  # pipe: #fdba74
+        UserColorPalette.TAILWIND_GREEN,   # input: #86efac
+    ),
+    
+    # Variation 5: All cool tones (cyan + blue + mint)
+    "cool_breeze": create_custom_theme(
+        UserColorPalette.BRIGHT_CYAN,      # func: #9ee0ff
+        UserColorPalette.TAILWIND_BLUE,    # pipe: #7dd3fc
+        UserColorPalette.BRIGHT_MINT,      # input: #b7f5ce
+    ),
+    
+    # Variation 6: Warm tones (yellow + coral + orange)
+    "warm_glow": create_custom_theme(
+        UserColorPalette.SOFT_YELLOW,      # func: #FBE897
+        UserColorPalette.SOFT_CORAL,       # pipe: #FBC7C7
+        UserColorPalette.TAILWIND_ORANGE,  # input: #fdba74
+    ),
+    
+    # Variation 7: Purple dominant (soft purple + lavender + tailwind green)
+    "lavender_fields": create_custom_theme(
+        UserColorPalette.TAILWIND_GREEN,   # func: #86efac
+        UserColorPalette.SOFT_PURPLE,      # pipe: #e7b3ff
+        UserColorPalette.LAVENDER,         # input: #EBBCF6
+    ),
+    
+    # Variation 8: High contrast pastel
+    "vivid_pastel": create_custom_theme(
+        UserColorPalette.TAILWIND_BLUE,    # func: #7dd3fc
+        UserColorPalette.LAVENDER,         # pipe: #EBBCF6
+        UserColorPalette.SOFT_YELLOW,      # input: #FBE897
+    ),
+    
+    # ========== ORIGINAL CURATED PALETTES ==========
+    
+    # Nord Soft – muted, serious, great on light or slightly tinted backgrounds
     "nord_soft": create_custom_theme(
         DagPalettes.NORD_FUNC,
         DagPalettes.NORD_PIPE,
         DagPalettes.NORD_INPUT,
     ),
-    # 3. Soft Candy – playful, good for exploratory / dev DAGs
+    
+    # Soft Candy – playful, good for exploratory / dev DAGs
     "soft_candy": create_custom_theme(
         DagPalettes.CANDY_FUNC,
         DagPalettes.CANDY_PIPE,
         DagPalettes.CANDY_INPUT,
     ),
-    # 4. Warm Flow – warm, high-energy pipelines (alerts, experiments, etc.)
+    
+    # Warm Flow – warm, high-energy pipelines (alerts, experiments, etc.)
     "warm_flow": create_custom_theme(
         DagPalettes.WARM_FUNC,
         DagPalettes.WARM_PIPE,
         DagPalettes.WARM_INPUT,
     ),
-    # 5. Tropical Ocean – teal/coral contrast for visually busy graphs
+    
+    # Tropical Ocean – teal/coral contrast for visually busy graphs
     "tropical_ocean": create_custom_theme(
         DagPalettes.TROPIC_FUNC,
         DagPalettes.TROPIC_PIPE,
         DagPalettes.TROPIC_INPUT,
     ),
-    # 6. Sunrise – optimistic, good for presentations
+    
+    # Sunrise – optimistic, good for presentations
     "sunrise": create_custom_theme(
         DagPalettes.SUNRISE_FUNC,
         DagPalettes.SUNRISE_PIPE,

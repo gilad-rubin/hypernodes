@@ -723,11 +723,81 @@ class PipelineNodeOperation(DaftOperation):
     def generate_code(
         self, df_var: str, available_columns: Set[str], context: CodeGenContext
     ) -> str:
+        """Generate code for nested pipeline with map_over (explode/groupby pattern)."""
         lines = []
-        lines.append(f"# Pipeline {self.node.output_name}")
-        lines.append(f"{df_var} = {df_var}.explode(...)")
-        # ... recursive generation ...
-        lines.append(f"{df_var} = {df_var}.groupby(...).agg(...)")
+        inner_pipeline = self.node.pipeline
+        input_mapping = self.node.input_mapping or {}
+        output_mapping = self.node.output_mapping or {}
+        map_over = self.node.map_over
+        map_over_col = map_over[0] if isinstance(map_over, list) else map_over
+
+        lines.append(f"# Pipeline with map_over: {self.node.output_name}")
+        
+        # Generate row ID for grouping
+        row_id_col = context.generate_row_id_name()
+        lines.append(f"{df_var} = {df_var}._add_monotonically_increasing_id('{row_id_col}')")
+        
+        # Store original list column
+        original_list_col = f"__original_{map_over_col}__"
+        lines.append(f"{df_var} = {df_var}.with_column('{original_list_col}', daft.col('{map_over_col}'))")
+        
+        # Explode the map_over column
+        lines.append(f"{df_var} = {df_var}.explode(daft.col('{map_over_col}'))")
+        
+        # Apply input mapping (rename columns)
+        if input_mapping:
+            for outer, inner in input_mapping.items():
+                if outer != inner:
+                    lines.append(f"{df_var} = {df_var}.with_column('{inner}', daft.col('{outer}'))")
+        
+        # Track available columns for inner nodes
+        inner_available = available_columns.copy()
+        for outer, inner in input_mapping.items():
+            inner_available.add(inner)
+        
+        # Generate code for inner pipeline nodes
+        lines.append(f"# Inner pipeline nodes")
+        for inner_node in inner_pipeline.graph.execution_order:
+            op = context.engine._create_operation(inner_node)
+            code = op.generate_code(df_var, inner_available, context)
+            lines.append(code)
+            if hasattr(inner_node, "output_name"):
+                out = inner_node.output_name
+                if isinstance(out, (list, tuple)):
+                    inner_available.update(out)
+                else:
+                    inner_available.add(out)
+        
+        # Determine inner outputs and their mapped names
+        inner_outputs = []
+        for n in inner_pipeline.graph.execution_order:
+            out = n.output_name
+            if isinstance(out, (list, tuple)):
+                inner_outputs.extend(out)
+            else:
+                inner_outputs.append(out)
+        final_outputs = [output_mapping.get(n, n) for n in inner_outputs]
+        
+        # Apply output mapping (rename columns)
+        if output_mapping:
+            for inner_name, outer_name in output_mapping.items():
+                if inner_name != outer_name and inner_name in inner_outputs:
+                    lines.append(f"{df_var} = {df_var}.with_column('{outer_name}', daft.col('{inner_name}'))")
+        
+        # Group by row ID and aggregate outputs into lists
+        agg_exprs = []
+        for out in final_outputs:
+            agg_exprs.append(f"daft.col('{out}').list_agg().alias('{out}')")
+        agg_exprs.append(f"daft.col('{original_list_col}').any_value().alias('{original_list_col}')")
+        
+        lines.append(f"{df_var} = {df_var}.groupby(daft.col('{row_id_col}')).agg({', '.join(agg_exprs)})")
+        
+        # Sort by row ID to restore order
+        lines.append(f"{df_var} = {df_var}.sort(daft.col('{row_id_col}'))")
+        
+        # Restore original column name
+        lines.append(f"{df_var} = {df_var}.with_column('{map_over_col}', daft.col('{original_list_col}'))")
+        
         return "\n".join(lines)
 
 
