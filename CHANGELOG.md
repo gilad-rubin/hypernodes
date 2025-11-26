@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2025-11-26
+
+### Added
+- **Dark Theme Preview Generation**: Added script and functionality to generate theme previews, especially for dark mode.
+- **Adaptive SVG Processing**: Enhanced Graphviz rendering to better handle SVG processing.
+- **Theme Improvements**: Improved color management and visualization options for better clarity.
+
+### Refactored
+- **Graphviz Theme**: Renamed `GraphvizStyle` to `GraphvizTheme` and updated node styling.
+- **Visualization Styles**: Updated theme detection and style configurations for better consistency.
+
 ## [0.4.5] - 2025-11-21
 
 ### Changed
