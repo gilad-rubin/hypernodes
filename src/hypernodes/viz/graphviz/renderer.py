@@ -1,4 +1,5 @@
 import html
+import re
 import subprocess
 from typing import Dict, List, Optional, Union
 
@@ -89,13 +90,50 @@ class GraphvizRenderer:
                 capture_output=True,
                 check=True,
             )
-            return process.stdout.decode("utf-8")
+            svg_content = process.stdout.decode("utf-8")
+            return self._post_process_svg(svg_content)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Graphviz failed: {e.stderr.decode('utf-8')}")
         except FileNotFoundError:
             raise RuntimeError(
                 "Graphviz 'dot' executable not found. Please install Graphviz."
             )
+
+    def _post_process_svg(self, svg_content: str) -> str:
+        """Apply post-processing to make SVG adaptive to VS Code themes."""
+        
+        # 1. Remove background polygon (make it truly transparent)
+        # Matches <polygon fill="..." stroke="..." points="..."/> that covers the graph
+        # Graphviz typically puts this as the first polygon in the graph
+        svg_content = re.sub(
+            r'<polygon fill="[^"]*" stroke="[^"]*" points="[^"]*"/>', 
+            '', 
+            svg_content,
+            count=1 
+        )
+
+        # 2. Replace structural colors with CSS variables for adaptivity
+        
+        # Identify the colors used in the current style that should be adaptive
+        # Edges
+        edge_color = self.style.edge_color
+        # Universal outline (used for node borders)
+        outline_color = self.style.node_styles['function'].color.outline 
+        # Replacement target: 'currentColor' makes it inherit the text color of the container
+        # (Dark in light mode, Light in dark mode)
+        adaptive_color = "currentColor"
+
+        # Replace hex colors with adaptive color
+        # We use simple string replacement for robustness, assuming the hex codes are unique enough
+        # and exactly match what we put in.
+        
+        if edge_color:
+            # Replace edge stroke
+            svg_content = svg_content.replace(f'stroke="{edge_color}"', f'stroke="{adaptive_color}"')
+            # Replace edge fill (arrowheads)
+            svg_content = svg_content.replace(f'fill="{edge_color}"', f'fill="{adaptive_color}"')
+        
+        return svg_content
 
     def _render_scope(self, parent_id: Optional[str]):
         """Recursively render nodes within a scope (cluster or root)."""
@@ -139,8 +177,10 @@ class GraphvizRenderer:
         cluster_name = f"cluster_{abs(hash(node.id))}"
         label = node.label
 
-        # Use edge color for cluster outline and label (darker in light mode)
-        border_color = self.style.edge_color
+        # Use the pipeline color's outline for the expanded cluster border
+        # This matches the collapsed node outline color
+        pipeline_style = self.style.node_styles.get("pipeline")
+        border_color = pipeline_style.color.outline if pipeline_style else self.style.edge_color
         label_color = self.style.edge_color
 
         self._add_line(f'subgraph "{cluster_name}" {{')
@@ -152,8 +192,8 @@ class GraphvizRenderer:
         self._add_line(f'fontcolor="{label_color}";')
         self._add_line(f'fontname="{self.style.font_name}";')
         self._add_line('margin="20";')
-        # Bolder penwidth for visibility
-        self._add_line('penwidth="2.0";')
+        # Match arrow width (usually 1.2)
+        self._add_line('penwidth="1.5";')
 
         # Recurse
         self._render_scope(node.id)
@@ -213,7 +253,7 @@ class GraphvizRenderer:
         # Use simple name for Graphviz identifier (becomes SVG title)
         gv_id = self._get_graphviz_id(node)
         self._add_line(
-            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}", penwidth="{config.penwidth}"];'
         )
 
     def _render_function_node(self, node: VizNode):
@@ -249,7 +289,7 @@ class GraphvizRenderer:
         # Use simple name for Graphviz identifier (becomes SVG title)
         gv_id = self._get_graphviz_id(node)
         self._add_line(
-            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}", penwidth="{config.penwidth}"];'
         )
 
     def _render_combined_node(
@@ -309,7 +349,7 @@ class GraphvizRenderer:
         # Use simple name for Graphviz identifier (becomes SVG title)
         gv_id = self._get_graphviz_id(node)
         self._add_line(
-            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}", penwidth="{config.penwidth}"];'
         )
 
     def _render_edge(self, edge: VizEdge, node_map: Dict[str, VizNode]):
