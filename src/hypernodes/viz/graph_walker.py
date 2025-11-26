@@ -75,7 +75,8 @@ class GraphWalker:
                     except Exception:
                         pass
             
-            data_node_id = f"data_{prefix}bound_{param_name}"
+            # Use human-readable param name (with prefix for nested scopes)
+            data_node_id = f"{prefix}{param_name}" if prefix else param_name
             data_node = DataNode(
                 id=data_node_id,
                 parent_id=parent_id,
@@ -103,7 +104,7 @@ class GraphWalker:
         parent_pipeline: Optional[Pipeline] = None,
     ):
         """Default visitor for unknown node types."""
-        passuv
+        pass
 
     @_visit_node.register
     def _(
@@ -116,26 +117,12 @@ class GraphWalker:
         scope: Dict[str, str],
         parent_pipeline: Optional[Pipeline] = None,
     ):
-        node_id = f"{prefix}{id(node)}"
-        is_expanded = node_id in self.expanded_nodes
-        
         # Generate a human-readable label
-        # Priority: node.name > node.pipeline.name > function name of first node > "Pipeline"
-        label = None
-        if node.name:
-            label = node.name
-        elif hasattr(node.pipeline, "name") and node.pipeline.name:
-            label = node.pipeline.name
-        else:
-            # Try to get a descriptive name from the first function in the pipeline
-            if node.pipeline.nodes:
-                first_node = node.pipeline.nodes[0]
-                if hasattr(first_node, "func") and hasattr(first_node.func, "__name__"):
-                    label = f"{first_node.func.__name__}_pipeline"
-                else:
-                    label = "Pipeline"
-            else:
-                label = "Pipeline"
+        label = self._get_pipeline_node_label(node)
+        
+        # Use human-readable label as the node ID
+        node_id = f"{prefix}{label}"
+        is_expanded = node_id in self.expanded_nodes
         
         viz_node = PipelineNode(
             id=node_id,
@@ -169,9 +156,10 @@ class GraphWalker:
         scope: Dict[str, str],
         parent_pipeline: Optional[Pipeline] = None,
     ):
-        node_id = f"{prefix}{id(node)}"
-        label = self._get_node_label(node)
         func_name = self._get_func_name(node)
+        # Use human-readable function name as the node ID
+        node_id = f"{prefix}{func_name}"
+        label = self._get_node_label(node)
         
         # Check for dual node property safely
         is_dual = getattr(node, "is_dual_node", False)
@@ -220,7 +208,8 @@ class GraphWalker:
                 nested_scope[inner_arg] = scope[outer_arg]
             else:
                 # Not found in outer scope - create input DataNode
-                input_node_id = f"input_{prefix}{outer_arg}"
+                # Use just the argument name (with prefix for nested scopes)
+                input_node_id = f"{prefix}{outer_arg}" if prefix else outer_arg
                 if input_node_id not in [n.id for n in nodes_out]:
                     input_node = DataNode(
                         id=input_node_id,
@@ -243,7 +232,7 @@ class GraphWalker:
             scope=nested_scope
         )
         
-        # Map outputs: Create new DataNodes for mapped outputs
+        # Map outputs: Create boundary DataNodes for mapped outputs if names differ
         # Get the PipelineNode's parent_id
         pipeline_node = next(n for n in nodes_out if n.id == node_id)
         outer_parent_id = pipeline_node.parent_id
@@ -251,9 +240,24 @@ class GraphWalker:
         if node.output_mapping:
             for inner_out, outer_out in node.output_mapping.items():
                 if inner_out in nested_scope:
-                    # Simply register the inner DataNode with the outer name in the outer scope
-                    # No need to create boundary DataNodes since the pipeline is expanded
-                    scope[outer_out] = nested_scope[inner_out]
+                    inner_data_node_id = nested_scope[inner_out]
+                    if inner_out != outer_out:
+                        # Create boundary DataNode for the mapped output name
+                        outer_data_node_id = f"{prefix}{outer_out}" if prefix else outer_out
+                        outer_data_node = DataNode(
+                            id=outer_data_node_id,
+                            parent_id=outer_parent_id,
+                            name=outer_out,
+                            is_bound=False,
+                            source_id=inner_data_node_id  # Links to inner output
+                        )
+                        nodes_out.append(outer_data_node)
+                        # Create edge from inner output to outer boundary
+                        edges_out.append(VizEdge(source=inner_data_node_id, target=outer_data_node_id))
+                        scope[outer_out] = outer_data_node_id
+                    else:
+                        # Same name - just register in outer scope
+                        scope[outer_out] = inner_data_node_id
         else:
             # Default mapping (same names) - register inner DataNodes directly in outer scope
             # No need to create boundary DataNodes since the pipeline is expanded
@@ -282,7 +286,8 @@ class GraphWalker:
                     edges_out.append(VizEdge(source=data_node_id, target=node_id))
                 else:
                     # Create new Input DataNode
-                    input_node_id = f"input_{prefix}{actual_arg}"
+                    # Use just the argument name (with prefix for nested scopes)
+                    input_node_id = f"{prefix}{actual_arg}" if prefix else actual_arg
                     exists = False
                     for n in nodes_out:
                         if n.id == input_node_id:
@@ -317,6 +322,7 @@ class GraphWalker:
         self,
         node: Any,
         node_id: str,
+        prefix: str,
         nodes_out: List[VizNode],
         edges_out: List[VizEdge],
         scope: Dict[str, str],
@@ -342,8 +348,9 @@ class GraphWalker:
             for out_name in output_names:
                 final_out_name = out_name
                 
-                data_node_id = f"data_{node_id}_{final_out_name}"
-                type_hint = self._extract_return_type(node)
+                # Use human-readable output name (with prefix from parent scope)
+                data_node_id = f"{prefix}{final_out_name}" if prefix else final_out_name
+                type_hint = self._extract_return_type(node, final_out_name)
                 
                 data_node = DataNode(
                     id=data_node_id,
@@ -372,7 +379,7 @@ class GraphWalker:
     ):
         """Handle input/output connections for any node type."""
         self._handle_input_connections(node, node_id, prefix, nodes_out, edges_out, scope)
-        self._handle_output_connections(node, node_id, nodes_out, edges_out, scope, parent_pipeline)
+        self._handle_output_connections(node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline)
 
     def _group_data_nodes(self, nodes: List[VizNode], edges: List[VizEdge]) -> tuple[List[VizNode], List[VizEdge]]:
         """Group DataNodes that share source, target set, and bound state."""
@@ -433,6 +440,26 @@ class GraphWalker:
 
         return new_nodes, new_edges
 
+    def _get_pipeline_node_label(self, node: HyperPipelineNode) -> str:
+        """Generate a human-readable label for a PipelineNode.
+        
+        Priority: node.name > node.pipeline.name > function name of first node > "Pipeline"
+        """
+        if node.name:
+            return node.name
+        elif hasattr(node.pipeline, "name") and node.pipeline.name:
+            return node.pipeline.name
+        else:
+            # Try to get a descriptive name from the first function in the pipeline
+            if node.pipeline.nodes:
+                first_node = node.pipeline.nodes[0]
+                if hasattr(first_node, "func") and hasattr(first_node.func, "__name__"):
+                    return f"{first_node.func.__name__}_pipeline"
+                else:
+                    return "Pipeline"
+            else:
+                return "Pipeline"
+
     def _get_node_label(self, node: Node) -> str:
         if hasattr(node, "func") and hasattr(node.func, "__name__"):
             return node.func.__name__
@@ -445,7 +472,28 @@ class GraphWalker:
             return str(node.func)
         return "unknown"
 
-    def _extract_return_type(self, node: Node) -> Optional[str]:
+    def _extract_return_type(self, node: Node, output_name: Optional[str] = None) -> Optional[str]:
+        """Extract return type hint from node function or inner pipeline."""
+        if isinstance(node, HyperPipelineNode):
+            if output_name is None:
+                return None
+                
+            # Map outer output name to inner output name
+            inner_out_name = output_name
+            if node.output_mapping:
+                # output_mapping is {inner: outer}
+                for inner, outer in node.output_mapping.items():
+                    if outer == output_name:
+                        inner_out_name = inner
+                        break
+            
+            # Find inner node producing this output
+            if hasattr(node.pipeline, "graph") and hasattr(node.pipeline.graph, "output_to_node"):
+                if inner_out_name in node.pipeline.graph.output_to_node:
+                    inner_node = node.pipeline.graph.output_to_node[inner_out_name]
+                    return self._extract_return_type(inner_node, inner_out_name)
+            return None
+
         if not hasattr(node, "func"):
             return None
         try:

@@ -59,8 +59,8 @@ def test_graph_walker_nested_pipeline_expanded():
     outer_node = inner_pipeline.as_node(name="nested")
     outer_pipeline = Pipeline([outer_node])
     
-    # Get ID to expand
-    node_id = f"{id(outer_node)}"
+    # Get ID to expand - uses human-readable label now
+    node_id = "nested"
     
     walker = GraphWalker(outer_pipeline, expanded_nodes={node_id})
     graph = walker.get_visualization_data()

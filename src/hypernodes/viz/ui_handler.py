@@ -53,7 +53,9 @@ class UIHandler:
     def _expand_all(self, pipeline: Pipeline, prefix: str = ""):
         for node in pipeline.graph.execution_order:
             if isinstance(node, HyperPipelineNode):
-                node_id = f"{prefix}{id(node)}"
+                # Use human-readable label as the node ID (consistent with GraphWalker)
+                label = self._get_pipeline_node_label(node)
+                node_id = f"{prefix}{label}"
                 self.expanded_nodes.add(node_id)
                 self._expand_all(node.pipeline, prefix=f"{node_id}__")
 
@@ -63,9 +65,31 @@ class UIHandler:
         
         for node in pipeline.graph.execution_order:
             if isinstance(node, HyperPipelineNode):
-                node_id = f"{prefix}{id(node)}"
+                # Use human-readable label as the node ID (consistent with GraphWalker)
+                label = self._get_pipeline_node_label(node)
+                node_id = f"{prefix}{label}"
                 self.expanded_nodes.add(node_id)
                 self._expand_to_depth(node.pipeline, current_depth + 1, max_depth, prefix=f"{node_id}__")
+
+    def _get_pipeline_node_label(self, node: HyperPipelineNode) -> str:
+        """Generate a human-readable label for a PipelineNode.
+        
+        Priority: node.name > node.pipeline.name > function name of first node > "Pipeline"
+        """
+        if node.name:
+            return node.name
+        elif hasattr(node.pipeline, "name") and node.pipeline.name:
+            return node.pipeline.name
+        else:
+            # Try to get a descriptive name from the first function in the pipeline
+            if node.pipeline.nodes:
+                first_node = node.pipeline.nodes[0]
+                if hasattr(first_node, "func") and hasattr(first_node.func, "__name__"):
+                    return f"{first_node.func.__name__}_pipeline"
+                else:
+                    return "Pipeline"
+            else:
+                return "Pipeline"
 
     def apply_options(
         self,

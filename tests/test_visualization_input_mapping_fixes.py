@@ -67,12 +67,13 @@ class TestDepthExpansion:
         outer = Pipeline(nodes=[inner.as_node(name="inner_node")], name="outer")
         
         # Depth 1: should show collapsed pipeline node
+        # Use traverse_collapsed=False to test actual visual output
         handler1 = UIHandler(outer, depth=1)
-        viz_data_1 = handler1.get_visualization_data()
+        viz_data_1 = handler1.get_visualization_data(traverse_collapsed=False)
         
         # Depth 2: should expand and show inner nodes
         handler2 = UIHandler(outer, depth=2)
-        viz_data_2 = handler2.get_visualization_data()
+        viz_data_2 = handler2.get_visualization_data(traverse_collapsed=False)
         
         # At depth=1, should only see PipelineNode (collapsed)
         pipeline_nodes_d1 = [n for n in viz_data_1.nodes if isinstance(n, PipelineNode)]
@@ -103,8 +104,9 @@ class TestDepthExpansion:
         level3 = Pipeline(nodes=[level2.as_node(name="level2_node")], name="level3")
         
         # Depth 1: collapsed outermost only
+        # Use traverse_collapsed=False to test actual visual output
         handler1 = UIHandler(level3, depth=1)
-        viz_data_1 = handler1.get_visualization_data()
+        viz_data_1 = handler1.get_visualization_data(traverse_collapsed=False)
         
         pipeline_nodes_d1 = [n for n in viz_data_1.nodes if isinstance(n, PipelineNode)]
         assert len(pipeline_nodes_d1) == 1, "Depth 1 should show one collapsed pipeline"
@@ -112,7 +114,7 @@ class TestDepthExpansion:
         
         # Depth 2: expand one level
         handler2 = UIHandler(level3, depth=2)
-        viz_data_2 = handler2.get_visualization_data()
+        viz_data_2 = handler2.get_visualization_data(traverse_collapsed=False)
         
         pipeline_nodes_d2 = [n for n in viz_data_2.nodes if isinstance(n, PipelineNode)]
         # Should have level2_node (expanded) and level1_node (collapsed)
@@ -122,7 +124,7 @@ class TestDepthExpansion:
         
         # Depth 3: expand two levels
         handler3 = UIHandler(level3, depth=3)
-        viz_data_3 = handler3.get_visualization_data()
+        viz_data_3 = handler3.get_visualization_data(traverse_collapsed=False)
         
         pipeline_nodes_d3 = [n for n in viz_data_3.nodes if isinstance(n, PipelineNode)]
         func_nodes_d3 = [n for n in viz_data_3.nodes if isinstance(n, FunctionNode)]

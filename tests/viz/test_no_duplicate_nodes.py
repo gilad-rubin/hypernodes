@@ -30,8 +30,8 @@ def test_no_duplicate_nodes_in_expanded_nested_pipeline():
     # Outer pipeline
     outer = Pipeline(nodes=[retrieval_pipeline.as_node(), generate])
     
-    # Visualize with depth=2 (expanded)
-    result = outer.visualize(depth=2)
+    # Visualize with depth=2 (expanded), separate_outputs=True for individual output nodes
+    result = outer.visualize(depth=2, separate_outputs=True)
     
     # Extract HTML
     if hasattr(result, 'data'):
@@ -100,8 +100,8 @@ def test_no_duplicate_nodes_with_output_mapping():
     
     outer = Pipeline(nodes=[inner_node, add_ten])
     
-    # Visualize with depth=2 (expanded)
-    result = outer.visualize(depth=2)
+    # Visualize with depth=2 (expanded), separate_outputs=True for individual output nodes
+    result = outer.visualize(depth=2, separate_outputs=True)
     
     # Extract HTML
     if hasattr(result, 'data'):

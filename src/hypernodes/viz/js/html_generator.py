@@ -119,10 +119,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             <div style="display: flex; flex-direction: column; gap: 8px; max-width: 80%;">
                 <div style="color: #f87171; font-family: monospace; user-select: text; background: #2a1b1b; padding: 12px; rounded: 4px;">${msg}</div>
                 <button onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText)" style="padding: 4px 8px; background: #374151; border: none; color: white; border-radius: 4px; cursor: pointer; align-self: flex-start;">Copy Error</button>
+                <button onclick="window.location.reload()" style="margin-top: 8px; padding: 6px 12px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; align-self: flex-start;">Retry Visualization</button>
             </div>
         `;
       }
     };
+
+    // Keep-alive mechanism to prevent iframe cleanup in some environments
+    setInterval(() => {
+      try {
+        // Minimal DOM interaction to keep the context alive
+        document.documentElement.dataset.lastPing = Date.now();
+      } catch(e) {}
+    }, 5000);
 
     try {
       const React = window.React;
@@ -221,6 +230,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       const CustomNode = ({ data, id }) => {
         const isExpanded = data.isExpanded;
         const theme = data.theme;
+        
+        // Force re-render on theme/expansion change using a ref or key if needed
+        // but here we rely on React's prop diffing.
         
         // Style Configuration
         let colors = { bg: "slate", border: "slate", text: "slate", icon: "slate" };

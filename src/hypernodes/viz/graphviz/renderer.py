@@ -12,17 +12,25 @@ from ..structures import (
     VizEdge,
     VizNode,
 )
-from .style import DESIGN_STYLES, GraphvizTheme, UNIVERSAL_OUTLINE
+from .style import DESIGN_STYLES, GraphvizTheme
 
 
 class GraphvizRenderer:
     """Renders VisualizationGraph to Graphviz SVG via DOT format."""
 
-    def __init__(self, style: Union[str, GraphvizTheme] = "default"):
+    def __init__(self, style: Union[str, GraphvizTheme] = "default", separate_outputs: bool = False):
+        """Initialize the renderer.
+        
+        Args:
+            style: Visual style for the graph (theme name or GraphvizTheme object)
+            separate_outputs: If True, render outputs as separate nodes.
+                            If False (default), combine function nodes with their outputs.
+        """
         if isinstance(style, str):
             self.style = DESIGN_STYLES.get(style, DESIGN_STYLES["default"])
         else:
             self.style = style
+        self.separate_outputs = separate_outputs
         self.lines: List[str] = []
         self._indent_level = 0
         self.graph_data: Optional[VisualizationGraph] = None
@@ -94,39 +102,54 @@ class GraphvizRenderer:
         nodes = self.nodes_by_parent.get(parent_id, [])
 
         for node in nodes:
-            # 1. If DataNode/GroupDataNode with source_id -> SKIP (handled by producer)
-            if isinstance(node, (DataNode, GroupDataNode)) and node.source_id:
-                continue
+            if self.separate_outputs:
+                # Separate mode: outputs are rendered as individual nodes
+                # 1. If PipelineNode AND expanded -> CLUSTER
+                if isinstance(node, PipelineNode) and node.is_expanded:
+                    self._render_cluster(node)
 
-            # 2. If PipelineNode AND expanded -> CLUSTER
-            if isinstance(node, PipelineNode) and node.is_expanded:
-                self._render_cluster(node)
+                # 2. If Function/Pipeline(collapsed)/Dual -> FUNCTION NODE only
+                elif isinstance(node, (FunctionNode, PipelineNode, DualNode)):
+                    self._render_function_node(node)
 
-            # 3. If Function/Pipeline(collapsed)/Dual -> COMBINED NODE
-            elif isinstance(node, (FunctionNode, PipelineNode, DualNode)):
-                outputs = self.outputs_by_source.get(node.id, [])
-                self._render_combined_node(node, outputs)
+                # 3. If Data/Group -> DATA NODE (inputs OR outputs)
+                elif isinstance(node, (DataNode, GroupDataNode)):
+                    self._render_input_node(node)
+            else:
+                # Combined mode (default): outputs are part of function nodes
+                # 1. If DataNode/GroupDataNode with source_id -> SKIP (handled by producer)
+                if isinstance(node, (DataNode, GroupDataNode)) and node.source_id:
+                    continue
 
-            # 4. If Input Node (Data/Group without source) -> INPUT NODE
-            elif isinstance(node, (DataNode, GroupDataNode)):
-                self._render_input_node(node)
+                # 2. If PipelineNode AND expanded -> CLUSTER
+                if isinstance(node, PipelineNode) and node.is_expanded:
+                    self._render_cluster(node)
+
+                # 3. If Function/Pipeline(collapsed)/Dual -> COMBINED NODE with outputs
+                elif isinstance(node, (FunctionNode, PipelineNode, DualNode)):
+                    outputs = self.outputs_by_source.get(node.id, [])
+                    self._render_combined_node(node, outputs)
+
+                # 4. If Input Node (Data/Group without source) -> INPUT NODE
+                elif isinstance(node, (DataNode, GroupDataNode)):
+                    self._render_input_node(node)
 
     def _render_cluster(self, node: PipelineNode):
         """Render a nested pipeline as a Graphviz cluster."""
         cluster_name = f"cluster_{abs(hash(node.id))}"
         label = node.label
 
-        # Style for cluster - use universal outline for light/dark mode compatibility
-        # Both outline and label use same color since label is on transparent background
-        color = UNIVERSAL_OUTLINE
+        # Use edge color for cluster outline and label (darker in light mode)
+        border_color = self.style.edge_color
+        label_color = self.style.edge_color
 
         self._add_line(f'subgraph "{cluster_name}" {{')
         self._indent_level += 1
 
         self._add_line(f'label="{label}";')
         self._add_line('style="rounded,bold";')  # Solid outline, transparent background
-        self._add_line(f'color="{color}";')
-        self._add_line(f'fontcolor="{color}";')  # Same as outline for dark mode visibility
+        self._add_line(f'color="{border_color}";')
+        self._add_line(f'fontcolor="{label_color}";')
         self._add_line(f'fontname="{self.style.font_name}";')
         self._add_line('margin="20";')
         # Bolder penwidth for visibility
@@ -187,14 +210,52 @@ class GraphvizRenderer:
 {"".join(rows)}
 </TABLE>
 >"""
-        # margin="0.1" to reduce space between label and border
+        # Use simple name for Graphviz identifier (becomes SVG title)
+        gv_id = self._get_graphviz_id(node)
         self._add_line(
-            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+        )
+
+    def _render_function_node(self, node: VizNode):
+        """Render a FunctionNode, DualNode, or collapsed PipelineNode (separate mode)."""
+        # Determine color and config
+        config_key = "function"
+
+        if isinstance(node, PipelineNode):
+            config_key = "pipeline"
+        elif isinstance(node, DualNode):
+            config_key = "dual"
+
+        config = self.style.node_styles.get(
+            config_key, self.style.node_styles["function"]
+        )
+
+        node_label = self._get_label(node)
+        node_label_html = self._format_label_html(
+            node_label, color=config.color.text, is_bold=config.is_bold
+        )
+
+        rows = []
+        # Header only (no outputs combined)
+        rows.append(
+            f'<TR><TD ALIGN="CENTER" BALIGN="CENTER">{node_label_html}</TD></TR>'
+        )
+
+        table = f"""<
+<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
+{"".join(rows)}
+</TABLE>
+>"""
+        # Use simple name for Graphviz identifier (becomes SVG title)
+        gv_id = self._get_graphviz_id(node)
+        self._add_line(
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
         )
 
     def _render_combined_node(
         self, node: VizNode, outputs: List[Union[DataNode, GroupDataNode]]
     ):
+        """Render a FunctionNode with its outputs combined (default mode)."""
         # Determine color and config
         config_key = "function"
 
@@ -245,8 +306,10 @@ class GraphvizRenderer:
 {"".join(rows)}
 </TABLE>
 >"""
+        # Use simple name for Graphviz identifier (becomes SVG title)
+        gv_id = self._get_graphviz_id(node)
         self._add_line(
-            f'"{node.id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
+            f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}"];'
         )
 
     def _render_edge(self, edge: VizEdge, node_map: Dict[str, VizNode]):
@@ -259,25 +322,52 @@ class GraphvizRenderer:
         if not source_node or not target_node:
             return
 
-        # For DataNode outputs that are part of a combined node,
-        # connect from the parent combined node instead
-        actual_source_id = source_id
-        if isinstance(source_node, (DataNode, GroupDataNode)) and source_node.source_id:
-            actual_source_id = source_node.source_id
+        if self.separate_outputs:
+            # Separate mode: direct edges between all nodes
+            # Use human-readable Graphviz IDs for both source and target
+            gv_source = f'"{self._get_graphviz_id(source_node)}"'
+            gv_target = f'"{self._get_graphviz_id(target_node)}"'
+        else:
+            # Combined mode: edges from outputs come from parent function node
+            # For DataNode outputs that are part of a combined node,
+            # connect from the parent combined node instead
+            actual_source_id = source_id
+            actual_source_node = source_node
+            if isinstance(source_node, (DataNode, GroupDataNode)) and source_node.source_id:
+                actual_source_id = source_node.source_id
+                actual_source_node = node_map.get(actual_source_id)
+                if not actual_source_node:
+                    return
 
-        # Skip internal edges (Function -> its own Output)
-        if (
-            isinstance(target_node, (DataNode, GroupDataNode))
-            and target_node.source_id == actual_source_id
-        ):
-            return
+            # Skip internal edges (Function -> its own Output) in combined mode
+            if (
+                isinstance(target_node, (DataNode, GroupDataNode))
+                and target_node.source_id == actual_source_id
+            ):
+                return
 
-        # Connect using standard graphviz routing (smart placement)
-        # Removed :s and :n to allow cleaner arrows not forced to center
-        gv_source = f'"{actual_source_id}"'
-        gv_target = f'"{target_id}"'
+            gv_source = f'"{self._get_graphviz_id(actual_source_node)}"'
+            gv_target = f'"{self._get_graphviz_id(target_node)}"'
 
         self._add_line(f"{gv_source} -> {gv_target};")
+
+    def _get_graphviz_id(self, node: VizNode) -> str:
+        """Get a human-readable Graphviz identifier for a node.
+        
+        This becomes the <title> element in the SVG output.
+        Uses label/name instead of full ID to avoid prefixes like 'processor__'.
+        """
+        if isinstance(node, GroupDataNode):
+            # Use first node's name for group
+            if node.nodes:
+                return node.nodes[0].name
+            return "group"
+        if hasattr(node, "label") and node.label:
+            return node.label
+        if hasattr(node, "name") and node.name:
+            return node.name
+        # Fallback to full ID
+        return node.id
 
     def _get_label(self, node: VizNode) -> str:
         if isinstance(node, GroupDataNode):

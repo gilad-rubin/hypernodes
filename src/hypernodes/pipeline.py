@@ -234,6 +234,7 @@ class Pipeline:
         filename: Optional[str] = None,
         engine: Union[str, Any] = "graphviz",
         depth: Optional[int] = 1,
+        separate_outputs: bool = False,
         # Legacy parameters (kept for backward compatibility)
         orient: str = "TB",
         flatten: bool = False,
@@ -251,6 +252,8 @@ class Pipeline:
             filename: Output filename (e.g., "pipeline.svg"). If None, returns object
             engine: Visualization engine - "graphviz", "ipywidget", or custom engine
             depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
+            separate_outputs: If True, render outputs as separate nodes.
+                             If False (default), combine function nodes with their outputs.
             
             Legacy graphviz-specific parameters (will be deprecated):
             orient: Graph orientation ("TB", "LR", "BT", "RL")
@@ -292,6 +295,7 @@ class Pipeline:
             filename=filename,
             engine=engine,
             depth=depth,
+            separate_outputs=separate_outputs,
             **engine_options
         )
 

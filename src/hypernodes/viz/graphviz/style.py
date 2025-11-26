@@ -3,7 +3,11 @@ from typing import Dict
 
 
 # Universal outline/edge color - visible in both light and dark modes
-UNIVERSAL_OUTLINE = "#94a3b8"  # Tailwind slate-400 - lighter for dark mode visibility
+UNIVERSAL_OUTLINE = "#64748b"  # Tailwind slate-500 - balanced for both modes
+
+# Edges for specific modes
+EDGE_LIGHT = "#1e293b"  # Slate 800 - Almost black for light mode
+EDGE_DARK = "#e2e8f0"   # Slate 200 - Contrast for dark mode
 
 
 @dataclass(frozen=True)
@@ -168,7 +172,7 @@ class GraphvizTheme:
     font_name: str = "Helvetica"
     base_font_size: int = 12
     edge_font_size: int = 10
-    edge_color: str = UNIVERSAL_OUTLINE  # Works in light & dark mode
+    edge_color: str = EDGE_LIGHT  # Default to dark grey for light mode
 
     # Graphviz Attributes
     graph_attr: Dict[str, str] = field(default_factory=dict)
@@ -215,10 +219,14 @@ class GraphvizTheme:
 
 
 def create_custom_theme(
-    func_color: ColorPair, pipe_color: ColorPair, input_color: ColorPair
+    func_color: ColorPair, 
+    pipe_color: ColorPair, 
+    input_color: ColorPair,
+    edge_color: str = EDGE_LIGHT
 ) -> GraphvizTheme:
     """Factory for custom colored themes."""
     return GraphvizTheme(
+        edge_color=edge_color,
         node_styles={
             "function": NodeStyle(is_bold=True, color=func_color),
             "pipeline": NodeStyle(is_bold=True, color=pipe_color),
@@ -259,6 +267,43 @@ class LegacyColors:
     FUNCTION = ColorPair(fill="#87D3F9")  # Sky Blue
     PIPELINE = ColorPair(fill="#D5BCFE")  # Plum
     INPUT = ColorPair(fill="#FFC661")     # Amber
+
+
+class NeonColors:
+    """
+    Super vibrant neon colors for true Cyberpunk aesthetics.
+    """
+
+    # 1. Solid Neon - Bright fills, high contrast
+    SOLID_FUNC = ColorPair(fill="#08F7FE", outline="#FFFFFF", text="#000000")   # Electric Cyan
+    SOLID_PIPE = ColorPair(fill="#FE53BB", outline="#FFFFFF", text="#000000")   # Neon Pink/Magenta
+    SOLID_INPUT = ColorPair(fill="#39FF14", outline="#FFFFFF", text="#000000")  # Neon Green
+
+    # 2. Wireframe Neon - Dark fills, glowing outlines
+    WIRE_FUNC = ColorPair(fill="#0a1a1c", outline="#08F7FE", text="#08F7FE")    # Dark Cyan bg
+    WIRE_PIPE = ColorPair(fill="#1a0a16", outline="#FE53BB", text="#FE53BB")    # Dark Pink bg
+    WIRE_INPUT = ColorPair(fill="#0a1a0a", outline="#39FF14", text="#39FF14")   # Dark Green bg
+
+
+class CyberpunkColors:
+    """
+    High-saturation/Neon colors for Dark Mode.
+    """
+
+    # 1. Neon - High Contrast
+    NEON_FUNC = ColorPair(fill="#00e5ff", outline="#ffffff", text="#000000") # Cyan Neon
+    NEON_PIPE = ColorPair(fill="#d500f9", outline="#ffffff", text="#ffffff") # Magenta Neon
+    NEON_INPUT = ColorPair(fill="#00e676", outline="#ffffff", text="#000000") # Green Neon
+
+    # 2. Soft Cyber - Lighter, glowing
+    SOFT_FUNC = ColorPair(fill="#4dd0e1", outline="#b2ebf2", text="#000000")
+    SOFT_PIPE = ColorPair(fill="#e040fb", outline="#f3e5f5", text="#ffffff")
+    SOFT_INPUT = ColorPair(fill="#69f0ae", outline="#b9f6ca", text="#000000")
+
+    # 3. Deep Cyber - Darker fills, bright outlines
+    DEEP_FUNC = ColorPair(fill="#01579b", outline="#4fc3f7", text="#e1f5fe") # Dark Blue
+    DEEP_PIPE = ColorPair(fill="#4a148c", outline="#ea80fc", text="#f3e5f5") # Dark Purple
+    DEEP_INPUT = ColorPair(fill="#1b5e20", outline="#69f0ae", text="#e8f5e9") # Dark Green
 
 
 class UserColorPalette:
@@ -328,7 +373,7 @@ class DagPalettes:
 def create_default_theme() -> GraphvizTheme:
     """Factory for the default HyperNodes theme (new pastel palette)."""
     return create_custom_theme(
-        SelectedColors.FUNCTION, SelectedColors.PIPELINE, SelectedColors.INPUT
+        SelectedColors.FUNCTION, SelectedColors.PIPELINE, SelectedColors.INPUT, edge_color=EDGE_LIGHT
     )
 
 
@@ -337,7 +382,7 @@ DEFAULT_THEME = create_default_theme()
 
 # Theme Registry using curated DAG palettes
 DESIGN_STYLES: Dict[str, GraphvizTheme] = {
-    # ========== DEFAULT ==========
+    # ========== DEFAULT (Light Mode Optimized) ==========
     "default": DEFAULT_THEME,
     
     # ========== LEGACY (your previous default) ==========
@@ -345,9 +390,42 @@ DESIGN_STYLES: Dict[str, GraphvizTheme] = {
         LegacyColors.FUNCTION,
         LegacyColors.PIPELINE,
         LegacyColors.INPUT,
+        edge_color=EDGE_LIGHT,
+    ),
+
+    # ========== DARK MODE / CYBERPUNK ==========
+    "dark_neon_solid": create_custom_theme(
+        NeonColors.SOLID_FUNC,
+        NeonColors.SOLID_PIPE,
+        NeonColors.SOLID_INPUT,
+        edge_color="#FFFFFF", # White edges for maximum contrast against dark
+    ),
+    "dark_neon_wire": create_custom_theme(
+        NeonColors.WIRE_FUNC,
+        NeonColors.WIRE_PIPE,
+        NeonColors.WIRE_INPUT,
+        edge_color=EDGE_DARK,
+    ),
+    "dark_neon": create_custom_theme(
+        CyberpunkColors.NEON_FUNC,
+        CyberpunkColors.NEON_PIPE,
+        CyberpunkColors.NEON_INPUT,
+        edge_color=EDGE_DARK,
+    ),
+    "dark_soft": create_custom_theme(
+        CyberpunkColors.SOFT_FUNC,
+        CyberpunkColors.SOFT_PIPE,
+        CyberpunkColors.SOFT_INPUT,
+        edge_color=EDGE_DARK,
+    ),
+    "dark_deep": create_custom_theme(
+        CyberpunkColors.DEEP_FUNC,
+        CyberpunkColors.DEEP_PIPE,
+        CyberpunkColors.DEEP_INPUT,
+        edge_color=EDGE_DARK,
     ),
     
-    # ========== VARIATIONS WITH YOUR COLORS ==========
+    # ========== VARIATIONS WITH YOUR COLORS (Using Light Edge) ==========
     
     # Variation 1: Bright Mint + Cyan + Soft Purple
     "bright_mint": create_custom_theme(

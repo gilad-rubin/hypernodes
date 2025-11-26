@@ -15,6 +15,7 @@ def visualize(
     engine: Union[str, Any] = "graphviz",
     depth: Optional[int] = 1,
     interactive: bool = False,
+    separate_outputs: bool = False,
     **kwargs
 ):
     """Visualize a pipeline.
@@ -25,6 +26,8 @@ def visualize(
         engine: "graphviz" or "ipywidget" (or custom).
         depth: Initial expansion depth.
         interactive: Whether to use interactive widget (for graphviz).
+        separate_outputs: If True, render outputs as separate nodes.
+                         If False (default), combine function nodes with their outputs.
         **kwargs: Additional options passed to the renderer.
 
     Returns:
@@ -42,7 +45,7 @@ def visualize(
         # For static Graphviz, don't traverse collapsed pipelines (they should remain truly collapsed)
         graph_data = handler.get_visualization_data(traverse_collapsed=False)
         
-        renderer = GraphvizRenderer(style=kwargs.get("style", "default"))
+        renderer = GraphvizRenderer(style=kwargs.get("style", "default"), separate_outputs=separate_outputs)
         svg_content = renderer.render(graph_data)
         
         if filename:

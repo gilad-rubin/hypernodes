@@ -183,7 +183,7 @@ class TestOutputPruningInViz:
         
         # Visualize with expansion
         handler = UIHandler(evaluation, depth=2)
-        viz_data = handler.get_visualization_data()
+        viz_data = handler.get_visualization_data(traverse_collapsed=False)
         
         # 'answer' should appear (it's used)
         answer_nodes = [n for n in viz_data.nodes if isinstance(n, DataNode) and n.name == "answer"]
@@ -191,8 +191,9 @@ class TestOutputPruningInViz:
         
         # 'retrieved_docs' might appear if 'retrieve' node is shown.
         # But let's check collapsed view (depth=1)
+        # Use traverse_collapsed=False to test actual collapsed visual output
         handler_collapsed = UIHandler(evaluation, depth=1)
-        viz_data_collapsed = handler_collapsed.get_visualization_data()
+        viz_data_collapsed = handler_collapsed.get_visualization_data(traverse_collapsed=False)
         
         # In collapsed view, the PipelineNode should only have 'answer' as output edge?
         # Or rather, there should be a DataNode 'answer' connected to it.
