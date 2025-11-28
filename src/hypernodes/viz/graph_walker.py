@@ -131,18 +131,52 @@ class GraphWalker:
             is_expanded=is_expanded
         )
         nodes_out.append(viz_node)
-        
-        if is_expanded or self.traverse_collapsed:
-            # For expanded PipelineNode (or if traversing collapsed nodes for interactive viz):
-            # 1. Expand the internal structure (creates boundary output DataNodes)
-            self._expand_pipeline_node(node, node_id, prefix, nodes_out, edges_out, scope)
-            
-            # Note: When expanded, input connections go directly to inner nodes (via _expand_pipeline_node logic),
-            # or we rely on the fact that outer DataNodes are in scope.
-            # We do NOT create edges to the container PipelineNode itself to avoid double edges.
-            
+
+        if is_expanded:
+            existing_ids = {n.id for n in nodes_out}
+            # Expanded: build inner structure and register outputs directly to outer scope
+            _, output_map = self._expand_pipeline_node(
+                node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline
+            )
+            for outer_out, meta in output_map.items():
+                inner_id = meta.get("inner_id")
+                inner_name = meta.get("inner_name")
+                if not inner_id:
+                    continue
+
+                if inner_name and inner_name != outer_out:
+                    boundary_id = f"{prefix}{outer_out}" if prefix else outer_out
+                    if boundary_id not in existing_ids:
+                        boundary_node = DataNode(
+                            id=boundary_id,
+                            parent_id=parent_id,
+                            name=outer_out,
+                            type_hint=meta.get("type_hint"),
+                            source_id=node_id if self.traverse_collapsed else node_id,
+                        )
+                        nodes_out.append(boundary_node)
+                        existing_ids.add(boundary_id)
+                        edges_out.append(VizEdge(source=inner_id, target=boundary_id))
+                    scope[outer_out] = boundary_id
+                else:
+                    scope[outer_out] = inner_id
+        elif self.traverse_collapsed:
+            # Collapsed but traversing for interactive viz: build inner structure and expose boundary outputs
+            _, output_map = self._expand_pipeline_node(
+                node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline
+            )
+            self._attach_boundary_outputs(
+                node=node,
+                node_id=node_id,
+                prefix=prefix,
+                outer_parent_id=parent_id,
+                nodes_out=nodes_out,
+                edges_out=edges_out,
+                scope=scope,
+                output_map=output_map,
+            )
         else:
-            # For collapsed PipelineNode: handle both inputs and outputs normally
+            # Collapsed + no traversal: use simple boundary connection handling
             self._handle_connections(node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline)
 
     @_visit_node.register
@@ -190,8 +224,14 @@ class GraphWalker:
         nodes_out: List[VizNode],
         edges_out: List[VizEdge],
         scope: Dict[str, str],
+        parent_pipeline: Optional[Pipeline] = None,
     ):
-        """Handle expansion of a pipeline node."""
+        """Handle expansion of a pipeline node.
+
+        Returns:
+            nested_scope: Scope for inner pipeline nodes.
+            output_map: Mapping of outer output name -> meta (inner_id, type_hint).
+        """
         # Create a new scope for the nested pipeline
         nested_scope = {}
         
@@ -229,42 +269,79 @@ class GraphWalker:
             prefix=f"{node_id}__",
             nodes_out=nodes_out,
             edges_out=edges_out,
-            scope=nested_scope
+            scope=nested_scope,
+            parent_pipeline=node.pipeline,
         )
-        
-        # Map outputs: Create boundary DataNodes for mapped outputs if names differ
-        # Get the PipelineNode's parent_id
-        pipeline_node = next(n for n in nodes_out if n.id == node_id)
-        outer_parent_id = pipeline_node.parent_id
-        
+
+        output_map: Dict[str, Any] = {}
+        # Determine which outputs are required by the parent pipeline (if provided)
+        required_outputs = None
+        if parent_pipeline is not None:
+            required_outputs = parent_pipeline.graph.required_outputs.get(node)
+            if isinstance(required_outputs, str):
+                required_outputs = {required_outputs}
+            elif required_outputs is not None:
+                required_outputs = set(required_outputs)
+
+        # Build output mapping (outer name -> inner data node id + type hint)
         if node.output_mapping:
             for inner_out, outer_out in node.output_mapping.items():
-                if inner_out in nested_scope:
-                    inner_data_node_id = nested_scope[inner_out]
-                    if inner_out != outer_out:
-                        # Create boundary DataNode for the mapped output name
-                        outer_data_node_id = f"{prefix}{outer_out}" if prefix else outer_out
-                        outer_data_node = DataNode(
-                            id=outer_data_node_id,
-                            parent_id=outer_parent_id,
-                            name=outer_out,
-                            is_bound=False,
-                            source_id=inner_data_node_id  # Links to inner output
-                        )
-                        nodes_out.append(outer_data_node)
-                        # Create edge from inner output to outer boundary
-                        edges_out.append(VizEdge(source=inner_data_node_id, target=outer_data_node_id))
-                        scope[outer_out] = outer_data_node_id
-                    else:
-                        # Same name - just register in outer scope
-                        scope[outer_out] = inner_data_node_id
+                if required_outputs is not None and outer_out not in required_outputs:
+                    continue
+                inner_id = nested_scope.get(inner_out)
+                output_map[outer_out] = {
+                    "inner_id": inner_id,
+                    "inner_name": inner_out,
+                    "type_hint": self._extract_return_type(node, outer_out),
+                }
         else:
-            # Default mapping (same names) - register inner DataNodes directly in outer scope
-            # No need to create boundary DataNodes since the pipeline is expanded
             for out_name, _ in node.pipeline.graph.output_to_node.items():
-                if out_name in nested_scope:
-                    # Simply register the inner DataNode in the outer scope
-                    scope[out_name] = nested_scope[out_name]
+                if required_outputs is not None and out_name not in required_outputs:
+                    continue
+                inner_id = nested_scope.get(out_name)
+                output_map[out_name] = {
+                    "inner_id": inner_id,
+                    "inner_name": out_name,
+                    "type_hint": self._extract_return_type(node, out_name),
+                }
+
+        return nested_scope, output_map
+
+    def _attach_boundary_outputs(
+        self,
+        node: HyperPipelineNode,
+        node_id: str,
+        prefix: str,
+        outer_parent_id: Optional[str],
+        nodes_out: List[VizNode],
+        edges_out: List[VizEdge],
+        scope: Dict[str, str],
+        output_map: Dict[str, Any],
+    ):
+        """Create boundary DataNodes for pipeline outputs (used when traversing collapsed pipelines)."""
+        existing_ids = {n.id for n in nodes_out}
+
+        for outer_out, meta in output_map.items():
+            boundary_id = f"{prefix}{outer_out}" if prefix else outer_out
+            if boundary_id in existing_ids:
+                scope[outer_out] = boundary_id
+                continue
+
+            boundary_node = DataNode(
+                id=boundary_id,
+                parent_id=outer_parent_id,
+                name=outer_out,
+                type_hint=meta.get("type_hint"),
+                source_id=node_id,
+            )
+            nodes_out.append(boundary_node)
+            existing_ids.add(boundary_id)
+
+            inner_id = meta.get("inner_id")
+            if inner_id:
+                edges_out.append(VizEdge(source=inner_id, target=boundary_id))
+
+            scope[outer_out] = boundary_id
 
     def _handle_input_connections(
         self,

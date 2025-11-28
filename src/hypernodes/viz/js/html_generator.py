@@ -41,6 +41,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     elk_js = _read_asset("elk.bundled.js", "js")
     rf_js = _read_asset("reactflow.umd.js", "js")
     rf_css = _read_asset("reactflow.css", "css")
+    theme_js = _read_asset("theme_utils.js", "js")
+    state_js = _read_asset("state_utils.js", "js")
 
     # If local assets are missing, keep a minimal external fallback.
     fallback_css = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/style.css" />'
@@ -92,6 +94,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     {htm_js or ""}
     {elk_js or ""}
     {rf_js or ""}
+    {theme_js or ""}
+    {state_js or ""}
     {fallback_js if not all([react_js, react_dom_js, htm_js, elk_js, rf_js]) else ""}
 </head>"""
 
@@ -139,6 +143,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       const RF = window.ReactFlow;
       const htm = window.htm;
       const ELK = window.ELK;
+      const stateUtils = window.HyperNodesVizState || {};
+      const themeUtils = window.HyperNodesTheme || {};
 
       if (!React || !ReactDOM || !RF || !htm || !ELK) {
         throw new Error("Missing globals: " + JSON.stringify({
@@ -146,11 +152,96 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }));
       }
 
-      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, getSmoothStepPath, EdgeLabelRenderer, useReactFlow, Panel } = RF;
+      const { ReactFlow, Background, Controls, MiniMap, Handle, Position, ReactFlowProvider, useEdgesState, useNodesState, MarkerType, BaseEdge, getBezierPath, getSmoothStepPath, EdgeLabelRenderer, useReactFlow, Panel, useUpdateNodeInternals } = RF;
       const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
       const html = htm.bind(React.createElement);
       const elk = new ELK();
+      const fallbackApplyState = (baseNodes, baseEdges, options) => {
+        const { expansionState, separateOutputs, showTypes, theme } = options;
+        const expMap = expansionState instanceof Map ? expansionState : new Map(Object.entries(expansionState || {}));
+
+        const applyMeta = (nodeList) => nodeList.map((n) => {
+          const isPipeline = n.data?.nodeType === 'PIPELINE';
+          const expanded = isPipeline ? Boolean(expMap.get(n.id)) : undefined;
+          return {
+            ...n,
+            type: isPipeline && expanded ? 'pipelineGroup' : n.type,
+            style: isPipeline && !expanded ? undefined : n.style,
+            data: {
+              ...n.data,
+              theme,
+              showTypes,
+              isExpanded: expanded,
+            },
+          };
+        });
+
+        if (separateOutputs) {
+          return {
+            nodes: applyMeta(baseNodes).map((n) => ({
+              ...n,
+              data: { ...n.data, separateOutputs: true },
+            })),
+            edges: baseEdges,
+          };
+        }
+
+        const outputNodes = new Set(baseNodes.filter((n) => n.data?.sourceId).map((n) => n.id));
+        const functionOutputs = {};
+        baseNodes.forEach((n) => {
+          if (n.data?.sourceId) {
+            if (!functionOutputs[n.data.sourceId]) functionOutputs[n.data.sourceId] = [];
+            functionOutputs[n.data.sourceId].push({ name: n.data.label, type: n.data.typeHint });
+          }
+        });
+
+        const nodes = applyMeta(baseNodes)
+          .filter((n) => !outputNodes.has(n.id))
+          .map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              separateOutputs: false,
+              outputs: functionOutputs[n.id] || [],
+            },
+          }));
+
+        const edges = baseEdges
+          .filter((e) => !outputNodes.has(e.target))
+          .map((e) => {
+            if (outputNodes.has(e.source)) {
+              const outputNode = baseNodes.find((n) => n.id === e.source);
+              if (outputNode?.data?.sourceId) {
+                return { ...e, id: `e_${outputNode.data.sourceId}_${e.target}`, source: outputNode.data.sourceId };
+              }
+            }
+            return e;
+          });
+
+        return { nodes, edges };
+      };
+
+      const fallbackApplyVisibility = (nodes, expansionState) => {
+        const expMap = expansionState instanceof Map ? expansionState : new Map(Object.entries(expansionState || {}));
+        const parentMap = new Map();
+        nodes.forEach((n) => {
+          if (n.parentNode) parentMap.set(n.id, n.parentNode);
+        });
+
+        const isHidden = (nodeId) => {
+          let curr = nodeId;
+          while (curr) {
+            const parent = parentMap.get(curr);
+            if (!parent) return false;
+            if (expMap.get(parent) === false) return true;
+            curr = parent;
+          }
+          return false;
+        };
+
+        return nodes.map((n) => ({ ...n, hidden: isHidden(n.id) }));
+      };
 
       // --- Icons ---
       const Icons = {
@@ -291,6 +382,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const isExpanded = data.isExpanded;
         // Get theme from node data (updated via setNodes when theme changes)
         const theme = data.theme || 'dark';
+        const updateNodeInternals = useUpdateNodeInternals();
         
         // Style Configuration
         let colors = { bg: "slate", border: "slate", text: "slate", icon: "slate" };
@@ -322,6 +414,18 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           Icon = Icons.Function;
           labelType = "FUNCTION";
         }
+
+        useEffect(() => {
+          updateNodeInternals(id);
+        }, [
+          id,
+          data.separateOutputs,
+          data.showTypes,
+          data.outputs ? data.outputs.length : 0,
+          data.inputs ? data.inputs.length : 0,
+          isExpanded,
+          theme,
+        ]);
         
         // --- Render Data Node (Compact) ---
         if (data.nodeType === 'DATA') {
@@ -351,6 +455,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         if (data.nodeType === 'INPUT') {
              const isLight = theme === 'light';
              const isBound = Boolean(data.isBound);
+             const showTypes = data.showTypes;
+             const typeHint = data.typeHint;
+             const hasType = showTypes && typeHint;
+             const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
              // Reuse DATA node styling but preserve dashed border for bound inputs
              return html`
                 <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
@@ -361,6 +469,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 `}>
                     <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} /></span>
                     <span className="text-xs font-mono font-medium truncate">${data.label}</span>
+                    ${hasType ? html`<span className=${`text-[10px] font-mono truncate ${typeClass}`}>: ${typeHint}</span>` : null}
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
              `;
@@ -517,7 +626,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             
             const mapToElk = (n) => {
                 let width = 200;
-                let height = 80;
+                let height = 90;
                 
                 if (n.data?.nodeType === 'DATA') {
                     width = 140;
@@ -530,15 +639,15 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     // Collapsed pipeline - compact size based on label
                     const labelLen = n.data.label ? n.data.label.length : 10;
                     width = Math.max(140, labelLen * 8 + 80);
-                    height = 60;
+                    height = 68;
                 } else                 if (n.data?.nodeType === 'INPUT') {
                     width = 160;
-                    height = 40;
+                    height = 46;
                 } else if (n.data?.nodeType === 'INPUT_GROUP') {
                     width = 200;
                     // Dynamic height based on number of inputs
                     const paramCount = n.data.params ? n.data.params.length : 1;
-                    height = 40 + (paramCount * 16);
+                    height = 46 + (paramCount * 18);
                 }
                 
                 if (n.style && n.style.width) width = n.style.width;
@@ -553,9 +662,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                   height: height,
                   children: n.children.length ? n.children.map(mapToElk) : undefined,
                   layoutOptions: {
-                     'elk.padding': '[top=40,left=20,bottom=20,right=20]',
-                     'elk.spacing.nodeNode': '20',
-                     'elk.layered.spacing.nodeNodeBetweenLayers': '40',
+                     'elk.padding': '[top=60,left=24,bottom=40,right=24]',
+                     'elk.spacing.nodeNode': '24',
+                     'elk.layered.spacing.nodeNodeBetweenLayers': '48',
                      'elk.direction': 'DOWN',
                      // Ensure compound nodes are sized by content
                      'elk.resize.fixed': 'false', 
@@ -575,8 +684,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0',
                 
                 // Increased spacing to ensure edges don't touch nodes
-                'elk.layered.spacing.nodeNodeBetweenLayers': '50', // Layer separation (reduced)
-                'elk.spacing.nodeNode': '20', // Space between nodes in same layer (reduced)
+                'elk.layered.spacing.nodeNodeBetweenLayers': '60', // More breathing room vertically
+                'elk.spacing.nodeNode': '24', // Space between nodes in same layer
                 'elk.spacing.edgeNode': '40', // Increased from 30 - prevents edge-node contact
                 'elk.spacing.edgeEdge': '15', // Increased from 15 - space between parallel edges
                 
@@ -668,6 +777,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       const initialShowTypes = Boolean(initialData.meta?.show_types ?? true);
 
       const parseColorString = (value) => {
+        if (themeUtils?.parseColorString) return themeUtils.parseColorString(value);
         if (!value) return null;
         const scratch = document.createElement('div');
         scratch.style.color = value;
@@ -686,17 +796,17 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       const App = () => {
-        const [theme, setTheme] = useState(themePreference === 'auto' ? 'dark' : themePreference);
         const [showMiniMap, setShowMiniMap] = useState(false);
-        const [bgColor, setBgColor] = useState('transparent');
         const [separateOutputs, setSeparateOutputs] = useState(initialSeparateOutputs);
         const [showTypes, setShowTypes] = useState(initialShowTypes);
-        const [themeDebug, setThemeDebug] = useState({
-            source: 'init',
-            luminance: null,
-            background: 'transparent',
-            appliedTheme: themePreference === 'auto' ? 'dark' : themePreference,
+        const [themeDebug, setThemeDebug] = useState({ source: 'init', luminance: null, background: 'transparent', appliedTheme: themePreference });
+        const [detectedTheme, setDetectedTheme] = useState(() => {
+            if (themeUtils?.detectHostTheme) return themeUtils.detectHostTheme();
+            const fallback = parseColorString('transparent');
+            return { theme: themePreference === 'auto' ? 'dark' : themePreference, background: fallback?.resolved || 'transparent', luminance: fallback?.luminance ?? null, source: 'init' };
         });
+        const [manualTheme, setManualTheme] = useState(null);
+        const [bgColor, setBgColor] = useState(detectedTheme.background || 'transparent');
         
         // Track expansion state separately to preserve it across theme/toggle changes
         const [expansionState, setExpansionState] = useState(() => {
@@ -709,84 +819,91 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             return map;
         });
         
-        // Build nodes and edges based on separateOutputs mode and expansion state
-        const { processedNodes, processedEdges } = useMemo(() => {
-            const baseNodes = initialData.nodes;
-            const baseEdges = initialData.edges;
-            
-            // Apply expansion state and theme/showTypes to base nodes
-            const applyState = (nodeList) => nodeList.map(n => {
-                const expanded = n.data.nodeType === 'PIPELINE' ? expansionState.get(n.id) : undefined;
-                const isPipeline = n.data.nodeType === 'PIPELINE';
-                return {
-                    ...n,
-                    type: isPipeline && expanded ? 'pipelineGroup' : n.type,
-                    // Remove explicit style for collapsed pipelines so ELK can size them properly
-                    style: isPipeline && !expanded ? undefined : n.style,
-                    data: { 
-                        ...n.data, 
-                        theme, 
-                        showTypes,
-                        isExpanded: expanded,
-                    },
-                };
-            });
-            
-            if (separateOutputs) {
-                // Show all nodes including outputs as separate nodes
-                return {
-                    processedNodes: applyState(baseNodes).map(n => ({
-                        ...n,
-                        data: { ...n.data, separateOutputs: true },
-                    })),
-                    processedEdges: baseEdges,
-                };
-            } else {
-                // Combined mode: hide output DataNodes, add outputs to function nodes
-                const outputNodes = new Set(baseNodes.filter(n => n.data.sourceId).map(n => n.id));
-                const functionOutputs = {};
-                baseNodes.forEach(n => {
-                    if (n.data.sourceId) {
-                        if (!functionOutputs[n.data.sourceId]) functionOutputs[n.data.sourceId] = [];
-                        functionOutputs[n.data.sourceId].push({ name: n.data.label, type: n.data.typeHint });
-                    }
-                });
-                
-                return {
-                    processedNodes: applyState(baseNodes)
-                        .filter(n => !outputNodes.has(n.id))
-                        .map(n => ({
-                            ...n,
-                            data: { 
-                                ...n.data, 
-                                separateOutputs: false,
-                                outputs: functionOutputs[n.id] || [],
-                            },
-                        })),
-                    processedEdges: baseEdges.filter(e => {
-                        if (outputNodes.has(e.target)) return false;
-                        return true;
-                    }).map(e => {
-                        if (outputNodes.has(e.source)) {
-                            const outputNode = baseNodes.find(n => n.id === e.source);
-                            if (outputNode?.data?.sourceId) {
-                                return { ...e, id: `e_${outputNode.data.sourceId}_${e.target}`, source: outputNode.data.sourceId };
-                            }
-                        }
-                        return e;
-                    }),
-                };
-            }
-        }, [separateOutputs, showTypes, theme, expansionState]);
-        
         // Use React Flow's state management
         const [rfNodes, setNodes, onNodesChange] = useNodesState([]);
         const [rfEdges, setEdges, onEdgesChange] = useEdgesState([]);
         
-        // Track if we've initialized
-        const initializedRef = useRef(false);
+        const nodesRef = useRef(initialData.nodes);
+
+        const resolvedDetected = detectedTheme || { theme: themePreference === 'auto' ? 'dark' : themePreference, background: 'transparent', luminance: null, source: 'init' };
+        const activeTheme = useMemo(() => {
+            const base = themePreference === 'auto' ? (resolvedDetected.theme || 'dark') : themePreference;
+            return manualTheme || base;
+        }, [manualTheme, resolvedDetected.theme, themePreference]);
+        const activeBackground = useMemo(() => {
+            if (manualTheme) return manualTheme === 'light' ? '#f8fafc' : '#020617';
+            return resolvedDetected.background || 'transparent';
+        }, [manualTheme, resolvedDetected.background]);
+        const theme = activeTheme;
+
+        // Expansion logic
+        const onToggleExpand = useCallback((nodeId) => {
+          setExpansionState(prev => {
+            const newMap = new Map(prev);
+            const isCurrentlyExpanded = newMap.get(nodeId) || false;
+            const willExpand = !isCurrentlyExpanded;
+            newMap.set(nodeId, willExpand);
+
+            if (!willExpand) {
+                const currentNodes = nodesRef.current || [];
+                const childrenMap = new Map();
+                currentNodes.forEach(n => {
+                    if (n.parentNode) {
+                        if (!childrenMap.has(n.parentNode)) childrenMap.set(n.parentNode, []);
+                        childrenMap.get(n.parentNode).push(n.id);
+                    }
+                });
+
+                const getDescendants = (id) => {
+                    const children = childrenMap.get(id) || [];
+                    let res = [...children];
+                    children.forEach(childId => {
+                        res = res.concat(getDescendants(childId));
+                    });
+                    return res;
+                };
+
+                getDescendants(nodeId).forEach(descId => {
+                    if (newMap.has(descId)) newMap.set(descId, false);
+                });
+            }
+
+            return newMap;
+          });
+        }, []);
+
+        const applyStateFn = stateUtils.applyState || fallbackApplyState;
+        const applyVisibilityFn = stateUtils.applyVisibility || fallbackApplyVisibility;
+
+        const stateResult = useMemo(() => {
+            return applyStateFn(initialData.nodes, initialData.edges, {
+                expansionState,
+                separateOutputs,
+                showTypes,
+                theme: activeTheme,
+            });
+        }, [applyStateFn, initialData, expansionState, separateOutputs, showTypes, activeTheme]);
+
+        // Add callbacks and visibility in a single path so hidden flags persist through toggles
+        const nodesWithCallbacks = useMemo(() => stateResult.nodes.map(n => ({
+            ...n,
+            data: { ...n.data, onToggleExpand: n.data.nodeType === 'PIPELINE' ? () => onToggleExpand(n.id) : n.data.onToggleExpand },
+        })), [stateResult.nodes, onToggleExpand]);
+
+        const nodesWithVisibility = useMemo(() => {
+            const nextNodes = applyVisibilityFn(nodesWithCallbacks, expansionState);
+            nodesRef.current = nextNodes;
+            return nextNodes;
+        }, [nodesWithCallbacks, expansionState, applyVisibilityFn]);
+
+        useEffect(() => {
+          setNodes(nodesWithVisibility);
+          setEdges(stateResult.edges);
+        }, [nodesWithVisibility, stateResult.edges, setNodes, setEdges]);
 
         const detectHostTheme = useCallback(() => {
+            if (themeUtils?.detectHostTheme) return themeUtils.detectHostTheme();
+
             const attempts = [];
             const pushCandidate = (value, source) => {
                 if (value) attempts.push({ value: value.trim(), source });
@@ -848,34 +965,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             };
         }, []);
 
-        // --- Theme Detection & Background (Task 1) ---
+        // Theme detection listener (updates detected theme only)
         useEffect(() => {
-          const applyTheme = () => {
+          const applyThemeDetection = () => {
              const detected = detectHostTheme();
-             const appliedTheme = themePreference === 'auto' ? detected.theme : themePreference;
-             
-             setTheme(appliedTheme);
-             setBgColor(detected.background || 'transparent');
-             if (showThemeDebug) {
-                setThemeDebug({
-                    source: detected.source,
-                    luminance: detected.luminance,
-                    background: detected.background,
-                    appliedTheme,
-                });
-             }
-             document.body.classList.toggle('light-mode', appliedTheme === 'light');
-             window.__hypernodesVizThemeState = { ...detected, appliedTheme, preference: themePreference };
+             setDetectedTheme(detected);
           };
 
-          applyTheme();
+          applyThemeDetection();
 
           const observers = [];
           try { 
             const parentDoc = window.parent?.document;
             if (parentDoc) {
                 const config = { attributes: true, attributeFilter: ['class', 'data-vscode-theme-kind', 'style'] };
-                const observer = new MutationObserver(applyTheme);
+                const observer = new MutationObserver(applyThemeDetection);
                 observer.observe(parentDoc.body, config);
                 observer.observe(parentDoc.documentElement, config);
                 observers.push(observer);
@@ -883,7 +987,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           } catch(e) {}
 
           const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
-          const mqHandler = () => applyTheme();
+          const mqHandler = () => applyThemeDetection();
           if (mq && mq.addEventListener) mq.addEventListener('change', mqHandler);
           else if (mq && mq.addListener) mq.addListener(mqHandler);
 
@@ -892,165 +996,38 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             if (mq && mq.removeEventListener) mq.removeEventListener('change', mqHandler);
             else if (mq && mq.removeListener) mq.removeListener(mqHandler);
           };
-        }, [detectHostTheme, themePreference]);
+        }, [detectHostTheme]);
 
-        const toggleTheme = useCallback(() => {
-            setTheme(t => {
-                const next = t === 'light' ? 'dark' : 'light';
-                document.body.classList.toggle('light-mode', next === 'light');
-                // If we toggle manually, we override the detected background to a preset
-                const manualBg = next === 'light' ? '#f8fafc' : '#020617';
-                setBgColor(manualBg);
-                if (showThemeDebug) {
-                    setThemeDebug(prev => ({
-                        ...prev,
-                        source: 'manual toggle',
-                        appliedTheme: next,
-                        background: manualBg,
-                        luminance: null,
-                    }));
-                }
-                window.__hypernodesVizThemeState = {
-                    ...(window.__hypernodesVizThemeState || {}),
-                    appliedTheme: next,
-                    background: manualBg,
-                    source: 'manual toggle',
-                    preference: themePreference,
-                };
-                return next;
-            });
-        }, [themePreference]);
-
-        // --- Expansion Logic ---
-        // Use a ref to access current nodes without creating dependency cycles
-        const nodesRef = useRef(processedNodes);
-        useEffect(() => { nodesRef.current = rfNodes.length ? rfNodes : processedNodes; }, [rfNodes, processedNodes]);
-        
-        const onToggleExpand = useCallback((nodeId) => {
-          // Update the persistent expansion state
-          setExpansionState(prev => {
-            const newMap = new Map(prev);
-            const isCurrentlyExpanded = newMap.get(nodeId) || false;
-            const willExpand = !isCurrentlyExpanded;
-            newMap.set(nodeId, willExpand);
-            
-            // If collapsing, also collapse all descendants
-            if (!willExpand) {
-                // Find descendants by checking parentNode chains
-                const currentNodes = nodesRef.current || [];
-                const childrenMap = new Map();
-                currentNodes.forEach(n => {
-                    if (n.parentNode) {
-                        if (!childrenMap.has(n.parentNode)) childrenMap.set(n.parentNode, []);
-                        childrenMap.get(n.parentNode).push(n.id);
-                    }
-                });
-                
-                const getDescendants = (id) => {
-                    const children = childrenMap.get(id) || [];
-                    let res = [...children];
-                    children.forEach(childId => {
-                        res = res.concat(getDescendants(childId));
-                    });
-                    return res;
-                };
-                
-                getDescendants(nodeId).forEach(descId => {
-                    if (newMap.has(descId)) newMap.set(descId, false);
+        // Apply effective theme + background
+        useEffect(() => {
+            setBgColor(activeBackground);
+            document.body.classList.toggle('light-mode', activeTheme === 'light');
+            if (showThemeDebug) {
+                setThemeDebug({
+                    source: manualTheme ? 'manual toggle' : resolvedDetected.source,
+                    luminance: resolvedDetected.luminance,
+                    background: activeBackground,
+                    appliedTheme: activeTheme,
                 });
             }
-            
-            return newMap;
-          });
-        }, []); // No dependencies - uses ref
+            window.__hypernodesVizThemeState = {
+                ...resolvedDetected,
+                appliedTheme: activeTheme,
+                background: activeBackground,
+                preference: themePreference,
+                manualTheme,
+            };
+        }, [activeTheme, activeBackground, resolvedDetected, showThemeDebug, themePreference, manualTheme]);
 
-        // Single effect to sync processed nodes with callbacks
-        useEffect(() => {
-          // Add onToggleExpand callback to all processed nodes
-          const nodesWithCallbacks = processedNodes.map(n => ({
-            ...n,
-            data: { ...n.data, onToggleExpand: () => onToggleExpand(n.id) }
-          }));
-          setNodes(nodesWithCallbacks);
-          setEdges(processedEdges);
-        }, [processedNodes, processedEdges, onToggleExpand, setNodes, setEdges]);
-
-        // --- Visibility Logic with Error Boundary (Task 10 Partial) ---
-        useEffect(() => {
-           setNodes((nds) => {
-             const expansionMap = new Map();
-             nds.forEach(n => {
-                if (n.data.nodeType === 'PIPELINE') expansionMap.set(n.id, n.data.isExpanded);
-             });
-             
-             // Helper to check if all ancestors are expanded
-             const isVisible = (node, map, allNodes) => {
-                 if (!node.parentNode) return true;
-                 const parent = map.get(node.parentNode);
-                 // If parent not in map, it might be a group node that is NOT a pipeline (rare) or just missing.
-                 // If parent is a pipeline and not expanded, hidden.
-                 if (parent === false) return false;
-                 
-                 // Recurse up
-                 const parentNode = allNodes.find(n => n.id === node.parentNode);
-                 if (!parentNode) return true; // Should not happen if consistent
-                 return isVisible(parentNode, map, allNodes);
-             };
-             
-             return nds.map(n => {
-                const visible = isVisible(n, expansionMap, nds);
-                return { ...n, hidden: !visible };
-             });
-           });
-        }, [rfNodes.map(n => n.data.isExpanded).join(',')]);
+        const toggleTheme = useCallback(() => {
+            const current = manualTheme || (themePreference === 'auto' ? resolvedDetected.theme : themePreference);
+            const next = current === 'light' ? 'dark' : 'light';
+            setManualTheme(next);
+        }, [manualTheme, themePreference, resolvedDetected.theme]);
 
         const visibleEdges = useMemo(() => {
-            const nodeMap = new Map(rfNodes.map(n => [n.id, n]));
-            const parentMap = new Map();
-            const expansionMap = new Map();
-            rfNodes.forEach(n => {
-                if (n.parentNode) parentMap.set(n.id, n.parentNode);
-                if (n.data.nodeType === 'PIPELINE') expansionMap.set(n.id, n.data.isExpanded);
-            });
-
-            const getVisibleAncestor = (nodeId) => {
-                let curr = nodeId;
-                let candidate = nodeId;
-                while (curr) {
-                    const parent = parentMap.get(curr);
-                    if (!parent) break;
-                    if (expansionMap.get(parent) === false) candidate = parent;
-                    curr = parent;
-                }
-                return candidate;
-            };
-
-            const newEdges = [];
-            const processedEdges = new Set();
-
-            rfEdges.forEach(edge => {
-                const sourceNode = nodeMap.get(edge.source);
-                const targetNode = nodeMap.get(edge.target);
-
-                // Skip edges that connect directly to an expanded pipeline wrapper.
-                const sourceExpandedPipeline = sourceNode?.data?.nodeType === 'PIPELINE' && sourceNode.data.isExpanded;
-                const targetExpandedPipeline = targetNode?.data?.nodeType === 'PIPELINE' && targetNode.data.isExpanded;
-                if (sourceExpandedPipeline || targetExpandedPipeline) {
-                    return;
-                }
-
-                const sourceVis = getVisibleAncestor(edge.source);
-                const targetVis = getVisibleAncestor(edge.target);
-
-                if (sourceVis && targetVis && sourceVis !== targetVis) {
-                    const edgeId = `e_${sourceVis}_${targetVis}`;
-                    if (!processedEdges.has(edgeId)) {
-                         newEdges.push({ ...edge, id: edgeId, source: sourceVis, target: targetVis });
-                         processedEdges.add(edgeId);
-                    }
-                }
-            });
-            return newEdges;
+            const compressor = stateUtils.compressEdges || ((nodes, edges) => edges);
+            return compressor(rfNodes, rfEdges);
         }, [rfNodes, rfEdges]);
 
         const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(rfNodes, visibleEdges);
@@ -1096,6 +1073,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
         const edgeOptions = {
             type: 'custom',
+            sourcePosition: Position.Bottom,
+            targetPosition: Position.Top,
             style: { stroke: theme === 'light' ? '#94a3b8' : '#64748b', strokeWidth: 2 },
             markerEnd: { type: MarkerType.ArrowClosed, color: theme === 'light' ? '#94a3b8' : '#64748b' },
         };

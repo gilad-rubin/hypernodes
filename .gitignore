@@ -84,3 +84,4 @@ guides/*
 design_reference/*
 design_reference_nested/*
 .mcp.json
+tmp_data.json

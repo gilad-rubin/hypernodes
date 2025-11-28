@@ -51,6 +51,8 @@ class JSRenderer:
                 "id": node.id,
                 "position": {"x": 0, "y": 0},
                 "data": {"theme": theme},
+                "sourcePosition": "bottom",
+                "targetPosition": "top",
             }
 
             if node.parent_id:
@@ -115,6 +117,8 @@ class JSRenderer:
                 "target": edge.target,
                 "animated": False,
                 "style": {"stroke": "#64748b", "strokeWidth": 2},
+                "sourcePosition": "bottom",
+                "targetPosition": "top",
                 "data": {},
             }
             

@@ -516,6 +516,7 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
 - **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
 - **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses `transform_to_react_flow` with handler data).
+- **State utils (`assets/viz/state_utils.js`)**: Shared pure helpers for React Flow node/edge derivation and visibility so toggles (show types, separate outputs) stay consistent across renders.
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
 
 **GraphWalker `traverse_collapsed` parameter (IMPORTANT):**
