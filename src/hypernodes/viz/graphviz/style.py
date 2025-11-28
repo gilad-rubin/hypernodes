@@ -282,17 +282,17 @@ def create_custom_theme(
 
 class SelectedColors:
     """
-    NEW Default: User's chosen pastel palette with auto-generated outlines.
+    NEW Default: User's chosen pastel palette with custom outlines.
     """
 
-    # Function nodes: regular orange
-    FUNCTION = ColorPair(fill="#fdba74")
+    # Function nodes: peach orange
+    FUNCTION = ColorPair(fill="#ffd8a8", outline="#f08c00")
 
-    # Pipeline nodes: pipeline purple
-    PIPELINE = ColorPair(fill="#cfa0fd")
+    # Pipeline nodes: lavender purple
+    PIPELINE = ColorPair(fill="#d0bfff", outline="#6741d9")
 
-    # Input / data nodes: inputs green
-    INPUT = ColorPair(fill="#6de998")
+    # Input / data nodes: soft green
+    INPUT = ColorPair(fill="#b2f2bb", outline="#2f9e44")
 
 
 class LegacyColors:
