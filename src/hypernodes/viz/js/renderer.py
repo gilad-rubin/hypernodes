@@ -25,8 +25,21 @@ class JSRenderer:
         initial_depth: int = 1,
         theme_debug: bool = False,
         pan_on_scroll: bool = False,
+        separate_outputs: bool = False,
+        show_types: bool = True,
     ) -> Dict[str, Any]:
-        """Transform graph data to React Flow format."""
+        """Transform graph data to React Flow format.
+        
+        Args:
+            graph_data: The visualization graph to render.
+            theme: Color theme preference ("auto", "light", "dark").
+            initial_depth: Initial expansion depth for nested pipelines.
+            theme_debug: Show theme detection debug info.
+            pan_on_scroll: Enable pan on scroll (vs zoom on scroll).
+            separate_outputs: If True, show outputs as separate nodes.
+                            If False (default), combine outputs into function nodes.
+            show_types: If True (default), show type hints on nodes.
+        """
         nodes = []
         edges = []
 
@@ -79,6 +92,7 @@ class JSRenderer:
                     "nodeType": "DATA",
                     "typeHint": node.type_hint,
                     "isBound": node.is_bound,
+                    "sourceId": node.source_id,  # Include source_id to identify outputs
                 })
                 
             elif isinstance(node, GroupDataNode):
@@ -87,7 +101,9 @@ class JSRenderer:
                     "label": "Inputs",
                     "nodeType": "INPUT_GROUP",
                     "params": [n.name for n in node.nodes],
+                    "paramTypes": [n.type_hint for n in node.nodes],
                     "isBound": node.is_bound,
+                    "sourceId": node.source_id,
                 })
 
             nodes.append(rf_node)
@@ -115,5 +131,7 @@ class JSRenderer:
                 "initial_depth": initial_depth,
                 "theme_debug": theme_debug,
                 "pan_on_scroll": pan_on_scroll,
+                "separate_outputs": separate_outputs,
+                "show_types": show_types,
             },
         }

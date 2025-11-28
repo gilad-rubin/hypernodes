@@ -16,6 +16,7 @@ def visualize(
     depth: Optional[int] = 1,
     interactive: bool = False,
     separate_outputs: bool = False,
+    show_types: bool = True,
     **kwargs
 ):
     """Visualize a pipeline.
@@ -28,6 +29,7 @@ def visualize(
         interactive: Whether to use interactive widget (for graphviz).
         separate_outputs: If True, render outputs as separate nodes.
                          If False (default), combine function nodes with their outputs.
+        show_types: If True (default), show type hints on nodes.
         **kwargs: Additional options passed to the renderer.
 
     Returns:
@@ -57,7 +59,7 @@ def visualize(
 
     elif engine == "ipywidget":
         from .visualization_widget import PipelineWidget
-        return PipelineWidget(pipeline, depth=depth, **kwargs)
+        return PipelineWidget(pipeline, depth=depth, separate_outputs=separate_outputs, show_types=show_types, **kwargs)
 
     else:
         raise ValueError(f"Unknown engine: {engine}")

@@ -21,6 +21,7 @@ class PipelineWidget(widgets.HTML):
         depth: Optional[int] = 1,
         group_inputs: bool = True,
         show_types: bool = True,
+        separate_outputs: bool = False,
         theme_debug: bool = False,
         **kwargs: Any,
     ):
@@ -55,6 +56,8 @@ class PipelineWidget(widgets.HTML):
             initial_depth=depth or 1,
             theme_debug=theme_debug,
             pan_on_scroll=False, # Force disable scroll hijacking
+            separate_outputs=separate_outputs,
+            show_types=show_types,
         )
         
         # 4. Generate HTML

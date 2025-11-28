@@ -199,6 +199,66 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         `;
       };
 
+      // --- View Controls (top-left toggles for separate_outputs and show_types) ---
+      const ViewControls = ({ separateOutputs, showTypes, onToggleSeparate, onToggleTypes, theme }) => {
+        const isLight = theme === 'light';
+        const containerClass = isLight 
+            ? "bg-white/95 border-slate-200 shadow-lg" 
+            : "bg-slate-900/95 border-slate-700 shadow-xl";
+        const labelClass = isLight ? "text-slate-600" : "text-slate-400";
+        const activeClass = isLight ? "bg-indigo-500" : "bg-indigo-600";
+        const inactiveClass = isLight ? "bg-slate-300" : "bg-slate-600";
+        
+        return html`
+            <${Panel} position="top-left" className="mt-4 ml-4">
+                <div className=${`flex flex-col gap-2.5 px-3 py-2.5 rounded-lg border backdrop-blur-sm text-[11px] ${containerClass}`}>
+                    <div className="flex items-center justify-between gap-3">
+                        <span className=${`font-medium ${labelClass}`}>Separate outputs</span>
+                        <button
+                            onClick=${onToggleSeparate}
+                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${separateOutputs ? activeClass : inactiveClass}`}
+                        >
+                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${separateOutputs ? "left-4" : "left-0.5"}`}></div>
+                        </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                        <span className=${`font-medium ${labelClass}`}>Show types</span>
+                        <button
+                            onClick=${onToggleTypes}
+                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${showTypes ? activeClass : inactiveClass}`}
+                        >
+                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${showTypes ? "left-4" : "left-0.5"}`}></div>
+                        </button>
+                    </div>
+                </div>
+            <//>
+        `;
+      };
+
+      // --- Outputs Section (combined outputs display in function nodes) ---
+      const OutputsSection = ({ outputs, showTypes, isLight }) => {
+        if (!outputs || outputs.length === 0) return null;
+        const bgClass = isLight ? "bg-slate-50/80" : "bg-slate-900/50";
+        const textClass = isLight ? "text-slate-600" : "text-slate-400";
+        const arrowClass = isLight ? "text-emerald-500" : "text-emerald-400";
+        const typeClass = isLight ? "text-slate-400" : "text-slate-500";
+        const borderClass = isLight ? "border-slate-100" : "border-slate-800/50";
+        
+        return html`
+            <div className=${`px-3 py-2.5 border-t transition-all duration-300 ${bgClass} ${borderClass}`}>
+                <div className="flex flex-col items-start gap-1">
+                    ${outputs.map(out => html`
+                        <div key=${out.name} className=${`flex items-center gap-1.5 text-xs max-w-full overflow-hidden ${textClass}`}>
+                            <span className=${`shrink-0 ${arrowClass}`}>→</span>
+                            <span className="font-mono font-medium shrink-0">${out.name}</span>
+                            ${showTypes && out.type ? html`<span className=${`font-mono truncate min-w-0 ${typeClass}`} title=${out.type}>: ${out.type}</span>` : null}
+                        </div>
+                    `)}
+                </div>
+            </div>
+        `;
+      };
+
       // --- Edge Component ---
       const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label }) => {
         const [edgePath, labelX, labelY] = getBezierPath({
@@ -229,10 +289,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       // --- Node Component ---
       const CustomNode = ({ data, id }) => {
         const isExpanded = data.isExpanded;
-        const theme = data.theme;
-        
-        // Force re-render on theme/expansion change using a ref or key if needed
-        // but here we rely on React's prop diffing.
+        // Get theme from node data (updated via setNodes when theme changes)
+        const theme = data.theme || 'dark';
         
         // Style Configuration
         let colors = { bg: "slate", border: "slate", text: "slate", icon: "slate" };
@@ -268,14 +326,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Render Data Node (Compact) ---
         if (data.nodeType === 'DATA') {
             const isLight = theme === 'light';
+            const isOutput = data.sourceId != null;
+            const showAsOutput = data.separateOutputs && isOutput;
+            const showTypes = data.showTypes;
+            const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
+            const hasTypeHint = showTypes && data.typeHint;
             return html`
-                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-1.5 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden
+                    ${showAsOutput ? 'ring-2 ring-emerald-500/30' : ''}
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
                 `}>
-                     <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icon} /></span>
-                     <span className="text-xs font-mono font-medium truncate">${data.label}</span>
+                     <span className=${`shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`}><${Icon} /></span>
+                     <span className="text-xs font-mono font-medium shrink-0">${data.label}</span>
+                     ${hasTypeHint ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${data.typeHint}>: ${data.typeHint}</span>` : null}
                      <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-2px' }} />
                      <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
@@ -305,7 +370,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         if (data.nodeType === 'INPUT_GROUP') {
              const isLight = theme === 'light';
              const params = data.params || [];
+             const paramTypes = data.paramTypes || [];
              const isBound = data.isBound;
+             const showTypes = data.showTypes;
+             const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
              
              return html`
                 <div className=${`px-3 py-2 w-full relative rounded-xl border shadow-sm flex flex-col gap-1 min-w-[120px] transition-all duration-200 hover:-translate-y-0.5
@@ -314,10 +382,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200'
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
                 `}>
-                    ${params.map(p => html`
-                        <div className="flex items-center gap-2">
+                    ${params.map((p, i) => html`
+                        <div className="flex items-center gap-2 whitespace-nowrap">
                             <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} className="w-3 h-3" /></span>
-                            <div className="text-xs font-mono leading-tight truncate">${p}</div>
+                            <div className="text-xs font-mono leading-tight">${p}</div>
+                            ${showTypes && paramTypes[i] ? html`<span className=${`text-[10px] font-mono ${typeClass}`}>: ${paramTypes[i]}</span>` : null}
                         </div>
                     `)}
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
@@ -328,23 +397,30 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Render Expanded Pipeline Group ---
         if (data.nodeType === 'PIPELINE' && isExpanded) {
           const isLight = theme === 'light';
+          const handleCollapseClick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            if (data.onToggleExpand) data.onToggleExpand();
+          };
+          
           return html`
-            <div className=${`relative w-full h-full rounded-2xl border-2 border-dashed p-4 transition-all duration-300
+            <div className=${`relative w-full h-full rounded-2xl border-2 border-dashed p-6 transition-all duration-300
                 ${isLight 
                     ? 'border-amber-300 bg-amber-50/30' 
                     : 'border-amber-500/30 bg-amber-500/5'}
-            `} onWheel=${(e) => e.stopPropagation()}>
-              <div 
-                   className=${`absolute -top-3 left-4 px-3 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors
+            `}>
+              <button 
+                   type="button"
+                   className=${`absolute -top-3 left-4 px-3 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors z-10
                         ${isLight
                             ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200'
                             : 'bg-slate-950 text-amber-400 hover:text-amber-300 border border-amber-500/50'}
                    `}
-                   onClick=${data.onToggleExpand}>
+                   onClick=${handleCollapseClick}>
                 <${Icon} />
                 ${data.label}
-                <span className="text-[9px] opacity-60 normal-case ml-1">Click to collapse</span>
-              </div>
+                <span className="text-[9px] opacity-60 normal-case font-normal ml-1">Click to collapse</span>
+              </button>
               <${Handle} type="target" position=${Position.Top} className="!w-0 !h-0 !opacity-0" />
               <${Handle} type="source" position=${Position.Bottom} className="!w-0 !h-0 !opacity-0" />
             </div>
@@ -354,18 +430,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Render Standard Node ---
         const isLight = theme === 'light';
         const boundInputs = data.inputs ? data.inputs.filter(i => i.is_bound).length : 0;
+        const outputs = data.outputs || [];
+        const showCombined = !data.separateOutputs && outputs.length > 0;
+        const showTypes = data.showTypes;
 
         return html`
-          <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme}
+          <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme} overflow-hidden
                ${isLight 
                  ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200`
                  : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/10`}
                `}
-               onClick=${data.nodeType === 'PIPELINE' ? data.onToggleExpand : undefined}>
+               onClick=${data.nodeType === 'PIPELINE' ? (e) => { e.stopPropagation(); if(data.onToggleExpand) data.onToggleExpand(); } : undefined}>
             
             <!-- Header -->
-            <div className=${`px-3 py-2.5 border-b flex items-center gap-3
-                 ${isLight ? 'border-slate-100' : 'border-slate-800/50'}`}>
+            <div className=${`px-4 py-2.5 flex items-center gap-3
+                 ${showCombined ? (isLight ? 'border-b border-slate-100' : 'border-b border-slate-800/50') : ''}`}>
               <div className=${`p-1.5 rounded-md shrink-0
                    ${isLight 
                      ? `bg-${colors.bg}-50 text-${colors.text}-600` 
@@ -389,16 +468,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 </div>
               ` : null}
             </div>
+            
+            <!-- Combined Outputs Section -->
+            ${showCombined ? html`<${OutputsSection} outputs=${outputs} showTypes=${showTypes} isLight=${isLight} />` : null}
 
-            <!-- Handles -->
-            <${Handle} type="target" position=${Position.Top} className=${`!w-2 !h-2 !border-2 transition-colors
-                 ${isLight 
-                    ? '!bg-white !border-slate-300 group-hover:!border-slate-400' 
-                    : '!bg-slate-950 !border-slate-600 group-hover:!border-slate-500'}`} />
-            <${Handle} type="source" position=${Position.Bottom} className=${`!w-2 !h-2 !border-2 transition-colors
-                 ${isLight 
-                    ? '!bg-white !border-slate-300 group-hover:!border-slate-400' 
-                    : '!bg-slate-950 !border-slate-600 group-hover:!border-slate-500'}`} />
+            <!-- Handles (invisible) -->
+            <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" />
+            <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
             
             ${data.nodeType === 'PIPELINE' ? html`
                <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
@@ -440,13 +516,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
             
             const mapToElk = (n) => {
-                let width = 240;
-                let height = 90;
+                let width = 200;
+                let height = 80;
                 
                 if (n.data?.nodeType === 'DATA') {
-                    width = 160;
-                    height = 40;
-                    if (n.data.label) width = Math.max(120, n.data.label.length * 8 + 40);
+                    width = 140;
+                    height = 36;
+                    // Calculate width based on label + optional type hint
+                    const labelLen = n.data.label ? n.data.label.length : 0;
+                    const typeLen = (n.data.showTypes && n.data.typeHint) ? Math.min(n.data.typeHint.length, 15) : 0;
+                    width = Math.max(100, (labelLen + typeLen + 4) * 7 + 50);
+                } else if (n.data?.nodeType === 'PIPELINE' && !n.data?.isExpanded) {
+                    // Collapsed pipeline - compact size based on label
+                    const labelLen = n.data.label ? n.data.label.length : 10;
+                    width = Math.max(140, labelLen * 8 + 80);
+                    height = 60;
                 } else                 if (n.data?.nodeType === 'INPUT') {
                     width = 160;
                     height = 40;
@@ -580,6 +664,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       const themePreference = normalizeThemePref(initialData.meta?.theme_preference || 'auto');
       const showThemeDebug = Boolean(initialData.meta?.theme_debug);
       const panOnScroll = Boolean(initialData.meta?.pan_on_scroll);
+      const initialSeparateOutputs = Boolean(initialData.meta?.separate_outputs ?? false);
+      const initialShowTypes = Boolean(initialData.meta?.show_types ?? true);
 
       const parseColorString = (value) => {
         if (!value) return null;
@@ -600,17 +686,105 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       const App = () => {
-        const [nodes, setNodes, onNodesChange] = useNodesState(initialData.nodes);
-        const [edges, setEdges, onEdgesChange] = useEdgesState(initialData.edges);
         const [theme, setTheme] = useState(themePreference === 'auto' ? 'dark' : themePreference);
         const [showMiniMap, setShowMiniMap] = useState(false);
         const [bgColor, setBgColor] = useState('transparent');
+        const [separateOutputs, setSeparateOutputs] = useState(initialSeparateOutputs);
+        const [showTypes, setShowTypes] = useState(initialShowTypes);
         const [themeDebug, setThemeDebug] = useState({
             source: 'init',
             luminance: null,
             background: 'transparent',
             appliedTheme: themePreference === 'auto' ? 'dark' : themePreference,
         });
+        
+        // Track expansion state separately to preserve it across theme/toggle changes
+        const [expansionState, setExpansionState] = useState(() => {
+            const map = new Map();
+            initialData.nodes.forEach(n => {
+                if (n.data.nodeType === 'PIPELINE') {
+                    map.set(n.id, n.data.isExpanded || false);
+                }
+            });
+            return map;
+        });
+        
+        // Build nodes and edges based on separateOutputs mode and expansion state
+        const { processedNodes, processedEdges } = useMemo(() => {
+            const baseNodes = initialData.nodes;
+            const baseEdges = initialData.edges;
+            
+            // Apply expansion state and theme/showTypes to base nodes
+            const applyState = (nodeList) => nodeList.map(n => {
+                const expanded = n.data.nodeType === 'PIPELINE' ? expansionState.get(n.id) : undefined;
+                const isPipeline = n.data.nodeType === 'PIPELINE';
+                return {
+                    ...n,
+                    type: isPipeline && expanded ? 'pipelineGroup' : n.type,
+                    // Remove explicit style for collapsed pipelines so ELK can size them properly
+                    style: isPipeline && !expanded ? undefined : n.style,
+                    data: { 
+                        ...n.data, 
+                        theme, 
+                        showTypes,
+                        isExpanded: expanded,
+                    },
+                };
+            });
+            
+            if (separateOutputs) {
+                // Show all nodes including outputs as separate nodes
+                return {
+                    processedNodes: applyState(baseNodes).map(n => ({
+                        ...n,
+                        data: { ...n.data, separateOutputs: true },
+                    })),
+                    processedEdges: baseEdges,
+                };
+            } else {
+                // Combined mode: hide output DataNodes, add outputs to function nodes
+                const outputNodes = new Set(baseNodes.filter(n => n.data.sourceId).map(n => n.id));
+                const functionOutputs = {};
+                baseNodes.forEach(n => {
+                    if (n.data.sourceId) {
+                        if (!functionOutputs[n.data.sourceId]) functionOutputs[n.data.sourceId] = [];
+                        functionOutputs[n.data.sourceId].push({ name: n.data.label, type: n.data.typeHint });
+                    }
+                });
+                
+                return {
+                    processedNodes: applyState(baseNodes)
+                        .filter(n => !outputNodes.has(n.id))
+                        .map(n => ({
+                            ...n,
+                            data: { 
+                                ...n.data, 
+                                separateOutputs: false,
+                                outputs: functionOutputs[n.id] || [],
+                            },
+                        })),
+                    processedEdges: baseEdges.filter(e => {
+                        if (outputNodes.has(e.target)) return false;
+                        return true;
+                    }).map(e => {
+                        if (outputNodes.has(e.source)) {
+                            const outputNode = baseNodes.find(n => n.id === e.source);
+                            if (outputNode?.data?.sourceId) {
+                                return { ...e, id: `e_${outputNode.data.sourceId}_${e.target}`, source: outputNode.data.sourceId };
+                            }
+                        }
+                        return e;
+                    }),
+                };
+            }
+        }, [separateOutputs, showTypes, theme, expansionState]);
+        
+        // Use React Flow's state management
+        const [rfNodes, setNodes, onNodesChange] = useNodesState([]);
+        const [rfEdges, setEdges, onEdgesChange] = useEdgesState([]);
+        
+        // Track if we've initialized
+        const initializedRef = useRef(false);
 
         const detectHostTheme = useCallback(() => {
             const attempts = [];
@@ -748,24 +922,27 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [themePreference]);
 
         // --- Expansion Logic ---
+        // Use a ref to access current nodes without creating dependency cycles
+        const nodesRef = useRef(processedNodes);
+        useEffect(() => { nodesRef.current = rfNodes.length ? rfNodes : processedNodes; }, [rfNodes, processedNodes]);
+        
         const onToggleExpand = useCallback((nodeId) => {
-          setNodes((nds) => {
-            // Find the node to toggle
-            const targetNode = nds.find(n => n.id === nodeId);
-            if (!targetNode) return nds;
-            
-            const isCurrentlyExpanded = targetNode.data.isExpanded;
+          // Update the persistent expansion state
+          setExpansionState(prev => {
+            const newMap = new Map(prev);
+            const isCurrentlyExpanded = newMap.get(nodeId) || false;
             const willExpand = !isCurrentlyExpanded;
+            newMap.set(nodeId, willExpand);
             
-            // If collapsing, we need to find all descendants and collapse them too
-            const descendantsToCollapse = new Set();
+            // If collapsing, also collapse all descendants
             if (!willExpand) {
-                // Robust descendant finding via parentNode
+                // Find descendants by checking parentNode chains
+                const currentNodes = nodesRef.current || [];
                 const childrenMap = new Map();
-                nds.forEach(n => {
+                currentNodes.forEach(n => {
                     if (n.parentNode) {
-                         if (!childrenMap.has(n.parentNode)) childrenMap.set(n.parentNode, []);
-                         childrenMap.get(n.parentNode).push(n.id);
+                        if (!childrenMap.has(n.parentNode)) childrenMap.set(n.parentNode, []);
+                        childrenMap.get(n.parentNode).push(n.id);
                     }
                 });
                 
@@ -778,43 +955,25 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     return res;
                 };
                 
-                getDescendants(nodeId).forEach(id => descendantsToCollapse.add(id));
+                getDescendants(nodeId).forEach(descId => {
+                    if (newMap.has(descId)) newMap.set(descId, false);
+                });
             }
-
-            return nds.map((node) => {
-              if (node.id === nodeId) {
-                return {
-                  ...node,
-                  type: willExpand ? 'pipelineGroup' : 'custom',
-                  data: { ...node.data, isExpanded: willExpand },
-                  style: undefined, // Let ELK handle size
-                };
-              }
-              
-              // If we are collapsing the target, also collapse descendants
-              if (!willExpand && descendantsToCollapse.has(node.id)) {
-                  // Only update if it was expanded
-                  if (node.data.isExpanded) {
-                      return {
-                          ...node,
-                          type: 'custom', // Revert to custom (collapsed)
-                          data: { ...node.data, isExpanded: false },
-                          style: undefined
-                      };
-                  }
-              }
-              
-              return node;
-            });
+            
+            return newMap;
           });
-        }, [setNodes]);
+        }, []); // No dependencies - uses ref
 
+        // Single effect to sync processed nodes with callbacks
         useEffect(() => {
-          setNodes((nds) => nds.map(n => ({
+          // Add onToggleExpand callback to all processed nodes
+          const nodesWithCallbacks = processedNodes.map(n => ({
             ...n,
-            data: { ...n.data, theme, onToggleExpand: () => onToggleExpand(n.id) }
-          })));
-        }, [onToggleExpand, setNodes, theme]);
+            data: { ...n.data, onToggleExpand: () => onToggleExpand(n.id) }
+          }));
+          setNodes(nodesWithCallbacks);
+          setEdges(processedEdges);
+        }, [processedNodes, processedEdges, onToggleExpand, setNodes, setEdges]);
 
         // --- Visibility Logic with Error Boundary (Task 10 Partial) ---
         useEffect(() => {
@@ -843,13 +1002,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 return { ...n, hidden: !visible };
              });
            });
-        }, [nodes.map(n => n.data.isExpanded).join(',')]);
+        }, [rfNodes.map(n => n.data.isExpanded).join(',')]);
 
         const visibleEdges = useMemo(() => {
-            const nodeMap = new Map(nodes.map(n => [n.id, n]));
+            const nodeMap = new Map(rfNodes.map(n => [n.id, n]));
             const parentMap = new Map();
             const expansionMap = new Map();
-            nodes.forEach(n => {
+            rfNodes.forEach(n => {
                 if (n.parentNode) parentMap.set(n.id, n.parentNode);
                 if (n.data.nodeType === 'PIPELINE') expansionMap.set(n.id, n.data.isExpanded);
             });
@@ -869,7 +1028,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const newEdges = [];
             const processedEdges = new Set();
 
-            edges.forEach(edge => {
+            rfEdges.forEach(edge => {
                 const sourceNode = nodeMap.get(edge.source);
                 const targetNode = nodeMap.get(edge.target);
 
@@ -892,9 +1051,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 }
             });
             return newEdges;
-        }, [nodes, edges]);
+        }, [rfNodes, rfEdges]);
 
-        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(nodes, visibleEdges);
+        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(rfNodes, visibleEdges);
         const { fitView } = useReactFlow();
 
         // --- Iframe Resize Logic (Task 2) ---
@@ -969,6 +1128,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               edgeTypes=${edgeTypes}
               onNodesChange=${onNodesChange}
               onEdgesChange=${onEdgesChange}
+              onNodeClick=${(e, node) => {
+                // Handle click on collapsed pipeline nodes to expand
+                if (node.data.nodeType === 'PIPELINE' && !node.data.isExpanded && node.data.onToggleExpand) {
+                  e.stopPropagation();
+                  node.data.onToggleExpand();
+                }
+              }}
               fitView
               fitViewOptions=${{ padding: 0.02, minZoom: 0.5, maxZoom: 1 }}
               minZoom=${0.1}
@@ -983,6 +1149,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             >
               <${Background} color=${theme === 'light' ? '#94a3b8' : '#334155'} gap=${24} size=${1} variant="dots" />
               <${CustomControls} theme=${theme} onToggleTheme=${toggleTheme} showMiniMap=${showMiniMap} onToggleMiniMap=${() => setShowMiniMap(m => !m)} />
+              <${ViewControls} 
+                separateOutputs=${separateOutputs} 
+                showTypes=${showTypes}
+                onToggleSeparate=${() => setSeparateOutputs(s => !s)}
+                onToggleTypes=${() => setShowTypes(t => !t)}
+                theme=${theme} 
+              />
               ${showThemeDebug ? html`
               <${Panel} position="top-left" className=${`backdrop-blur-sm rounded-lg shadow-lg border text-xs px-3 py-2 mt-3 ml-3 max-w-xs
                     ${theme === 'light' ? 'bg-white/95 border-slate-200 text-slate-700' : 'bg-slate-900/90 border-slate-700 text-slate-200'}`}>
@@ -1001,10 +1174,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               />
               ` : null}
             <//>
-            ${(layoutError || (!layoutedNodes.length && nodes.length) || (!nodes.length)) ? html`
+            ${(layoutError || (!layoutedNodes.length && rfNodes.length) || (!rfNodes.length)) ? html`
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div className="px-4 py-2 rounded-lg border text-xs font-mono bg-slate-900/80 text-amber-200 border-amber-500/40 shadow-lg pointer-events-auto">
-                    ${layoutError ? `Layout error: ${layoutError}` : (!nodes.length ? 'No graph data' : 'Layout produced no nodes. Showing fallback.')}
+                    ${layoutError ? `Layout error: ${layoutError}` : (!rfNodes.length ? 'No graph data' : 'Layout produced no nodes. Showing fallback.')}
                     <button className="ml-4 underline text-amber-400 hover:text-amber-100" onClick=${() => window.location.reload()}>Reload</button>
                   </div>
                 </div>
