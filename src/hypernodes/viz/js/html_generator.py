@@ -261,87 +261,74 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         Input: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
         Data: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`,
         Map: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`,
-        Bug: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m8 2 1.88 1.88"></path><path d="M14.12 3.88 16 2"></path><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"></path><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"></path><path d="M12 20v-9"></path><path d="M6.53 9C4.6 8.8 3 7.1 3 5"></path><path d="M6 13H2"></path><path d="M3 21c0-2.1 1.7-3.9 3.8-4"></path><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"></path><path d="M22 13h-4"></path><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"></path></svg>`
+        Bug: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m8 2 1.88 1.88"></path><path d="M14.12 3.88 16 2"></path><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"></path><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"></path><path d="M12 20v-9"></path><path d="M6.53 9C4.6 8.8 3 7.1 3 5"></path><path d="M6 13H2"></path><path d="M3 21c0-2.1 1.7-3.9 3.8-4"></path><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"></path><path d="M22 13h-4"></path><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"></path></svg>`,
+        // Split outputs icon (arrows diverging)
+        SplitOutputs: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M16 3h5v5"></path><path d="M8 3H3v5"></path><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"></path><path d="m15 9 6-6"></path></svg>`,
+        // Merge outputs icon (arrows converging)
+        MergeOutputs: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M8 3H3v5"></path><path d="m3 3 5.586 5.586a2 2 0 0 1 .586 1.414V22"></path><path d="M16 3h5v5"></path><path d="m21 3-5.586 5.586a2 2 0 0 0-.586 1.414V22"></path></svg>`,
+        // Type icon (T with bracket)
+        Type: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>`
       };
 
-      // --- Custom Controls ---
-      const CustomControls = ({ theme, onToggleTheme, showMiniMap, onToggleMiniMap }) => {
-        const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+      // --- Tooltip Button Component ---
+      const TooltipButton = ({ onClick, tooltip, isActive, theme, children }) => {
+        const [showTooltip, setShowTooltip] = useState(false);
+        const isLight = theme === 'light';
         
         const btnClass = `p-2 rounded-lg shadow-lg border transition-all duration-200 ${
-            theme === 'light' 
+            isLight 
             ? 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900' 
             : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-100'
         }`;
-
+        const activeClass = isLight ? 'bg-slate-100 text-indigo-600' : 'bg-slate-800 text-indigo-400';
+        const tooltipClass = isLight 
+            ? 'bg-slate-800 text-white' 
+            : 'bg-white text-slate-800';
+        
         return html`
-            <${Panel} position="bottom-right" className="flex flex-col gap-2 pb-4 pr-4">
-                <button className=${btnClass} onClick=${() => zoomIn()} title="Zoom In">
-                    <${Icons.ZoomIn} />
-          </button>
-                <button className=${btnClass} onClick=${() => zoomOut()} title="Zoom Out">
-                    <${Icons.ZoomOut} />
+            <div className="relative" onMouseEnter=${() => setShowTooltip(true)} onMouseLeave=${() => setShowTooltip(false)}>
+                <button className=${`${btnClass} ${isActive ? activeClass : ''}`} onClick=${onClick}>
+                    ${children}
                 </button>
-                <button className=${btnClass} onClick=${() => fitView({ padding: 0.2, duration: 200 })} title="Fit View">
-                    <${Icons.Center} />
-                </button>
-                <button className=${`${btnClass} ${showMiniMap ? (theme === 'light' ? 'bg-slate-100 text-indigo-600' : 'bg-slate-800 text-indigo-400') : ''}`} onClick=${onToggleMiniMap} title="Toggle Minimap">
-                    <${Icons.Map} />
-                </button>
-                <div className="h-px bg-slate-200 dark:bg-slate-700 my-1"></div>
-                <button className=${btnClass} onClick=${onToggleTheme} title="Toggle Theme">
-                    ${theme === 'light' ? html`<${Icons.Moon} />` : html`<${Icons.Sun} />`}
-                </button>
-            <//>
+                ${showTooltip && html`
+                    <div className=${`absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs font-medium rounded shadow-lg whitespace-nowrap pointer-events-none z-50 ${tooltipClass}`}>
+                        ${tooltip}
+                        <div className=${`absolute left-full top-1/2 -translate-y-1/2 border-4 border-transparent ${isLight ? 'border-l-slate-800' : 'border-l-white'}`}></div>
+                    </div>
+                `}
+            </div>
         `;
       };
 
-      // --- View Controls (top-left toggles for separate_outputs, show_types, and debug) ---
-      const ViewControls = ({ separateOutputs, showTypes, debugOverlays, onToggleSeparate, onToggleTypes, onToggleDebug, theme }) => {
-        const isLight = theme === 'light';
-        const containerClass = isLight 
-            ? "bg-white/95 border-slate-200 shadow-lg" 
-            : "bg-slate-900/95 border-slate-700 shadow-xl";
-        const labelClass = isLight ? "text-slate-600" : "text-slate-400";
-        const activeClass = isLight ? "bg-indigo-500" : "bg-indigo-600";
-        const inactiveClass = isLight ? "bg-slate-300" : "bg-slate-600";
-        const debugActiveClass = isLight ? "bg-red-500" : "bg-red-600";
-        
+      // --- Custom Controls ---
+      const CustomControls = ({ theme, onToggleTheme, showMiniMap, onToggleMiniMap, separateOutputs, onToggleSeparate, showTypes, onToggleTypes }) => {
+        const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+
         return html`
-            <${Panel} position="top-left" className="mt-4 ml-4">
-                <div className=${`flex flex-col gap-2.5 px-3 py-2.5 rounded-lg border backdrop-blur-sm text-[11px] ${containerClass}`}>
-                    <div className="flex items-center justify-between gap-3">
-                        <span className=${`font-medium ${labelClass}`}>Separate outputs</span>
-                        <button
-                            onClick=${onToggleSeparate}
-                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${separateOutputs ? activeClass : inactiveClass}`}
-                        >
-                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${separateOutputs ? "left-4" : "left-0.5"}`}></div>
-                        </button>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                        <span className=${`font-medium ${labelClass}`}>Show types</span>
-                        <button
-                            onClick=${onToggleTypes}
-                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${showTypes ? activeClass : inactiveClass}`}
-                        >
-                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${showTypes ? "left-4" : "left-0.5"}`}></div>
-                        </button>
-                    </div>
-                    <div className="h-px ${isLight ? 'bg-slate-200' : 'bg-slate-700'}"></div>
-                    <div className="flex items-center justify-between gap-3">
-                        <span className=${`font-medium flex items-center gap-1.5 ${debugOverlays ? (isLight ? 'text-red-600' : 'text-red-400') : labelClass}`}>
-                            <${Icons.Bug} />
-                            Debug overlays
-                        </span>
-                        <button
-                            onClick=${onToggleDebug}
-                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${debugOverlays ? debugActiveClass : inactiveClass}`}
-                        >
-                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${debugOverlays ? "left-4" : "left-0.5"}`}></div>
-                        </button>
-                    </div>
-                </div>
+            <${Panel} position="bottom-right" className="flex flex-col gap-2 pb-4 pr-4">
+                <${TooltipButton} onClick=${() => zoomIn()} tooltip="Zoom In" theme=${theme}>
+                    <${Icons.ZoomIn} />
+                <//>
+                <${TooltipButton} onClick=${() => zoomOut()} tooltip="Zoom Out" theme=${theme}>
+                    <${Icons.ZoomOut} />
+                <//>
+                <${TooltipButton} onClick=${() => fitView({ padding: 0.2, duration: 200 })} tooltip="Fit View" theme=${theme}>
+                    <${Icons.Center} />
+                <//>
+                <${TooltipButton} onClick=${onToggleMiniMap} tooltip="Toggle Minimap" isActive=${showMiniMap} theme=${theme}>
+                    <${Icons.Map} />
+                <//>
+                <div className=${`h-px my-1 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
+                <${TooltipButton} onClick=${onToggleSeparate} tooltip=${separateOutputs ? "Merge Outputs" : "Separate Outputs"} isActive=${separateOutputs} theme=${theme}>
+                    ${separateOutputs ? html`<${Icons.MergeOutputs} />` : html`<${Icons.SplitOutputs} />`}
+                <//>
+                <${TooltipButton} onClick=${onToggleTypes} tooltip=${showTypes ? "Hide Types" : "Show Types"} isActive=${showTypes} theme=${theme}>
+                    <${Icons.Type} />
+                <//>
+                <div className=${`h-px my-1 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
+                <${TooltipButton} onClick=${onToggleTheme} tooltip="Toggle Theme" theme=${theme}>
+                    ${theme === 'light' ? html`<${Icons.Moon} />` : html`<${Icons.Sun} />`}
+                <//>
             <//>
         `;
       };
@@ -1529,15 +1516,15 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               style=${{ width: '100%', height: '100%' }}
             >
               <${Background} color=${theme === 'light' ? '#94a3b8' : '#334155'} gap=${24} size=${1} variant="dots" />
-              <${CustomControls} theme=${theme} onToggleTheme=${toggleTheme} showMiniMap=${showMiniMap} onToggleMiniMap=${() => setShowMiniMap(m => !m)} />
-              <${ViewControls} 
-                separateOutputs=${separateOutputs} 
-                showTypes=${showTypes}
-                debugOverlays=${debugOverlays}
-                onToggleSeparate=${() => setSeparateOutputs(s => !s)}
-                onToggleTypes=${() => setShowTypes(t => !t)}
-                onToggleDebug=${() => setDebugOverlays(d => !d)}
+              <${CustomControls} 
                 theme=${theme} 
+                onToggleTheme=${toggleTheme} 
+                showMiniMap=${showMiniMap} 
+                onToggleMiniMap=${() => setShowMiniMap(m => !m)}
+                separateOutputs=${separateOutputs}
+                onToggleSeparate=${() => setSeparateOutputs(s => !s)}
+                showTypes=${showTypes}
+                onToggleTypes=${() => setShowTypes(t => !t)}
               />
               ${(showThemeDebug || debugOverlays) ? html`
               <${Panel} position="bottom-left" className=${`backdrop-blur-sm rounded-lg shadow-lg border text-xs px-3 py-2 mb-3 ml-3 max-w-xs pointer-events-auto
