@@ -1026,16 +1026,18 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [manualTheme, themePreference, resolvedDetected.theme]);
 
         // Compress edges first (remaps to visible ancestors when pipelines collapse)
+        // IMPORTANT: Use nodesWithVisibility and stateResult.edges (synchronous) instead of 
+        // rfNodes/rfEdges (async via setNodes/setEdges) to avoid stale data on first render
         const compressedEdges = useMemo(() => {
             const compressor = stateUtils.compressEdges || ((nodes, edges) => edges);
-            return compressor(rfNodes, rfEdges);
-        }, [rfNodes, rfEdges]);
+            return compressor(nodesWithVisibility, stateResult.edges);
+        }, [nodesWithVisibility, stateResult.edges]);
 
         // Group inputs that share the same targets after compression
         const { nodes: groupedNodes, edges: groupedEdges } = useMemo(() => {
             const grouper = stateUtils.groupInputs || ((nodes, edges) => ({ nodes, edges }));
-            return grouper(rfNodes, compressedEdges);
-        }, [rfNodes, compressedEdges]);
+            return grouper(nodesWithVisibility, compressedEdges);
+        }, [nodesWithVisibility, compressedEdges]);
 
         const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(groupedNodes, groupedEdges);
         const { fitView } = useReactFlow();
