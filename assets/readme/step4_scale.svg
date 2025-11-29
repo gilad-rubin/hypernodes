@@ -1,0 +1,42 @@
+<svg width="152pt" height="240pt"
+ viewBox="0.00 0.00 152.00 240.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 235.8)">
+<title>G</title>
+<!-- batch_text_processor -->
+<g id="node1" class="node">
+<title>batch_text_processor</title>
+<path fill="#d0bfff" stroke="#6741d9" stroke-width="1.5" d="M131.65,-145.8C131.65,-145.8 12,-145.8 12,-145.8 6,-145.8 0,-139.8 0,-133.8 0,-133.8 0,-109.9 0,-109.9 0,-103.9 6,-97.9 12,-97.9 12,-97.9 131.65,-97.9 131.65,-97.9 137.65,-97.9 143.65,-103.9 143.65,-109.9 143.65,-109.9 143.65,-133.8 143.65,-133.8 143.65,-139.8 137.65,-145.8 131.65,-145.8"/>
+<text xml:space="preserve" text-anchor="start" x="9.2" y="-126.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">batch_text_processor</text>
+<text xml:space="preserve" text-anchor="start" x="26.83" y="-109.45" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">word_counts : </text>
+<text xml:space="preserve" text-anchor="start" x="104.08" y="-109.45" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">int</text>
+
+</g>
+<!-- aggregate -->
+<g id="node3" class="node">
+<title>aggregate</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M97.9,-47.9C97.9,-47.9 45.75,-47.9 45.75,-47.9 39.75,-47.9 33.75,-41.9 33.75,-35.9 33.75,-35.9 33.75,-12 33.75,-12 33.75,-6 39.75,0 45.75,0 45.75,0 97.9,0 97.9,0 103.9,0 109.9,-6 109.9,-12 109.9,-12 109.9,-35.9 109.9,-35.9 109.9,-41.9 103.9,-47.9 97.9,-47.9"/>
+<text xml:space="preserve" text-anchor="start" x="42.95" y="-28.3" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">aggregate</text>
+<text xml:space="preserve" text-anchor="start" x="49.7" y="-11.55" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">total : </text>
+<text xml:space="preserve" text-anchor="start" x="81.2" y="-11.55" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">int</text>
+<polygon fill="#f08c00" stroke="#f08c00" points="40.95,-23.95 40.95,-23.95 102.7,-23.95 102.7,-23.95 40.95,-23.95"/>
+</g>
+<!-- batch_text_processor&#45;&gt;aggregate -->
+<g id="edge2" class="edge">
+<title>batch_text_processor&#45;&gt;aggregate</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M71.83,-97.64C71.83,-85.56 71.83,-70.61 71.83,-57.42"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="71.83,-50.44 74.98,-57.44 72.08,-52.12 72.08,-57.44 71.83,-57.44 71.58,-57.44 71.58,-52.12 68.68,-57.44 71.83,-50.44"/>
+</g>
+<!-- texts -->
+<g id="node2" class="node">
+<title>texts</title>
+<path fill="#b2f2bb" stroke="#2f9e44" stroke-width="1.5" d="M92.28,-231.8C92.28,-231.8 51.38,-231.8 51.38,-231.8 45.38,-231.8 39.38,-225.8 39.38,-219.8 39.38,-219.8 39.38,-207.8 39.38,-207.8 39.38,-201.8 45.38,-195.8 51.38,-195.8 51.38,-195.8 92.28,-195.8 92.28,-195.8 98.28,-195.8 104.28,-201.8 104.28,-207.8 104.28,-207.8 104.28,-219.8 104.28,-219.8 104.28,-225.8 98.28,-231.8 92.28,-231.8"/>
+<text xml:space="preserve" text-anchor="start" x="48.58" y="-208.78" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">texts : str</text>
+</g>
+<!-- texts&#45;&gt;batch_text_processor -->
+<g id="edge1" class="edge">
+<title>texts&#45;&gt;batch_text_processor</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M71.83,-195.46C71.83,-183.98 71.83,-168.59 71.83,-154.93"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="71.83,-148.09 74.98,-155.09 72.08,-149.76 72.08,-155.09 71.83,-155.09 71.58,-155.09 71.58,-149.76 68.68,-155.09 71.83,-148.09"/>
+</g>
+</g>
+</svg>

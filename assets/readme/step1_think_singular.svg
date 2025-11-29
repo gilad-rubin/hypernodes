@@ -1,0 +1,42 @@
+<svg width="110pt" height="240pt"
+ viewBox="0.00 0.00 110.00 240.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 235.8)">
+<title>G</title>
+<!-- clean -->
+<g id="node1" class="node">
+<title>clean</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M80.65,-145.8C80.65,-145.8 21.75,-145.8 21.75,-145.8 15.75,-145.8 9.75,-139.8 9.75,-133.8 9.75,-133.8 9.75,-109.9 9.75,-109.9 9.75,-103.9 15.75,-97.9 21.75,-97.9 21.75,-97.9 80.65,-97.9 80.65,-97.9 86.65,-97.9 92.65,-103.9 92.65,-109.9 92.65,-109.9 92.65,-133.8 92.65,-133.8 92.65,-139.8 86.65,-145.8 80.65,-145.8"/>
+<text xml:space="preserve" text-anchor="start" x="35.83" y="-126.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">clean</text>
+<text xml:space="preserve" text-anchor="start" x="18.95" y="-109.45" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">cleaned : </text>
+<text xml:space="preserve" text-anchor="start" x="70.7" y="-109.45" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">str</text>
+
+</g>
+<!-- count -->
+<g id="node3" class="node">
+<title>count</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M90.4,-47.9C90.4,-47.9 12,-47.9 12,-47.9 6,-47.9 0,-41.9 0,-35.9 0,-35.9 0,-12 0,-12 0,-6 6,0 12,0 12,0 90.4,0 90.4,0 96.4,0 102.4,-6 102.4,-12 102.4,-12 102.4,-35.9 102.4,-35.9 102.4,-41.9 96.4,-47.9 90.4,-47.9"/>
+<text xml:space="preserve" text-anchor="start" x="34.7" y="-28.3" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">count</text>
+<text xml:space="preserve" text-anchor="start" x="9.2" y="-11.55" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">word_count : </text>
+<text xml:space="preserve" text-anchor="start" x="80.45" y="-11.55" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">int</text>
+<polygon fill="#f08c00" stroke="#f08c00" points="7.2,-23.95 7.2,-23.95 95.2,-23.95 95.2,-23.95 7.2,-23.95"/>
+</g>
+<!-- clean&#45;&gt;count -->
+<g id="edge2" class="edge">
+<title>clean&#45;&gt;count</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M51.2,-97.64C51.2,-85.56 51.2,-70.61 51.2,-57.42"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="51.2,-50.44 54.35,-57.44 51.45,-52.12 51.45,-57.44 51.2,-57.44 50.95,-57.44 50.95,-52.12 48.05,-57.44 51.2,-50.44"/>
+</g>
+<!-- text -->
+<g id="node2" class="node">
+<title>text</title>
+<path fill="#b2f2bb" stroke="#2f9e44" stroke-width="1.5" d="M68.65,-231.8C68.65,-231.8 33.75,-231.8 33.75,-231.8 27.75,-231.8 21.75,-225.8 21.75,-219.8 21.75,-219.8 21.75,-207.8 21.75,-207.8 21.75,-201.8 27.75,-195.8 33.75,-195.8 33.75,-195.8 68.65,-195.8 68.65,-195.8 74.65,-195.8 80.65,-201.8 80.65,-207.8 80.65,-207.8 80.65,-219.8 80.65,-219.8 80.65,-225.8 74.65,-231.8 68.65,-231.8"/>
+<text xml:space="preserve" text-anchor="start" x="30.95" y="-208.78" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">text : str</text>
+</g>
+<!-- text&#45;&gt;clean -->
+<g id="edge1" class="edge">
+<title>text&#45;&gt;clean</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M51.2,-195.46C51.2,-183.98 51.2,-168.59 51.2,-154.93"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="51.2,-148.09 54.35,-155.09 51.45,-149.76 51.45,-155.09 51.2,-155.09 50.95,-155.09 50.95,-149.76 48.05,-155.09 51.2,-148.09"/>
+</g>
+</g>
+</svg>

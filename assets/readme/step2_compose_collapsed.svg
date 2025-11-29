@@ -1,0 +1,41 @@
+<svg width="137pt" height="240pt"
+ viewBox="0.00 0.00 137.00 240.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 235.8)">
+<title>G</title>
+<!-- text_processor -->
+<g id="node1" class="node">
+<title>text_processor</title>
+<path fill="#d0bfff" stroke="#6741d9" stroke-width="1.5" d="M117.4,-145.8C117.4,-145.8 12,-145.8 12,-145.8 6,-145.8 0,-139.8 0,-133.8 0,-133.8 0,-109.9 0,-109.9 0,-103.9 6,-97.9 12,-97.9 12,-97.9 117.4,-97.9 117.4,-97.9 123.4,-97.9 129.4,-103.9 129.4,-109.9 129.4,-109.9 129.4,-133.8 129.4,-133.8 129.4,-139.8 123.4,-145.8 117.4,-145.8"/>
+<text xml:space="preserve" text-anchor="start" x="21.58" y="-126.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">text_processor</text>
+<text xml:space="preserve" text-anchor="start" x="9.2" y="-108.45" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">cleaned, word_count</text>
+
+</g>
+<!-- summarize -->
+<g id="node3" class="node">
+<title>summarize</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M93.03,-47.9C93.03,-47.9 36.38,-47.9 36.38,-47.9 30.38,-47.9 24.38,-41.9 24.38,-35.9 24.38,-35.9 24.38,-12 24.38,-12 24.38,-6 30.38,0 36.38,0 36.38,0 93.03,0 93.03,0 99.03,0 105.03,-6 105.03,-12 105.03,-12 105.03,-35.9 105.03,-35.9 105.03,-41.9 99.03,-47.9 93.03,-47.9"/>
+<text xml:space="preserve" text-anchor="start" x="33.58" y="-28.3" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">summarize</text>
+<text xml:space="preserve" text-anchor="start" x="38.45" y="-11.55" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">report : </text>
+<text xml:space="preserve" text-anchor="start" x="78.2" y="-11.55" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">str</text>
+<polygon fill="#f08c00" stroke="#f08c00" points="31.58,-23.95 31.58,-23.95 97.83,-23.95 97.83,-23.95 31.58,-23.95"/>
+</g>
+<!-- text_processor&#45;&gt;summarize -->
+<g id="edge2" class="edge">
+<title>text_processor&#45;&gt;summarize</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M64.7,-97.64C64.7,-85.56 64.7,-70.61 64.7,-57.42"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="64.7,-50.44 67.85,-57.44 64.95,-52.12 64.95,-57.44 64.7,-57.44 64.45,-57.44 64.45,-52.12 61.55,-57.44 64.7,-50.44"/>
+</g>
+<!-- text -->
+<g id="node2" class="node">
+<title>text</title>
+<path fill="#b2f2bb" stroke="#2f9e44" stroke-width="1.5" d="M82.15,-231.8C82.15,-231.8 47.25,-231.8 47.25,-231.8 41.25,-231.8 35.25,-225.8 35.25,-219.8 35.25,-219.8 35.25,-207.8 35.25,-207.8 35.25,-201.8 41.25,-195.8 47.25,-195.8 47.25,-195.8 82.15,-195.8 82.15,-195.8 88.15,-195.8 94.15,-201.8 94.15,-207.8 94.15,-207.8 94.15,-219.8 94.15,-219.8 94.15,-225.8 88.15,-231.8 82.15,-231.8"/>
+<text xml:space="preserve" text-anchor="start" x="44.45" y="-208.78" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">text : str</text>
+</g>
+<!-- text&#45;&gt;text_processor -->
+<g id="edge1" class="edge">
+<title>text&#45;&gt;text_processor</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M64.7,-195.46C64.7,-183.98 64.7,-168.59 64.7,-154.93"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="64.7,-148.09 67.85,-155.09 64.95,-149.76 64.95,-155.09 64.7,-155.09 64.45,-155.09 64.45,-149.76 61.55,-155.09 64.7,-148.09"/>
+</g>
+</g>
+</svg>

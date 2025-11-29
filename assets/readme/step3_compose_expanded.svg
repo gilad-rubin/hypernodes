@@ -1,0 +1,68 @@
+<svg width="180pt" height="339pt"
+ viewBox="0.00 0.00 180.00 339.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 334.7)">
+<title>G</title>
+<g id="clust1" class="cluster">
+<title>cluster_1869371050411480057</title>
+<path fill="none" stroke="#6741d9" stroke-width="1.5" d="M20,-77.9C20,-77.9 138,-77.9 138,-77.9 144,-77.9 150,-83.9 150,-89.9 150,-89.9 150,-274.7 150,-274.7 150,-280.7 144,-286.7 138,-286.7 138,-286.7 20,-286.7 20,-286.7 14,-286.7 8,-280.7 8,-274.7 8,-274.7 8,-89.9 8,-89.9 8,-83.9 14,-77.9 20,-77.9"/>
+<text xml:space="preserve" text-anchor="middle" x="79" y="-269.4" font-family="Helvetica,sans-Serif" font-size="14.00" fill="currentColor">text_processor</text>
+</g>
+<!-- clean -->
+<g id="node1" class="node">
+<title>clean</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M113.45,-243.7C113.45,-243.7 54.55,-243.7 54.55,-243.7 48.55,-243.7 42.55,-237.7 42.55,-231.7 42.55,-231.7 42.55,-207.8 42.55,-207.8 42.55,-201.8 48.55,-195.8 54.55,-195.8 54.55,-195.8 113.45,-195.8 113.45,-195.8 119.45,-195.8 125.45,-201.8 125.45,-207.8 125.45,-207.8 125.45,-231.7 125.45,-231.7 125.45,-237.7 119.45,-243.7 113.45,-243.7"/>
+<text xml:space="preserve" text-anchor="start" x="68.62" y="-224.1" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">clean</text>
+<text xml:space="preserve" text-anchor="start" x="51.75" y="-207.35" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">cleaned : </text>
+<text xml:space="preserve" text-anchor="start" x="103.5" y="-207.35" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">str</text>
+
+</g>
+<!-- count -->
+<g id="node2" class="node">
+<title>count</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M118.2,-145.8C118.2,-145.8 39.8,-145.8 39.8,-145.8 33.8,-145.8 27.8,-139.8 27.8,-133.8 27.8,-133.8 27.8,-109.9 27.8,-109.9 27.8,-103.9 33.8,-97.9 39.8,-97.9 39.8,-97.9 118.2,-97.9 118.2,-97.9 124.2,-97.9 130.2,-103.9 130.2,-109.9 130.2,-109.9 130.2,-133.8 130.2,-133.8 130.2,-139.8 124.2,-145.8 118.2,-145.8"/>
+<text xml:space="preserve" text-anchor="start" x="62.5" y="-126.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">count</text>
+<text xml:space="preserve" text-anchor="start" x="37" y="-109.45" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">word_count : </text>
+<text xml:space="preserve" text-anchor="start" x="108.25" y="-109.45" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">int</text>
+<polygon fill="#f08c00" stroke="#f08c00" points="35,-121.85 35,-121.85 123,-121.85 123,-121.85 35,-121.85"/>
+</g>
+<!-- clean&#45;&gt;count -->
+<g id="edge2" class="edge">
+<title>clean&#45;&gt;count</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M82.79,-195.54C82.16,-183.46 81.38,-168.51 80.69,-155.32"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="80.33,-148.34 83.84,-155.17 80.67,-150 80.94,-155.32 80.69,-155.33 80.44,-155.35 80.17,-150.03 77.55,-155.5 80.33,-148.34"/>
+</g>
+<!-- summarize -->
+<g id="node4" class="node">
+<title>summarize</title>
+<path fill="#ffd8a8" stroke="#f08c00" stroke-width="1.5" d="M160.32,-47.9C160.32,-47.9 103.67,-47.9 103.67,-47.9 97.67,-47.9 91.67,-41.9 91.67,-35.9 91.67,-35.9 91.67,-12 91.67,-12 91.67,-6 97.67,0 103.67,0 103.67,0 160.32,0 160.32,0 166.32,0 172.32,-6 172.32,-12 172.32,-12 172.32,-35.9 172.32,-35.9 172.32,-41.9 166.32,-47.9 160.32,-47.9"/>
+<text xml:space="preserve" text-anchor="start" x="100.88" y="-28.3" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00" fill="#000000">summarize</text>
+<text xml:space="preserve" text-anchor="start" x="105.75" y="-11.55" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">report : </text>
+<text xml:space="preserve" text-anchor="start" x="145.5" y="-11.55" font-family="Helvetica,sans-Serif" font-style="italic" font-size="12.00" fill="#000000">str</text>
+<polygon fill="#f08c00" stroke="#f08c00" points="98.88,-23.95 98.88,-23.95 165.12,-23.95 165.12,-23.95 98.88,-23.95"/>
+</g>
+<!-- clean&#45;&gt;summarize -->
+<g id="edge4" class="edge">
+<title>clean&#45;&gt;summarize</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M112.63,-195.2C126.13,-182.22 140.82,-164.88 148,-145.8 158.87,-116.92 152.17,-81.73 144.38,-56.79"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="142.19,-50.16 147.38,-55.82 142.95,-51.67 144.63,-56.73 144.39,-56.81 144.15,-56.89 142.48,-51.83 141.4,-57.8 142.19,-50.16"/>
+</g>
+<!-- count&#45;&gt;summarize -->
+<g id="edge3" class="edge">
+<title>count&#45;&gt;summarize</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M91.83,-97.64C98.69,-85.22 107.24,-69.75 114.69,-56.28"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="118.04,-50.22 117.41,-57.87 117.45,-51.8 114.87,-56.46 114.65,-56.34 114.43,-56.22 117.01,-51.56 111.89,-54.82 118.04,-50.22"/>
+</g>
+<!-- text -->
+<g id="node3" class="node">
+<title>text</title>
+<path fill="#b2f2bb" stroke="#2f9e44" stroke-width="1.5" d="M101.45,-330.7C101.45,-330.7 66.55,-330.7 66.55,-330.7 60.55,-330.7 54.55,-324.7 54.55,-318.7 54.55,-318.7 54.55,-306.7 54.55,-306.7 54.55,-300.7 60.55,-294.7 66.55,-294.7 66.55,-294.7 101.45,-294.7 101.45,-294.7 107.45,-294.7 113.45,-300.7 113.45,-306.7 113.45,-306.7 113.45,-318.7 113.45,-318.7 113.45,-324.7 107.45,-330.7 101.45,-330.7"/>
+<text xml:space="preserve" text-anchor="start" x="63.75" y="-307.68" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#000000">text : str</text>
+</g>
+<!-- text&#45;&gt;clean -->
+<g id="edge1" class="edge">
+<title>text&#45;&gt;clean</title>
+<path fill="none" stroke="currentColor" stroke-width="1.5" d="M84,-294.16C84,-282.56 84,-267 84,-253.19"/>
+<polygon fill="currentColor" stroke="currentColor" stroke-width="1.5" points="84,-246.25 87.15,-253.25 84.25,-247.92 84.25,-253.25 84,-253.25 83.75,-253.25 83.75,-247.92 80.85,-253.25 84,-246.25"/>
+</g>
+</g>
+</svg>
