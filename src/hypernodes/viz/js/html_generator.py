@@ -1586,18 +1586,42 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [rawLayoutedNodes, debugOverlays]);
         
         // Expose debug layout info to console API
+        // Calculate absolute positions by accumulating parent offsets
         useEffect(() => {
+          const nodeMap = new Map(layoutedNodes.map(n => [n.id, n]));
+          
+          // Helper to calculate absolute position
+          const getAbsolutePosition = (node) => {
+            let absX = node.position?.x || 0;
+            let absY = node.position?.y || 0;
+            let current = node;
+            
+            // Walk up parent chain to accumulate offsets
+            while (current.parentNode) {
+              const parent = nodeMap.get(current.parentNode);
+              if (!parent) break;
+              absX += parent.position?.x || 0;
+              absY += parent.position?.y || 0;
+              current = parent;
+            }
+            return { x: absX, y: absY };
+          };
+          
           window.__hypernodesVizLayout = {
-            nodes: layoutedNodes.map(n => ({
-              id: n.id,
-              x: n.position?.x,
-              y: n.position?.y,
-              width: n.style?.width,
-              height: n.style?.height,
-              hidden: n.hidden,
-              nodeType: n.data?.nodeType,
-              isExpanded: n.data?.isExpanded,
-            })),
+            nodes: layoutedNodes.map(n => {
+              const absPos = getAbsolutePosition(n);
+              return {
+                id: n.id,
+                x: absPos.x,  // Absolute X position
+                y: absPos.y,  // Absolute Y position
+                width: n.style?.width,
+                height: n.style?.height,
+                hidden: n.hidden,
+                nodeType: n.data?.nodeType,
+                isExpanded: n.data?.isExpanded,
+                parentNode: n.parentNode || null,
+              };
+            }),
             edges: layoutedEdges.map(e => ({
               id: e.id,
               source: e.source,

@@ -655,7 +655,15 @@
       const edgeElements = document.querySelectorAll('.react-flow__edge');
       
       edgeElements.forEach(edgeEl => {
-        const edgeId = edgeEl.getAttribute('data-id') || edgeEl.id || '';
+        // Extract edge ID from data-id, id, or data-testid (React Flow uses different attributes)
+        let edgeId = edgeEl.getAttribute('data-id') || edgeEl.id || '';
+        if (!edgeId) {
+          // Fallback: extract from data-testid which has format "rf__edge-{edgeId}"
+          const testid = edgeEl.getAttribute('data-testid') || '';
+          const match = testid.match(/^rf__edge-(.+)$/);
+          if (match) edgeId = match[1];
+        }
+        
         const path = edgeEl.querySelector('path');
         if (!path) return;
         
@@ -682,6 +690,7 @@
         const sourceNode = nodeMap.get(edgeMatch.source);
         const targetNode = nodeMap.get(edgeMatch.target);
         
+        // Note: Layout data now stores ABSOLUTE positions (parent offsets already applied)
         if (sourceNode && !sourceNode.hidden) {
           const sourceBottom = sourceNode.y + (sourceNode.height || 68);
           const sourceLeft = sourceNode.x;
@@ -697,7 +706,7 @@
               edge: edgeMatch.id,
               type: 'source_mismatch',
               issue: `Edge starts at (${Math.round(startX)}, ${Math.round(startY)}) but source node "${sourceNode.id}" ends at y=${Math.round(sourceBottom)}`,
-              expected: { x: `${sourceLeft}-${sourceRight}`, y: sourceBottom },
+              expected: { x: `${Math.round(sourceLeft)}-${Math.round(sourceRight)}`, y: Math.round(sourceBottom) },
               actual: { x: startX, y: startY },
               delta: { y: Math.round(startY - sourceBottom) },
             });
@@ -719,7 +728,7 @@
               edge: edgeMatch.id,
               type: 'target_mismatch',
               issue: `Edge ends at (${Math.round(endX)}, ${Math.round(endY)}) but target node "${targetNode.id}" starts at y=${Math.round(targetTop)}`,
-              expected: { x: `${targetLeft}-${targetRight}`, y: targetTop },
+              expected: { x: `${Math.round(targetLeft)}-${Math.round(targetRight)}`, y: Math.round(targetTop) },
               actual: { x: endX, y: endY },
               delta: { y: Math.round(endY - targetTop) },
             });

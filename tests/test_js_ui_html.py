@@ -45,7 +45,7 @@ def test_debug_overlay_present():
     
     # Check for debug overlay controls
     assert "Debug overlays" in html
-    assert "NODE BOUNDS" in html
+    assert "BOUNDS" in html  # Tab label for node bounds
     assert "DEBUG: Green=source, Blue=target" in html
 
 

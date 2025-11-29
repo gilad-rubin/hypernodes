@@ -29,12 +29,11 @@ def test_viz_spacing_height_calculation():
     
     html_content = generate_widget_html(react_flow_data)
     
-    # Check for the updated height formula (refactored formula)
-    # We look for the string "height = 60 + 38 + ((n.data.outputs.length - 1) * 24);"
-    assert "height = 60 + 38 + ((n.data.outputs.length - 1) * 24)" in html_content
+    # Check for the updated height formula (refactored formula - 44 for compact header)
+    assert "height = 44 + 38 + ((outputs.length - 1) * 24)" in html_content
     
-    # Also check for the gap-2 class in OutputsSection (centered text)
-    assert 'className="flex flex-col items-center gap-2"' in html_content
+    # Also check for the gap-1.5 class in OutputsSection (centered text with tighter gaps)
+    assert 'className="flex flex-col items-center gap-1.5"' in html_content
 
 def test_viz_spacing_width_calculation():
     """
@@ -58,10 +57,12 @@ def test_viz_spacing_width_calculation():
     
     html_content = generate_widget_html(react_flow_data)
     
-    # Check for width calculation logic (refactored formulas using constants)
-    # The current implementation uses: Math.min(MAX_NODE_WIDTH, Math.max(MIN_*, (...) * CHAR_WIDTH_PX + NODE_BASE_PADDING))
-    assert "Math.min(MAX_NODE_WIDTH, Math.max(MIN_DATA_NODE_WIDTH," in html_content
-    assert "CHAR_WIDTH_PX + NODE_BASE_PADDING" in html_content
+    # Check for width calculation logic (dynamic width capped by MAX_NODE_WIDTH)
+    # MIN_* constants were removed - width is now purely dynamic
+    assert "Math.min(MAX_NODE_WIDTH," in html_content
+    assert "CHAR_WIDTH_PX" in html_content
+    assert "NODE_BASE_PADDING" in html_content
+    assert "FUNCTION_NODE_BASE_PADDING" in html_content
 
 def test_viz_spacing_collapsed_pipeline_height():
     """
@@ -91,5 +92,5 @@ def test_viz_spacing_collapsed_pipeline_height():
     html_content = generate_widget_html(react_flow_data)
     
     # Check for the height formula in the collapsed pipeline block
-    # The refactored formula appears in multiple places
-    assert html_content.count("height = 60 + 38 + ((n.data.outputs.length - 1) * 24);") == 2
+    # The refactored formula (44 for compact header) appears in multiple places
+    assert html_content.count("height = 44 + 38 + ((outputs.length - 1) * 24);") == 2
