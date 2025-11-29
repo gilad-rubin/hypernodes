@@ -327,10 +327,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
       // --- Custom Controls ---
       const CustomControls = ({ theme, onToggleTheme, separateOutputs, onToggleSeparate, showTypes, onToggleTypes }) => {
-        const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
+        const { zoomIn, zoomOut, fitView } = useReactFlow();
 
         return html`
-            <${Panel} position="bottom-right" className="flex flex-col gap-2 pb-4 pr-4">
+            <${Panel} position="bottom-right" className="flex flex-col gap-2 pb-4 mr-4">
                 <${TooltipButton} onClick=${() => zoomIn()} tooltip="Zoom In" theme=${theme}>
                     <${Icons.ZoomIn} />
                 <//>
@@ -1635,7 +1635,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         useEffect(() => {
             if (graphHeight && graphWidth) {
                 const desiredHeight = Math.max(400, graphHeight + 50);
-                const desiredWidth = Math.max(400, graphWidth + 50);
+                // Add extra width (100px) for the control buttons on the right side
+                const desiredWidth = Math.max(400, graphWidth + 150);
                 try {
                     // Try to resize the hosting iframe to avoid internal scrollbars and excess padding
                     if (window.frameElement) {
