@@ -115,7 +115,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       }
     };
   </script>
-  <script type="module">
+  <script>
+    // Wait for DOM to be fully loaded before executing
+    // This replaces type="module" which auto-defers, for better VSCode notebook iframe compatibility
+    document.addEventListener('DOMContentLoaded', function() {
+    (function() {
+    'use strict';
     const fallback = document.getElementById("fallback");
     const fail = (msg) => {
       if (fallback) {
@@ -1590,6 +1595,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       console.error(err);
       fail("Viz error: " + (err && err.message ? err.message : err));
     }
+    })(); // End IIFE
+    }); // End DOMContentLoaded
   </script>
   <script id="graph-data" type="application/json">__GRAPH_JSON__</script>
 </body>

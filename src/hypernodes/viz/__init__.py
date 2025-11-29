@@ -3,6 +3,7 @@
 from typing import Any, Optional, Union
 
 from ..pipeline import Pipeline
+from .debug import diagnose_widget, quick_check
 from .graphviz.renderer import GraphvizRenderer
 from .graphviz.style import DESIGN_STYLES, GraphvizTheme
 from .js.renderer import JSRenderer
@@ -26,6 +27,8 @@ __all__ = [
     "verify_edge_alignment",
     "simulate_collapse_expand_cycle",
     "diagnose_all_states",
+    "diagnose_widget",
+    "quick_check",
     "DESIGN_STYLES",
     "GraphvizTheme",
 ]

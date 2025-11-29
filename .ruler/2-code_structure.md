@@ -572,3 +572,13 @@ HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
 
 See `.ruler/visualization_best_practices.md` for complete debugging guide.
 
+
+## Visualization / JS
+- Interactive visualizations in VSCode notebooks have strict requirements
+- See `skills/viz/js/VSCODE_NOTEBOOK_COMPATIBILITY.md` for full details
+- Key rules for JS in iframes:
+  - NO `<script type="module">` - use regular scripts with IIFE
+  - MUST wrap in `DOMContentLoaded` listener (regular scripts aren't deferred)
+  - Use `srcdoc` attribute, not base64 data URIs
+- Run `uv run pytest tests/viz/test_vscode_compatibility.py` after any HTML generator changes
+- Use `from hypernodes.viz import quick_check; quick_check(pipeline)` to diagnose issues
