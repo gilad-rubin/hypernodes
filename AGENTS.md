@@ -558,69 +558,748 @@ outer.run()  # ✅ Works! No inputs needed
 The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
 - **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
-- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
-- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses `transform_to_react_flow` with handler data).
+- **JSRenderer (`js/renderer.py`)**: Transforms VisualizationGraph → React Flow node/edge format.
+- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded.
+- **State Utils (`assets/viz/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
+- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow.
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
 
-**GraphWalker `traverse_collapsed` parameter (IMPORTANT):**
-- **`traverse_collapsed=False`** (for static Graphviz): Collapsed pipelines remain truly collapsed - no internal structure exposed, no ghost nodes
-- **`traverse_collapsed=True`** (for interactive viz): Pre-fetches internal structure even for collapsed nodes, enabling expand without refetch
-- **Bug Fix (Nov 2024)**: Static Graphviz now uses `traverse_collapsed=False` to prevent ghost text-only nodes appearing in SVG
+### Key Parameters
 
-**UIHandler serialization highlights:**
-- Resolves cross-level edges for nested pipelines (edges point to real inner producers, not wrapper nodes).
-- Emits mapping labels for input/output remapping (e.g., `"outer → inner"`).
-- Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped input candidates.
-- Supports expansion depth controls (`depth` or interactive expand/collapse) without frontend recomputation.
-- **Input level placement**: Prioritizes deeper (more specific) levels when inputs appear in multiple `unfulfilled_inputs`. This ensures inputs consumed only by nested nodes appear inside the correct container, not at root level.
+**GraphWalker `traverse_collapsed`:**
+- **`False`** (for static Graphviz): Collapsed pipelines remain truly collapsed
+- **`True`** (for interactive viz): Pre-fetches internal structure for expand/collapse
 
-**Ghost Nodes Issue (FIXED):**
-When `traverse_collapsed=True` was used for static visualizations, collapsed pipelines would expand their internal structure. This created nodes that were referenced in edges but never explicitly added to Graphviz with proper styling. Graphviz would auto-create simple text nodes for these missing references, resulting in "ghost nodes" like:
-```xml
-<g id="node8" class="node">
-<title>retrieve</title>
-<text>retrieve</text>  <!-- No styling! -->
-</g>
+### JS Visualization Data Flow
+
 ```
-**Solution**: `src/hypernodes/viz/__init__.py` now passes `traverse_collapsed=False` when rendering static Graphviz, ensuring collapsed pipelines stay truly collapsed.
+Python:  GraphWalker → UIHandler → JSRenderer → html_generator
+                                         ↓
+Browser: JSON → applyState → applyVisibility → compressEdges → groupInputs → ELK → ReactFlow
+```
+
+### Debug API (Browser Console)
+
+The visualization exposes `HyperNodesVizState.debug`:
+
+```javascript
+// Enable verbose logging for edge compression and layout
+HyperNodesVizState.debug.enableDebug()
+
+// Analyze current graph state
+HyperNodesVizState.debug.analyzeState()
+
+// Get current pipeline expansion state
+HyperNodesVizState.debug.getExpansionState()
+
+// Simulate edge compression with specific expansion state
+HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
+```
+
+### Key Client-Side Functions (state_utils.js)
+
+| Function | Purpose |
+|----------|---------|
+| `applyState` | Applies theme, separateOutputs mode, combines outputs |
+| `applyVisibility` | Hides children of collapsed pipelines |
+| `compressEdges` | Remaps edges to visible ancestors when pipelines collapse |
+| `groupInputs` | Groups inputs targeting the same node |
+
+### Common Issues & Debugging
+
+| Issue | Check | Location |
+|-------|-------|----------|
+| Missing edges after collapse | `compressEdges` output | `state_utils.js` |
+| Hanging arrows | Handle positions | `html_generator.py` |
+| Nodes not grouping | `groupInputs` | `state_utils.js` |
+| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
+
+See `.ruler/visualization_best_practices.md` for complete debugging guide.
+
+---
+Source: .ruler/3-theme_detection.md
+---
+# Trial 5: Parent CSS Variables
+# Checks if we can read CSS variables from the parent document.
+js = """
+const style = getComputedStyle(window.parent.document.documentElement);
+const bg = style.getPropertyValue('--vscode-editor-background');
+document.getElementById('result').innerText = 'VS Code Bg Var (Parent): ' + (bg || 'Not found');
+"""
+create_test_widget(js, "Trial 5: Parent CSS Variables")
+
+this works for bg color!
+
+# Trial 6: Body Attribute
+# Checks for data-vscode-theme-kind attribute on parent body.
+js = """
+const kind = window.parent.document.body.getAttribute('data-vscode-theme-kind');
+document.getElementById('result').innerText = 'Theme Kind Attr: ' + (kind || 'Not found');
+"""
+create_test_widget(js, "Trial 6: Body Attribute")
+
+this works for light/dark theme. you just need to search for "dark" or "light" in the text
+
+---
+Source: .ruler/hanging_arrow_fix.md
+---
+# Hanging Arrow Bug Fix
+
+## The Problem
+
+When collapsing a pipeline node in the React Flow visualization, edges would "hang" approximately **41 pixels below** the collapsed node's bottom edge. This created a visual bug where arrows appeared disconnected from their source nodes.
+
+### Symptoms
+- Edge source Y coordinate: 281
+- Node bottom Y coordinate: 240
+- Mismatch: **41 pixels**
+
+### Key Observation
+Manually toggling the theme (dark/light) would immediately fix the issue. This was the critical clue that led to the solution.
+
+---
+
+## Root Cause Analysis
+
+React Flow caches edge paths based on node handle positions. When a pipeline node collapses:
+
+1. The node's DOM element shrinks (e.g., from 828px to 68px height)
+2. The Handle component moves to a new position (near the new bottom)
+3. **But React Flow doesn't automatically recalculate** the edge bezier paths
+4. Edges continue using the old cached path coordinates
+
+The theme toggle works because it triggers a full re-render of all node and edge components, forcing React Flow to recalculate paths using current handle positions.
+
+---
+
+## Approaches Tried
+
+### 1. Edge ID Versioning ❌
+**Idea:** Add a version suffix to edge IDs to force React Flow to treat them as "new" edges.
+
+```javascript
+id: `${e.id}_g${edgeGeneration}`
+```
+
+**Result:** Failed. React Flow still used cached path calculations even with new IDs.
+
+---
+
+### 2. `updateNodeInternals()` ❌
+**Idea:** Call React Flow's `updateNodeInternals()` for collapsed nodes to force handle recalculation.
+
+```javascript
+const pipelineIds = nodes.filter(n => n.data?.nodeType === 'PIPELINE').map(n => n.id);
+pipelineIds.forEach(id => updateNodeInternals(id));
+```
+
+**Result:** Failed. This API is designed for when handles are added/removed, not when handles move due to node resize.
+
+---
+
+### 3. Node Data Refresh Key ❌
+**Idea:** Add a `_refreshKey` to node data that changes on expansion, hoping React Flow would detect node changes.
+
+```javascript
+data: { ...n.data, _refreshKey: nodeRefreshKey }
+```
+
+**Result:** Failed. React Flow doesn't watch for arbitrary data changes to trigger edge recalculation.
+
+---
+
+### 4. Hide and Re-show Edges ❌
+**Idea:** Hide edges during expansion state change, wait for DOM to update, then show edges with new IDs.
+
+```javascript
+setEdgesVisible(false);
+setTimeout(() => {
+  setEdgeGeneration(g => g + 1);
+  setEdgesVisible(true);
+}, 150);
+```
+
+**Result:** Failed. The timing was unreliable - edges were still calculated before nodes finished resizing.
+
+---
+
+### 5. Wait for Layout Completion ❌
+**Idea:** Track `layoutVersion` and only regenerate edges after ELK layout completes.
+
+```javascript
+if (pendingEdgeRegen && !isLayouting && layoutVersion !== prevLayoutVersionRef.current) {
+  // Regenerate edges
+}
+```
+
+**Result:** Failed. ELK layout doesn't re-run on collapse (only visibility changes, not structure changes), so `layoutVersion` never updated.
+
+---
+
+### 6. Rapid Theme Toggle ✅
+**Idea:** Mimic what the manual theme toggle does - briefly toggle theme to force full recalculation.
+
+```javascript
+useEffect(() => {
+  if (expansionKey !== prevExpansionKeyRef.current) {
+    prevExpansionKeyRef.current = expansionKey;
+    
+    const timer = setTimeout(() => {
+      const currentTheme = theme;
+      const otherTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      
+      // Toggle to other theme, then immediately back
+      setManualTheme(otherTheme);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setManualTheme(currentTheme);
+        });
+      });
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }
+}, [expansionKey, theme, setManualTheme]);
+```
+
+**Result:** SUCCESS! The theme toggle is imperceptible but forces React Flow to fully recalculate all edge paths.
+
+---
+
+## Final Solution
+
+The fix works by:
+
+1. **Detecting expansion state changes** via `expansionKey` (a string of collapsed pipeline IDs)
+2. **Waiting 100ms** for DOM to settle after collapse/expand
+3. **Toggling theme briefly** (dark→light→dark or vice versa)
+4. **Using double `requestAnimationFrame`** to ensure the toggle-back happens after React commits
+
+### Why This Works
+
+Theme changes cause:
+- All node components to re-render with new style props
+- All edge components to re-render with new style props
+- React Flow's internal stores to update with fresh node dimensions
+- Edge bezier paths to be recalculated from current handle positions
+
+### Results
+
+| Metric | Before Fix | After Fix |
+|--------|-----------|-----------|
+| Edge source Y | 281 | 233 |
+| Node bottom Y | 240 | 240 |
+| Mismatch | 41px (bug!) | 7px (handle offset, correct) |
+
+The 7px remaining offset is the **correct handle position** - handles are positioned slightly inside the node border, not exactly at the edge.
+
+---
+
+## Debugging Tools Added
+
+As part of this investigation, we added debug overlays to the visualization:
+
+### Enable Debug Mode
+- URL parameter: `?debug=true`
+- UI toggle: "Debug overlays" button in view controls
+- Console: `HyperNodesVizState.debug.showOverlays()`
+
+### Debug Features
+- **Edge coordinate labels**: `S:(x,y) T:(x,y)` showing source and target coordinates
+- **Node bounds table**: Shows Y position, height, and bottom for each node
+- Helps verify that edge source Y matches node bottom (within handle offset tolerance)
+
+---
+
+## Lessons Learned
+
+1. **React Flow edge caching is aggressive** - it doesn't automatically recalculate paths on node resize
+2. **`updateNodeInternals()` is limited** - only works for handle add/remove, not position changes
+3. **The simplest fix is often the best** - mimicking what manual interaction does (theme toggle) was more reliable than trying to work around React Flow's internals
+4. **Debug tools are invaluable** - the coordinate overlays made it easy to verify the fix worked
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/hypernodes/viz/js/html_generator.py` | Added expansion state effect with theme toggle fix |
 
 ---
 Source: .ruler/visualization_best_practices.md
 ---
-# Visualization Best Practices & Lessons Learned
+# Visualization System - Architecture & Debugging Guide
 
-## Key Principles
+## Architecture Overview
 
-1.  **Frontend Agnostic Serialization**: Always rely on `GraphSerializer` for computing graph structure (nodes, edges, hierarchy). The rendering engine (Graphviz, Widget) should only handle display concerns.
-2.  **Nested Pipeline Visibility**:
-    *   Inputs to nested pipelines must be visualized at the correct scope (root vs nested).
-    *   Use `GraphSerializer.input_levels` to determine where an input node belongs.
-    *   Ensure `parentNode` in React Flow or clusters in Graphviz respect this hierarchy.
-3.  **Interactive Widget Resilience**:
-    *   **Error Handling**: Javascript errors inside the iframe must be caught and surfaced to the user (not silently fail).
-    *   **Fallback**: Always provide a fallback UI if layout calculation fails (e.g., ELK failure).
-    *   **State Management**: Expansion state of nested nodes must be robust. If a parent collapses, all children (even grandchildren) must be hidden.
-4.  **Layout & Styling**:
-    *   **Auto-Centering**: Trigger `fitView` on resize and layout changes.
-    *   **Theme Matching**: Detect host environment (VSCode) theme and background to blend in seamlessly.
-    *   **Edge Routing**: Use orthogonal or spline routing to avoid edges crossing *behind* nodes.
-    *   **Readability**: Avoid dashed lines for standard data flow. Group inputs logically.
-5.  **Verification**:
-    *   Always verify visualization changes by generating the HTML and inspecting it with a browser (or Playwright tool).
-    *   Check for console errors in the generated HTML.
-    *   Verify correct nesting of nodes (parents vs children).
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Browser                               │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │  React Flow + ELK Layout                                ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ ││
+│  │  │ CustomNode  │  │ CustomEdge  │  │ PipelineGroup   │ ││
+│  │  └─────────────┘  └─────────────┘  └─────────────────┘ ││
+│  └─────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │  state_utils.js                                         ││
+│  │  applyState → applyVisibility → compressEdges →        ││
+│  │  groupInputs                                            ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ HTML with embedded JSON
+┌─────────────────────────────────────────────────────────────┐
+│                    Python Backend                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │ UIHandler   │→ │ JSRenderer  │→ │ html_generator.py   │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+│         ▲                                                    │
+│  ┌─────────────┐                                            │
+│  │ GraphWalker │                                            │
+│  └─────────────┘                                            │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## Common Pitfalls
+## Directory Structure
 
-*   **Graphviz vs Widget Parity**: Logic for grouping, filtering, and scoping often diverges. Use `GraphSerializer` as the single source of truth.
-*   **Unused Outputs**: Pipelines may declare outputs that aren't used in a specific context. Visualization should filter these to reduce noise, unless explicitly requested.
-*   **Iframe Communication**: Communication between the notebook kernel and the iframe is one-way (HTML injection). State does not persist across re-renders unless handled carefully.
+```
+src/hypernodes/viz/
+├── graph_walker.py      # Traverses pipeline DAG, generates flat node/edge structure
+├── ui_handler.py        # Manages depth, expansion, serialization
+├── structures.py        # Data classes: FunctionNode, PipelineNode, DataNode, VizEdge
+├── js/
+│   ├── renderer.py      # Transforms VisualizationGraph → React Flow format
+│   └── html_generator.py # Generates complete HTML with React/ELK/Tailwind
+├── graphviz/
+│   └── renderer.py      # Static Graphviz SVG rendering
 
-## How to Verify
+assets/viz/
+├── state_utils.js       # Client-side state transformations (applyState, compressEdges, etc.)
+├── theme_utils.js       # Theme detection and color parsing
+├── reactflow.umd.js     # React Flow library
+├── elk.bundled.js       # ELK layout library
+└── custom.css           # Custom styling
 
-1.  Create a reproduction script (like `tests/repro_viz_issue.py`) that constructs a representative pipeline.
-2.  Generate the HTML artifact using `PipelineWidget._generate_html()`.
-3.  Open the HTML in a browser and visually inspect:
-    *   Node placement (nesting).
-    *   Edge connections (especially across boundaries).
-    *   Console for errors.
+tests/viz/
+├── test_collapsed_pipeline_outputs_and_grouping.py  # Combined outputs, input grouping
+├── test_collapsed_pipelines_no_dangling_edges.py    # Edge compression
+├── test_separate_outputs.py                          # Both display modes
+├── test_state_utils_visibility.py                    # Visibility logic
+├── test_debug_tools.py                               # Debug utilities
+└── ...
+```
+
+## Data Flow
+
+### 1. Python Side (Build Time)
+
+```python
+# 1. GraphWalker traverses the pipeline
+walker = GraphWalker(pipeline, depth=2, traverse_collapsed=True)
+graph = walker.walk()  # Returns VisualizationGraph
+
+# 2. UIHandler wraps for serialization
+handler = UIHandler(pipeline, depth=2)
+graph_data = handler.get_visualization_data(traverse_collapsed=True)
+
+# 3. JSRenderer transforms to React Flow format
+renderer = JSRenderer()
+rf_data = renderer.render(graph_data, theme='dark', separate_outputs=False)
+
+# 4. HTML generator embeds data
+html = generate_widget_html(rf_data)
+```
+
+### 2. JavaScript Side (Runtime)
+
+```javascript
+// 1. Parse embedded data
+const initialData = JSON.parse(document.getElementById('graph-data').textContent);
+
+// 2. Apply state transformations
+const stateResult = applyState(nodes, edges, { expansionState, separateOutputs, showTypes, theme });
+
+// 3. Apply visibility (hide children of collapsed pipelines)
+const nodesWithVis = applyVisibility(stateResult.nodes, expansionState);
+
+// 4. Compress edges (remap to visible ancestors)
+const compressedEdges = compressEdges(nodesWithVis, stateResult.edges);
+
+// 5. Group inputs (combine inputs targeting same node)
+const { nodes, edges } = groupInputs(nodesWithVis, compressedEdges);
+
+// 6. ELK layout → React Flow render
+```
+
+---
+
+## Debugging Guide
+
+### Quick Debug Commands
+
+```bash
+# Generate test HTML
+uv run python scripts/test_collapsed_pipeline.py
+
+# Run all viz tests
+uv run pytest tests/viz/ -v
+
+# Run specific test
+uv run pytest tests/viz/test_collapsed_pipelines_no_dangling_edges.py -v
+```
+
+### Browser Console Debug API
+
+The visualization exposes a debug API via `HyperNodesVizState.debug`:
+
+```javascript
+// Enable verbose logging for edge compression and layout
+HyperNodesVizState.debug.enableDebug()
+
+// Analyze current graph state (nodes, edges, pipelines, dangling edges)
+HyperNodesVizState.debug.analyzeState()
+
+// Get current pipeline expansion state
+HyperNodesVizState.debug.getExpansionState()
+
+// Simulate edge compression with a specific expansion state
+HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
+
+// Disable debug mode
+HyperNodesVizState.debug.disableDebug()
+
+// === Visual Debug Overlays ===
+
+// Show debug overlays (node bounding boxes + edge connection points)
+HyperNodesVizState.debug.showOverlays()
+
+// Hide debug overlays
+HyperNodesVizState.debug.hideOverlays()
+
+// Inspect current layout (node positions, dimensions, edge paths)
+HyperNodesVizState.debug.inspectLayout()
+// Returns: { nodes: [{id, x, y, width, height, bottom}], edges: [...], edgePaths: [...] }
+
+// Validate edge-node connections (checks if edges connect within node bounds)
+HyperNodesVizState.debug.validateConnections()
+// Returns: { valid: bool, issues: [{edge, type, issue, expected, actual}], summary: str }
+
+// Get comprehensive debug report (runs all analyses)
+HyperNodesVizState.debug.fullReport()
+```
+
+### Visual Debug Mode
+
+Debug overlays can be enabled in three ways:
+
+1. **UI Toggle**: Click the bug icon in the view controls panel
+2. **Console**: `HyperNodesVizState.debug.showOverlays()`
+3. **URL Parameter**: Add `?debug=overlays` or `?debug=true` to the URL
+
+When enabled, the visualization shows:
+- **Red dashed boxes** around each node with ID labels
+- **Green circles** at edge source points
+- **Blue circles** at edge target points
+- **Coordinate labels** on edges showing (sourceX, sourceY) → (targetX, targetY)
+
+### Python State Simulator
+
+The `state_simulator` module replicates JavaScript state transformations in Python for testing:
+
+```python
+from hypernodes.viz import (
+    UIHandler,
+    simulate_state,
+    verify_state,
+    verify_edge_alignment,
+    simulate_collapse_expand_cycle,
+    diagnose_all_states,
+)
+
+# Get visualization graph
+handler = UIHandler(pipeline, depth=99)
+graph = handler.get_visualization_data(traverse_collapsed=True)
+
+# Simulate a specific state (collapsed pipeline, combined outputs)
+result = simulate_state(
+    graph,
+    expansion_state={"my_pipeline": False},
+    separate_outputs=False,
+)
+
+# Verify edges are valid
+alignment = verify_edge_alignment(result)
+if not alignment["valid"]:
+    print("Issues:", alignment["issues"])
+
+# Test a complete collapse/expand cycle
+cycle = simulate_collapse_expand_cycle(graph, "my_pipeline")
+print(cycle["summary"])  # "Pipeline 'my_pipeline' collapse/expand cycle: PASS (0 total issues)"
+
+# Diagnose all state combinations
+all_states = diagnose_all_states(graph)
+for key, state in all_states.items():
+    if state["orphan_edges"]:
+        print(f"{key}: orphan edges found!")
+```
+
+### Debugging Each Layer
+
+#### 1. GraphWalker (`graph_walker.py`)
+
+**What it does**: Traverses the pipeline DAG and creates nodes/edges.
+
+**Debug approach**:
+```python
+from hypernodes.viz.graph_walker import GraphWalker
+
+walker = GraphWalker(pipeline, depth=2, traverse_collapsed=True)
+graph = walker.walk()
+
+# Inspect nodes
+for node in graph.nodes:
+    print(f"{node.__class__.__name__}: {node.id} (parent={node.parent_id})")
+
+# Inspect edges
+for edge in graph.edges:
+    print(f"  {edge.source} → {edge.target}")
+```
+
+**Common issues**:
+- Missing boundary outputs → Check `_expand_pipeline_node` creates them
+- Wrong parent assignment → Check `parent_id` parameter passing
+- Missing type hints → Check `_extract_input_type` recursive lookup
+
+#### 2. UIHandler (`ui_handler.py`)
+
+**What it does**: Manages depth, expansion state, and serialization.
+
+**Debug approach**:
+```python
+from hypernodes.viz.ui_handler import UIHandler
+
+handler = UIHandler(pipeline, depth=2)
+data = handler.get_visualization_data(traverse_collapsed=True)
+
+# Check what nodes exist
+print("Nodes:", [n.id for n in data.nodes])
+print("Pipelines:", [n.id for n in data.nodes if hasattr(n, 'is_expanded')])
+```
+
+**Key parameters**:
+- `depth`: How many levels to expand initially
+- `traverse_collapsed=True`: Pre-fetch internal structure for interactive expand/collapse
+
+#### 3. JSRenderer (`js/renderer.py`)
+
+**What it does**: Transforms VisualizationGraph → React Flow node/edge format.
+
+**Debug approach**:
+```python
+from hypernodes.viz.js.renderer import JSRenderer
+
+renderer = JSRenderer()
+rf_data = renderer.render(graph_data, theme="dark", separate_outputs=False)
+
+# Inspect React Flow data
+import json
+print(json.dumps(rf_data, indent=2))
+```
+
+**Key outputs**:
+- `nodes[].data.nodeType`: FUNCTION, PIPELINE, DATA, INPUT_GROUP, DUAL
+- `nodes[].data.isExpanded`: For PIPELINE nodes
+- `nodes[].data.sourceId`: For output DATA nodes (points to producer)
+- `nodes[].parentNode`: For nested nodes
+- `edges[].sourcePosition/targetPosition`: Should be "bottom"/"top"
+
+#### 4. state_utils.js (Frontend)
+
+**What it does**: Client-side state transformations.
+
+**Debug with Node.js**:
+```javascript
+// scripts/debug_state.js
+const utils = require('../assets/viz/state_utils.js');
+const fs = require('fs');
+
+const html = fs.readFileSync('outputs/test.html', 'utf-8');
+const match = html.match(/<script id="graph-data"[^>]*>([\s\S]*?)<\/script>/);
+const data = JSON.parse(match[1]);
+
+// Test transformations
+const result = utils.applyState(data.nodes, data.edges, {
+    expansionState: new Map([["rag_pipeline", false]]),
+    separateOutputs: false,
+    showTypes: true,
+    theme: "dark"
+});
+console.log(JSON.stringify(result, null, 2));
+```
+
+Run: `node scripts/debug_state.js`
+
+**Key functions**:
+- `applyState`: Applies theme, separateOutputs mode, combines outputs
+- `applyVisibility`: Hides children of collapsed pipelines
+- `compressEdges`: Remaps edges to visible ancestors when pipelines collapse
+- `groupInputs`: Groups inputs targeting the same node
+
+#### 5. Playwright Browser Testing
+
+For interactive debugging:
+```python
+# Use Playwright MCP tools
+mcp_playwright_browser_navigate(url="file:///path/to/test.html")
+mcp_playwright_browser_wait_for(time=2)  # Wait for React/ELK to render
+mcp_playwright_browser_console_messages()  # Check for errors
+mcp_playwright_browser_evaluate(function="() => HyperNodesVizState.debug.analyzeState()")
+```
+
+---
+
+## Key Patterns
+
+### Boundary Outputs
+
+When a pipeline is collapsed, its outputs appear at the parent level:
+
+```
+Expanded:                          Collapsed:
+┌─ rag_pipeline ─────────┐        ┌─ rag_pipeline ────┐
+│  generate_answer       │   →    │  → answer : str   │
+│      → answer          │        └───────────────────┘
+└────────────────────────┘
+```
+
+Boundary output nodes have `sourceId` pointing to the PIPELINE:
+```javascript
+{ id: "answer", data: { sourceId: "rag_pipeline", nodeType: "DATA" } }
+```
+
+### Edge Compression
+
+When pipelines collapse, edges to internal nodes remap to the collapsed pipeline:
+
+```javascript
+// getVisibleAncestor walks up parent chain to find collapsed pipeline
+const sourceVis = getVisibleAncestor(edge.source);  // e.g., "rag_pipeline"
+const targetVis = getVisibleAncestor(edge.target);
+// Remap: edge to internal node → edge to collapsed pipeline
+```
+
+### Input Grouping
+
+Inputs targeting the same node are grouped into INPUT_GROUP:
+```
+Before: eval_pair → rag_pipeline, model_name → rag_pipeline
+After:  [eval_pair, model_name, num_results] → rag_pipeline
+```
+
+---
+
+## Common Issues & Fixes
+
+| Issue | What to Check | Fix Location |
+|-------|---------------|--------------|
+| Missing edges after collapse | `compressEdges` output, `getVisibleAncestor` | `state_utils.js` |
+| Hanging/dangling arrows | Handle positions, node visibility, `updateNodeInternals` | `html_generator.py` |
+| Edge starts/ends outside node | Use `validateConnections()` to diagnose | `state_utils.js` debug API |
+| Stale edge paths after layout | Layout version, edge ID updates | `html_generator.py` |
+| Nodes not grouping | `groupInputs`, target matching | `state_utils.js` |
+| Outputs not combined | `applyState`, `sourceId` values | `state_utils.js` |
+| Wrong node positions | ELK layout, `parentNode` | `html_generator.py` |
+| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
+| Pipeline outputs not shown | `functionOutputs` collection | `state_utils.js` |
+
+### Debugging Edge Alignment Issues
+
+When edges appear to "hang" or not connect properly:
+
+1. **Enable debug overlays**: `HyperNodesVizState.debug.showOverlays()` or toggle in UI
+2. **Inspect layout**: `HyperNodesVizState.debug.inspectLayout()` to see node positions
+3. **Validate connections**: `HyperNodesVizState.debug.validateConnections()` to check bounds
+4. **Check edge paths**: Look for `delta.y` in issues to see how far off edges are
+5. **Run full report**: `HyperNodesVizState.debug.fullReport()` for comprehensive analysis
+
+Common causes:
+- React Flow caching edge paths after node resize
+- Layout not triggering `updateNodeInternals`
+- Asynchronous ELK layout completing after render
+
+---
+
+## Do's and Don'ts
+
+### DO's ✅
+
+1. **Use `traverse_collapsed=True`** for interactive viz (pre-fetches internal structure)
+2. **Filter boundary outputs based on expansion state** (expanded→hide, collapsed→show)
+3. **Remap edges when hiding nodes** (use `compressEdges`)
+4. **Test both display modes** (`separateOutputs=true/false`)
+5. **Preserve expansion state across option changes** (store separately)
+6. **Verify with Playwright** for interactive behavior
+
+### DON'TS ❌
+
+1. **Don't skip edges from expanded pipelines** without remapping
+2. **Don't assume all DATA nodes with sourceId are function outputs** (check sourceNodeTypes)
+3. **Don't filter edges before remapping** (order matters)
+4. **Don't create zero-size handles** (use opacity-0 instead)
+5. **Don't modify nodes in place** (use spread for React state)
+
+---
+
+## Running Tests
+
+```bash
+# All visualization tests
+uv run pytest tests/viz/ -v
+
+# Specific test categories
+uv run pytest tests/viz/test_collapsed*.py -v      # Collapse behavior
+uv run pytest tests/viz/test_separate_outputs.py -v # Display modes
+uv run pytest tests/viz/test_debug_tools.py -v     # Debug utilities
+
+# Edge alignment tests (requires Playwright)
+pip install playwright && playwright install chromium
+uv run pytest tests/viz/test_edge_alignment_playwright.py -v
+
+# Python-only edge alignment tests (no browser)
+uv run pytest tests/viz/test_edge_alignment_playwright.py::TestPythonEdgeAlignment -v
+```
+
+### Playwright Browser Tests
+
+The `test_edge_alignment_playwright.py` file contains tests that validate edge-node connections in a real browser:
+
+```python
+# Run tests that verify edges connect properly after collapse/expand
+pytest tests/viz/test_edge_alignment_playwright.py::TestPlaywrightEdgeAlignment -v
+
+# These tests:
+# 1. Generate HTML visualization
+# 2. Open in headless Chromium
+# 3. Click to collapse/expand pipelines
+# 4. Use debug.validateConnections() to verify alignment
+# 5. Assert no issues found
+```
+
+## Generate Test HTML
+
+```python
+from hypernodes.viz.ui_handler import UIHandler
+from hypernodes.viz.js.renderer import JSRenderer
+from hypernodes.viz.js.html_generator import generate_widget_html
+
+handler = UIHandler(pipeline, depth=2)
+graph_data = handler.get_visualization_data(traverse_collapsed=True)
+renderer = JSRenderer()
+rf_data = renderer.render(graph_data, theme="dark", separate_outputs=False, show_types=True)
+html = generate_widget_html(rf_data)
+
+with open("outputs/test.html", "w") as f:
+    f.write(html)
+```

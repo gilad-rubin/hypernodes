@@ -17,11 +17,16 @@
       scratch.remove();
 
       const nums = resolved.match(/[\d\.]+/g);
-      if (nums && nums.length >= 3) {
-        const [r, g, b] = nums.slice(0, 3).map(Number);
-        const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-        return { r, g, b, luminance, resolved, raw: value };
-      }
+        if (nums && nums.length >= 3) {
+          const [r, g, b] = nums.slice(0, 3).map(Number);
+          // Check alpha if present
+          if (nums.length >= 4) {
+             const alpha = Number(nums[3]);
+             if (alpha < 0.1) return null;
+          }
+          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+          return { r, g, b, luminance, resolved, raw: value };
+        }
     } catch (_) {}
     return null;
   }

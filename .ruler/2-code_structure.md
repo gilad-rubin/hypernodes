@@ -514,29 +514,61 @@ outer.run()  # ✅ Works! No inputs needed
 The visualization system is organized in `src/hypernodes/viz/` with a clean separation between:
 - **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
-- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow (`js_ui.py`) consume UIHandler output.
-- **Interactive Widgets** (`visualization_widget.py`): IPyWidget-based React Flow visualizations (uses `transform_to_react_flow` with handler data).
-- **State utils (`assets/viz/state_utils.js`)**: Shared pure helpers for React Flow node/edge derivation and visibility so toggles (show types, separate outputs) stay consistent across renders.
+- **JSRenderer (`js/renderer.py`)**: Transforms VisualizationGraph → React Flow node/edge format.
+- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded.
+- **State Utils (`assets/viz/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
+- **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow.
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
 
-**GraphWalker `traverse_collapsed` parameter (IMPORTANT):**
-- **`traverse_collapsed=False`** (for static Graphviz): Collapsed pipelines remain truly collapsed - no internal structure exposed, no ghost nodes
-- **`traverse_collapsed=True`** (for interactive viz): Pre-fetches internal structure even for collapsed nodes, enabling expand without refetch
-- **Bug Fix (Nov 2024)**: Static Graphviz now uses `traverse_collapsed=False` to prevent ghost text-only nodes appearing in SVG
+### Key Parameters
 
-**UIHandler serialization highlights:**
-- Resolves cross-level edges for nested pipelines (edges point to real inner producers, not wrapper nodes).
-- Emits mapping labels for input/output remapping (e.g., `"outer → inner"`).
-- Tracks per-level metadata: unfulfilled/bound inputs, parent relationships, grouped input candidates.
-- Supports expansion depth controls (`depth` or interactive expand/collapse) without frontend recomputation.
-- **Input level placement**: Prioritizes deeper (more specific) levels when inputs appear in multiple `unfulfilled_inputs`. This ensures inputs consumed only by nested nodes appear inside the correct container, not at root level.
+**GraphWalker `traverse_collapsed`:**
+- **`False`** (for static Graphviz): Collapsed pipelines remain truly collapsed
+- **`True`** (for interactive viz): Pre-fetches internal structure for expand/collapse
 
-**Ghost Nodes Issue (FIXED):**
-When `traverse_collapsed=True` was used for static visualizations, collapsed pipelines would expand their internal structure. This created nodes that were referenced in edges but never explicitly added to Graphviz with proper styling. Graphviz would auto-create simple text nodes for these missing references, resulting in "ghost nodes" like:
-```xml
-<g id="node8" class="node">
-<title>retrieve</title>
-<text>retrieve</text>  <!-- No styling! -->
-</g>
+### JS Visualization Data Flow
+
 ```
-**Solution**: `src/hypernodes/viz/__init__.py` now passes `traverse_collapsed=False` when rendering static Graphviz, ensuring collapsed pipelines stay truly collapsed.
+Python:  GraphWalker → UIHandler → JSRenderer → html_generator
+                                         ↓
+Browser: JSON → applyState → applyVisibility → compressEdges → groupInputs → ELK → ReactFlow
+```
+
+### Debug API (Browser Console)
+
+The visualization exposes `HyperNodesVizState.debug`:
+
+```javascript
+// Enable verbose logging for edge compression and layout
+HyperNodesVizState.debug.enableDebug()
+
+// Analyze current graph state
+HyperNodesVizState.debug.analyzeState()
+
+// Get current pipeline expansion state
+HyperNodesVizState.debug.getExpansionState()
+
+// Simulate edge compression with specific expansion state
+HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
+```
+
+### Key Client-Side Functions (state_utils.js)
+
+| Function | Purpose |
+|----------|---------|
+| `applyState` | Applies theme, separateOutputs mode, combines outputs |
+| `applyVisibility` | Hides children of collapsed pipelines |
+| `compressEdges` | Remaps edges to visible ancestors when pipelines collapse |
+| `groupInputs` | Groups inputs targeting the same node |
+
+### Common Issues & Debugging
+
+| Issue | Check | Location |
+|-------|-------|----------|
+| Missing edges after collapse | `compressEdges` output | `state_utils.js` |
+| Hanging arrows | Handle positions | `html_generator.py` |
+| Nodes not grouping | `groupInputs` | `state_utils.js` |
+| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
+
+See `.ruler/visualization_best_practices.md` for complete debugging guide.
+

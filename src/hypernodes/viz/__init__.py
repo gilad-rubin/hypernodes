@@ -6,7 +6,29 @@ from ..pipeline import Pipeline
 from .graphviz.renderer import GraphvizRenderer
 from .graphviz.style import DESIGN_STYLES, GraphvizTheme
 from .js.renderer import JSRenderer
+from .state_simulator import (
+    diagnose_all_states,
+    simulate_collapse_expand_cycle,
+    simulate_state,
+    verify_edge_alignment,
+    verify_state,
+)
 from .ui_handler import UIHandler
+
+# Public debugging API
+__all__ = [
+    "visualize",
+    "UIHandler",
+    "GraphvizRenderer",
+    "JSRenderer",
+    "simulate_state",
+    "verify_state",
+    "verify_edge_alignment",
+    "simulate_collapse_expand_cycle",
+    "diagnose_all_states",
+    "DESIGN_STYLES",
+    "GraphvizTheme",
+]
 
 
 def visualize(

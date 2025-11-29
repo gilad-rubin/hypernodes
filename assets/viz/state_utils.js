@@ -248,7 +248,7 @@
     }));
   };
 
-  const compressEdges = (nodes, edges) => {
+  const compressEdges = (nodes, edges, debug = false) => {
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
     const parentMap = new Map();
     const expansionMap = new Map();
@@ -256,6 +256,12 @@
       if (n.parentNode) parentMap.set(n.id, n.parentNode);
       if (n.data?.nodeType === "PIPELINE") expansionMap.set(n.id, !!n.data.isExpanded);
     });
+
+    if (debug) {
+      console.log("[compressEdges] expansionMap:", Object.fromEntries(expansionMap));
+      console.log("[compressEdges] parentMap:", Object.fromEntries(parentMap));
+      console.log("[compressEdges] input edges:", edges.length);
+    }
 
     const getVisibleAncestor = (nodeId) => {
       let curr = nodeId;
@@ -295,11 +301,20 @@
       if (sourceVis && targetVis && sourceVis !== targetVis) {
         const edgeId = `e_${sourceVis}_${targetVis}`;
         if (!processedEdges.has(edgeId)) {
+          if (debug) {
+            console.log(`[compressEdges] remapping edge: ${edge.source} -> ${edge.target} to ${sourceVis} -> ${targetVis}`);
+          }
           newEdges.push({ ...edge, id: edgeId, source: sourceVis, target: targetVis });
           processedEdges.add(edgeId);
         }
+      } else if (debug && (sourceVis !== edge.source || targetVis !== edge.target)) {
+        console.log(`[compressEdges] DROPPED edge: ${edge.source} -> ${edge.target} (sourceVis=${sourceVis}, targetVis=${targetVis})`);
       }
     });
+
+    if (debug) {
+      console.log("[compressEdges] output edges:", newEdges.length);
+    }
 
     return newEdges;
   };
@@ -410,5 +425,358 @@
     return hash;
   };
 
-  return { applyState, applyVisibility, compressEdges, groupInputs };
+  /**
+   * Debug helper to analyze visualization state.
+   * Call from browser console: HyperNodesVizState.debug.analyzeState()
+   */
+  const debug = {
+    /**
+     * Enable debug mode for compressEdges logging.
+     * Usage: HyperNodesVizState.debug.enableDebug()
+     */
+    enableDebug: () => {
+      if (typeof window !== "undefined") {
+        window.__hypernodes_debug_viz = true;
+        console.log("[debug] Debug mode enabled. Interactions will now log details.");
+      }
+    },
+
+    /**
+     * Disable debug mode.
+     */
+    disableDebug: () => {
+      if (typeof window !== "undefined") {
+        window.__hypernodes_debug_viz = false;
+        console.log("[debug] Debug mode disabled.");
+      }
+    },
+
+    /**
+     * Get the current expansion state from React Flow.
+     */
+    getExpansionState: () => {
+      if (typeof window !== "undefined" && window.__hypernodesVizExpansionState) {
+        return Object.fromEntries(window.__hypernodesVizExpansionState);
+      }
+      return null;
+    },
+
+    /**
+     * Analyze the current visualization state.
+     * Logs detailed information about nodes, edges, visibility, and edge compression.
+     */
+    analyzeState: () => {
+      if (typeof window === "undefined") {
+        console.log("[debug] Only available in browser.");
+        return;
+      }
+
+      const graphData = document.getElementById("graph-data");
+      if (!graphData) {
+        console.log("[debug] No graph-data element found.");
+        return;
+      }
+
+      const data = JSON.parse(graphData.textContent);
+      console.group("[debug] Graph Analysis");
+      console.log("Total nodes:", data.nodes.length);
+      console.log("Total edges:", data.edges.length);
+      
+      const pipelineNodes = data.nodes.filter(n => n.data?.nodeType === "PIPELINE");
+      console.log("Pipeline nodes:", pipelineNodes.map(n => ({ id: n.id, isExpanded: n.data?.isExpanded })));
+
+      const hiddenNodes = data.nodes.filter(n => n.hidden);
+      console.log("Hidden nodes:", hiddenNodes.length);
+
+      const edgeTargets = new Set(data.edges.map(e => e.target));
+      const edgeSources = new Set(data.edges.map(e => e.source));
+      const nodeIds = new Set(data.nodes.map(n => n.id));
+
+      const danglingSourceEdges = data.edges.filter(e => !nodeIds.has(e.source));
+      const danglingTargetEdges = data.edges.filter(e => !nodeIds.has(e.target));
+
+      if (danglingSourceEdges.length > 0) {
+        console.warn("Edges with missing source nodes:", danglingSourceEdges);
+      }
+      if (danglingTargetEdges.length > 0) {
+        console.warn("Edges with missing target nodes:", danglingTargetEdges);
+      }
+
+      console.groupEnd();
+      return { nodes: data.nodes, edges: data.edges, pipelineNodes, hiddenNodes, danglingSourceEdges, danglingTargetEdges };
+    },
+
+    /**
+     * Simulate edge compression for a given expansion state.
+     * @param {Object} expansionState - Map of pipeline ID to expanded state
+     */
+    simulateCompression: (expansionState = {}) => {
+      if (typeof window === "undefined") return;
+
+      const graphData = document.getElementById("graph-data");
+      if (!graphData) return;
+
+      const data = JSON.parse(graphData.textContent);
+      const expMap = new Map(Object.entries(expansionState));
+
+      // Apply expansion state to nodes
+      const nodes = data.nodes.map(n => {
+        if (n.data?.nodeType === "PIPELINE") {
+          return { ...n, data: { ...n.data, isExpanded: expMap.get(n.id) ?? n.data?.isExpanded } };
+        }
+        return n;
+      });
+
+      // Apply visibility
+      const withVisibility = applyVisibility(nodes, expMap);
+      
+      // Compress edges
+      const compressed = compressEdges(withVisibility, data.edges, true);
+
+      console.group("[debug] Simulation Results");
+      console.log("Expansion state:", expansionState);
+      console.log("Visible nodes:", withVisibility.filter(n => !n.hidden).length);
+      console.log("Hidden nodes:", withVisibility.filter(n => n.hidden).length);
+      console.log("Compressed edges:", compressed.length);
+      console.log("Edges:", compressed);
+      console.groupEnd();
+
+      return { nodes: withVisibility, edges: compressed };
+    },
+
+    /**
+     * Show debug overlays (node bounding boxes and edge connection points).
+     * Usage: HyperNodesVizState.debug.showOverlays()
+     */
+    showOverlays: () => {
+      if (typeof window !== "undefined") {
+        window.__hypernodes_debug_overlays = true;
+        console.log("[debug] Debug overlays enabled. Toggle in UI or call hideOverlays() to disable.");
+        // Try to trigger React re-render by dispatching a custom event
+        window.dispatchEvent(new CustomEvent('hypernodes-debug-toggle', { detail: { overlays: true } }));
+      }
+    },
+
+    /**
+     * Hide debug overlays.
+     * Usage: HyperNodesVizState.debug.hideOverlays()
+     */
+    hideOverlays: () => {
+      if (typeof window !== "undefined") {
+        window.__hypernodes_debug_overlays = false;
+        console.log("[debug] Debug overlays disabled.");
+        window.dispatchEvent(new CustomEvent('hypernodes-debug-toggle', { detail: { overlays: false } }));
+      }
+    },
+
+    /**
+     * Inspect the current layout state.
+     * Returns detailed position and dimension information for all nodes and edges.
+     * Usage: HyperNodesVizState.debug.inspectLayout()
+     */
+    inspectLayout: () => {
+      if (typeof window === "undefined") {
+        console.log("[debug] Only available in browser.");
+        return null;
+      }
+
+      const layoutData = window.__hypernodesVizLayout;
+      if (!layoutData) {
+        console.log("[debug] No layout data available. Make sure the visualization has rendered.");
+        return null;
+      }
+
+      // Get rendered edge paths from DOM
+      const edgePaths = [];
+      document.querySelectorAll('.react-flow__edge path').forEach((path, idx) => {
+        const d = path.getAttribute('d');
+        if (d) {
+          // Parse bezier path: M startX,startY C ... endX,endY
+          const coords = d.match(/[\d.-]+/g);
+          if (coords && coords.length >= 4) {
+            edgePaths.push({
+              index: idx,
+              pathD: d,
+              startX: parseFloat(coords[0]),
+              startY: parseFloat(coords[1]),
+              endX: parseFloat(coords[coords.length - 2]),
+              endY: parseFloat(coords[coords.length - 1]),
+            });
+          }
+        }
+      });
+
+      const result = {
+        nodes: layoutData.nodes.map(n => ({
+          ...n,
+          bottom: n.y + (n.height || 68),
+          right: n.x + (n.width || 200),
+        })),
+        edges: layoutData.edges,
+        edgePaths,
+        layoutVersion: layoutData.version,
+      };
+
+      console.group("[debug] Layout Inspection");
+      console.log("Layout version:", result.layoutVersion);
+      console.log("Nodes:", result.nodes.length);
+      console.table(result.nodes.filter(n => !n.hidden).slice(0, 20));
+      console.log("Edges:", result.edges.length);
+      console.log("Edge paths from DOM:", edgePaths.length);
+      if (edgePaths.length > 0) {
+        console.table(edgePaths.slice(0, 10));
+      }
+      console.groupEnd();
+
+      return result;
+    },
+
+    /**
+     * Validate that edge connection points fall within node boundaries.
+     * Returns issues if edges start/end outside their source/target nodes.
+     * Usage: HyperNodesVizState.debug.validateConnections()
+     */
+    validateConnections: () => {
+      if (typeof window === "undefined") {
+        console.log("[debug] Only available in browser.");
+        return null;
+      }
+
+      const layoutData = window.__hypernodesVizLayout;
+      if (!layoutData) {
+        console.log("[debug] No layout data available.");
+        return { valid: false, issues: [{ issue: "No layout data available" }] };
+      }
+
+      const issues = [];
+      const nodeMap = new Map(layoutData.nodes.map(n => [n.id, n]));
+      
+      // Get edge paths from DOM with their source/target info
+      const edgeElements = document.querySelectorAll('.react-flow__edge');
+      
+      edgeElements.forEach(edgeEl => {
+        const edgeId = edgeEl.getAttribute('data-id') || edgeEl.id || '';
+        const path = edgeEl.querySelector('path');
+        if (!path) return;
+        
+        const d = path.getAttribute('d');
+        if (!d) return;
+        
+        const coords = d.match(/[\d.-]+/g);
+        if (!coords || coords.length < 4) return;
+        
+        const startX = parseFloat(coords[0]);
+        const startY = parseFloat(coords[1]);
+        const endX = parseFloat(coords[coords.length - 2]);
+        const endY = parseFloat(coords[coords.length - 1]);
+        
+        // Find matching edge from layout data
+        // Edge IDs include version suffix like "e_source_target_v3"
+        const baseEdgeId = edgeId.replace(/_v\d+$/, '');
+        const edgeMatch = layoutData.edges.find(e => 
+          e.id === baseEdgeId || e.id.startsWith(baseEdgeId.replace(/^e_/, ''))
+        );
+        
+        if (!edgeMatch) return;
+        
+        const sourceNode = nodeMap.get(edgeMatch.source);
+        const targetNode = nodeMap.get(edgeMatch.target);
+        
+        if (sourceNode && !sourceNode.hidden) {
+          const sourceBottom = sourceNode.y + (sourceNode.height || 68);
+          const sourceLeft = sourceNode.x;
+          const sourceRight = sourceNode.x + (sourceNode.width || 200);
+          
+          // Check if edge starts from bottom of source node (with tolerance)
+          const tolerance = 20; // pixels
+          const withinXBounds = startX >= sourceLeft - tolerance && startX <= sourceRight + tolerance;
+          const nearSourceBottom = Math.abs(startY - sourceBottom) <= tolerance;
+          
+          if (!withinXBounds || !nearSourceBottom) {
+            issues.push({
+              edge: edgeMatch.id,
+              type: 'source_mismatch',
+              issue: `Edge starts at (${Math.round(startX)}, ${Math.round(startY)}) but source node "${sourceNode.id}" ends at y=${Math.round(sourceBottom)}`,
+              expected: { x: `${sourceLeft}-${sourceRight}`, y: sourceBottom },
+              actual: { x: startX, y: startY },
+              delta: { y: Math.round(startY - sourceBottom) },
+            });
+          }
+        }
+        
+        if (targetNode && !targetNode.hidden) {
+          const targetTop = targetNode.y;
+          const targetLeft = targetNode.x;
+          const targetRight = targetNode.x + (targetNode.width || 200);
+          
+          // Check if edge ends at top of target node (with tolerance)
+          const tolerance = 20;
+          const withinXBounds = endX >= targetLeft - tolerance && endX <= targetRight + tolerance;
+          const nearTargetTop = Math.abs(endY - targetTop) <= tolerance;
+          
+          if (!withinXBounds || !nearTargetTop) {
+            issues.push({
+              edge: edgeMatch.id,
+              type: 'target_mismatch',
+              issue: `Edge ends at (${Math.round(endX)}, ${Math.round(endY)}) but target node "${targetNode.id}" starts at y=${Math.round(targetTop)}`,
+              expected: { x: `${targetLeft}-${targetRight}`, y: targetTop },
+              actual: { x: endX, y: endY },
+              delta: { y: Math.round(endY - targetTop) },
+            });
+          }
+        }
+      });
+
+      const result = {
+        valid: issues.length === 0,
+        issues,
+        summary: `${edgeElements.length} edges validated, ${issues.length} issues found`,
+      };
+
+      console.group("[debug] Connection Validation");
+      console.log(result.summary);
+      if (issues.length > 0) {
+        console.warn("Issues found:");
+        console.table(issues);
+      } else {
+        console.log("All edges connect properly to their nodes.");
+      }
+      console.groupEnd();
+
+      return result;
+    },
+
+    /**
+     * Get a comprehensive debug report combining all analysis.
+     * Usage: HyperNodesVizState.debug.fullReport()
+     */
+    fullReport: () => {
+      console.group("[debug] Full Debug Report");
+      
+      const stateAnalysis = debug.analyzeState();
+      const layoutInspection = debug.inspectLayout();
+      const connectionValidation = debug.validateConnections();
+      const expansionState = debug.getExpansionState();
+      
+      console.log("\n=== Summary ===");
+      console.log("Expansion state:", expansionState);
+      if (connectionValidation) {
+        console.log("Connection validation:", connectionValidation.valid ? "PASS" : "FAIL");
+        if (!connectionValidation.valid) {
+          console.warn("Connection issues need attention!");
+        }
+      }
+      
+      console.groupEnd();
+      
+      return {
+        stateAnalysis,
+        layoutInspection,
+        connectionValidation,
+        expansionState,
+      };
+    }
+  };
+
+  return { applyState, applyVisibility, compressEdges, groupInputs, debug };
 });

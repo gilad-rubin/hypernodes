@@ -255,7 +255,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         Dual: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 12L2 12"></path><path d="M12 12L12 22"></path></svg>`,
         Input: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
         Data: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`,
-        Map: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`
+        Map: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`,
+        Bug: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="m8 2 1.88 1.88"></path><path d="M14.12 3.88 16 2"></path><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"></path><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"></path><path d="M12 20v-9"></path><path d="M6.53 9C4.6 8.8 3 7.1 3 5"></path><path d="M6 13H2"></path><path d="M3 21c0-2.1 1.7-3.9 3.8-4"></path><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"></path><path d="M22 13h-4"></path><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"></path></svg>`
       };
 
       // --- Custom Controls ---
@@ -290,8 +291,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         `;
       };
 
-      // --- View Controls (top-left toggles for separate_outputs and show_types) ---
-      const ViewControls = ({ separateOutputs, showTypes, onToggleSeparate, onToggleTypes, theme }) => {
+      // --- View Controls (top-left toggles for separate_outputs, show_types, and debug) ---
+      const ViewControls = ({ separateOutputs, showTypes, debugOverlays, onToggleSeparate, onToggleTypes, onToggleDebug, theme }) => {
         const isLight = theme === 'light';
         const containerClass = isLight 
             ? "bg-white/95 border-slate-200 shadow-lg" 
@@ -299,6 +300,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const labelClass = isLight ? "text-slate-600" : "text-slate-400";
         const activeClass = isLight ? "bg-indigo-500" : "bg-indigo-600";
         const inactiveClass = isLight ? "bg-slate-300" : "bg-slate-600";
+        const debugActiveClass = isLight ? "bg-red-500" : "bg-red-600";
         
         return html`
             <${Panel} position="top-left" className="mt-4 ml-4">
@@ -321,6 +323,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                             <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${showTypes ? "left-4" : "left-0.5"}`}></div>
                         </button>
                     </div>
+                    <div className="h-px ${isLight ? 'bg-slate-200' : 'bg-slate-700'}"></div>
+                    <div className="flex items-center justify-between gap-3">
+                        <span className=${`font-medium flex items-center gap-1.5 ${debugOverlays ? (isLight ? 'text-red-600' : 'text-red-400') : labelClass}`}>
+                            <${Icons.Bug} />
+                            Debug overlays
+                        </span>
+                        <button
+                            onClick=${onToggleDebug}
+                            className=${`relative w-8 h-4 rounded-full transition-all duration-300 ${debugOverlays ? debugActiveClass : inactiveClass}`}
+                        >
+                            <div className=${`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-300 ${debugOverlays ? "left-4" : "left-0.5"}`}></div>
+                        </button>
+                    </div>
                 </div>
             <//>
         `;
@@ -339,7 +354,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             <div className=${`px-3 py-2.5 border-t transition-all duration-300 ${bgClass} ${borderClass}`}>
                 <div className="flex flex-col items-start gap-1">
                     ${outputs.map(out => html`
-                        <div key=${out.name} className=${`flex items-center gap-1.5 text-xs max-w-full overflow-hidden ${textClass}`}>
+                        <div key=${out.name} className=${`flex items-center gap-2 text-xs max-w-full overflow-hidden ${textClass}`}>
                             <span className=${`shrink-0 ${arrowClass}`}>→</span>
                             <span className="font-mono font-medium shrink-0">${out.name}</span>
                             ${showTypes && out.type ? html`<span className=${`font-mono truncate min-w-0 ${typeClass}`} title=${out.type}>: ${out.type}</span>` : null}
@@ -350,16 +365,103 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         `;
       };
 
+      // --- Debug Overlay Component ---
+      // Shows node bounding boxes and edge connection points for debugging layout issues
+      const DebugOverlay = ({ nodes, edges, enabled, theme }) => {
+        const [showPanel, setShowPanel] = useState(true);
+        
+        if (!enabled) return null;
+        
+        const visibleNodes = nodes.filter(n => !n.hidden);
+        const isLight = theme === 'light';
+        
+        // Calculate node boundaries
+        const nodeBounds = visibleNodes.map(n => ({
+          id: n.id,
+          shortId: n.id.length > 20 ? n.id.slice(-18) + '..' : n.id,
+          y: Math.round(n.position?.y || 0),
+          height: Math.round(n.style?.height || 68),
+          bottom: Math.round((n.position?.y || 0) + (n.style?.height || 68)),
+          nodeType: n.data?.nodeType,
+        }));
+        
+        return html`
+          <${React.Fragment}>
+            <${Panel} position="top-center" className="pointer-events-none">
+              <div className=${`text-[10px] font-mono px-2 py-1 rounded ${isLight ? 'bg-red-100 text-red-800' : 'bg-red-900/80 text-red-200'}`}>
+                DEBUG: Green=source, Blue=target | Check if edge Y matches node bottom/top
+              </div>
+            <//>
+            <${Panel} position="top-right" className="mt-16 mr-4 pointer-events-auto">
+              <div className=${`rounded-lg border shadow-xl max-h-[50vh] overflow-hidden ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'}`}>
+                <button 
+                  onClick=${() => setShowPanel(p => !p)}
+                  className=${`w-full px-3 py-1.5 text-[10px] font-bold tracking-wide flex items-center justify-between ${isLight ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-red-900/50 text-red-300 hover:bg-red-900/70'}`}
+                >
+                  <span>NODE BOUNDS (Y)</span>
+                  <span>${showPanel ? '▼' : '▶'}</span>
+                </button>
+                ${showPanel ? html`
+                  <div className="overflow-y-auto max-h-[40vh]">
+                    <table className=${`text-[9px] font-mono w-full ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <thead className=${`sticky top-0 ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
+                        <tr>
+                          <th className="px-2 py-1 text-left">Node</th>
+                          <th className="px-2 py-1 text-right">Y</th>
+                          <th className="px-2 py-1 text-right">H</th>
+                          <th className="px-2 py-1 text-right font-bold text-amber-500">Bottom</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${nodeBounds.map((n, i) => html`
+                          <tr key=${n.id} className=${`${i % 2 === 0 ? (isLight ? 'bg-white' : 'bg-slate-900') : (isLight ? 'bg-slate-50' : 'bg-slate-800/50')} ${n.nodeType === 'PIPELINE' ? (isLight ? '!bg-amber-50' : '!bg-amber-900/20') : ''}`}>
+                            <td className="px-2 py-0.5 truncate max-w-[120px]" title=${n.id}>${n.shortId}</td>
+                            <td className="px-2 py-0.5 text-right">${n.y}</td>
+                            <td className="px-2 py-0.5 text-right">${n.height}</td>
+                            <td className="px-2 py-0.5 text-right font-bold text-amber-500">${n.bottom}</td>
+                          </tr>
+                        `)}
+                      </tbody>
+                    </table>
+                  </div>
+                ` : null}
+              </div>
+            <//>
+          <//>
+        `;
+      };
+
       // --- Edge Component ---
-      const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label }) => {
+      const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, data }) => {
         const [edgePath, labelX, labelY] = getBezierPath({
           sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition
         });
+        
+        const showDebug = data?.debugMode || window.__hypernodes_debug_overlays;
 
         return html`
           <${React.Fragment}>
             <${BaseEdge} path=${edgePath} markerEnd=${markerEnd} style=${style} />
-            ${label ? html`
+            ${showDebug ? html`
+              <!-- Debug: Source connection point (green) -->
+              <circle cx=${sourceX} cy=${sourceY} r="5" fill="#22c55e" stroke="#15803d" strokeWidth="1" />
+              <!-- Debug: Target connection point (blue) -->
+              <circle cx=${targetX} cy=${targetY} r="5" fill="#3b82f6" stroke="#1d4ed8" strokeWidth="1" />
+              <!-- Debug: Edge coordinates label -->
+              <${EdgeLabelRenderer}>
+                <div
+                  style=${{
+                    position: 'absolute',
+                    transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+                    pointerEvents: 'none',
+                  }}
+                  className="px-1.5 py-0.5 rounded bg-slate-900/95 border border-slate-600 text-[8px] text-slate-300 font-mono whitespace-nowrap"
+                >
+                  S:(${Math.round(sourceX)},${Math.round(sourceY)}) T:(${Math.round(targetX)},${Math.round(targetY)})
+                </div>
+              <//>
+            ` : null}
+            ${label && !showDebug ? html`
               <${EdgeLabelRenderer}>
                 <div
                   style=${{
@@ -383,6 +485,22 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // Get theme from node data (updated via setNodes when theme changes)
         const theme = data.theme || 'dark';
         const updateNodeInternals = useUpdateNodeInternals();
+        const showDebug = data.debugMode || window.__hypernodes_debug_overlays;
+        
+        // Debug wrapper to show node bounding box
+        const DebugWrapper = ({ children }) => {
+          if (!showDebug) return children;
+          return html`
+            <div className="relative">
+              <div className="absolute -inset-0.5 border-2 border-dashed border-red-500 rounded pointer-events-none z-50">
+                <span className="absolute -top-4 left-0 text-[8px] bg-red-500 text-white px-1 rounded font-mono whitespace-nowrap">
+                  ${id}
+                </span>
+              </div>
+              ${children}
+            </div>
+          `;
+        };
         
         // Style Configuration
         let colors = { bg: "slate", border: "slate", text: "slate", icon: "slate" };
@@ -426,6 +544,14 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           isExpanded,
           theme,
         ]);
+
+        const handleTransitionEnd = useCallback((e) => {
+            // Only trigger if the transition is on the root element (e.g. width/height/transform)
+            // and not bubbling up from a child
+            if (e.target === e.currentTarget) {
+                updateNodeInternals(id);
+            }
+        }, [id, updateNodeInternals]);
         
         // --- Render Data Node (Compact) ---
         if (data.nodeType === 'DATA') {
@@ -436,12 +562,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
             const hasTypeHint = showTypes && data.typeHint;
             return html`
-                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-1.5 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden
                     ${showAsOutput ? 'ring-2 ring-emerald-500/30' : ''}
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `}>
+                `} onTransitionEnd=${handleTransitionEnd}>
                      <span className=${`shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`}><${Icon} /></span>
                      <span className="text-xs font-mono font-medium shrink-0">${data.label}</span>
                      ${hasTypeHint ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${data.typeHint}>: ${data.typeHint}</span>` : null}
@@ -466,7 +592,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `}>
+                `} onTransitionEnd=${handleTransitionEnd}>
                     <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} /></span>
                     <span className="text-xs font-mono font-medium truncate">${data.label}</span>
                     ${hasType ? html`<span className=${`text-[10px] font-mono truncate ${typeClass}`}>: ${typeHint}</span>` : null}
@@ -490,7 +616,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     ${isLight
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200'
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `}>
+                `} onTransitionEnd=${handleTransitionEnd}>
                     ${params.map((p, i) => html`
                         <div className="flex items-center gap-2 whitespace-nowrap">
                             <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} className="w-3 h-3" /></span>
@@ -517,7 +643,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 ${isLight 
                     ? 'border-amber-300 bg-amber-50/30' 
                     : 'border-amber-500/30 bg-amber-500/5'}
-            `}>
+            `} onTransitionEnd=${handleTransitionEnd}>
               <button 
                    type="button"
                    className=${`absolute -top-3 left-4 px-3 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors z-10
@@ -549,6 +675,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                  ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200`
                  : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/10`}
                `}
+               onTransitionEnd=${handleTransitionEnd}
                onClick=${data.nodeType === 'PIPELINE' ? (e) => { e.stopPropagation(); if(data.onToggleExpand) data.onToggleExpand(); } : undefined}>
             
             <!-- Header -->
@@ -603,14 +730,28 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const [layoutError, setLayoutError] = useState(null);
         const [graphHeight, setGraphHeight] = useState(600);
         const [graphWidth, setGraphWidth] = useState(600);
+        // Track layout version to force edge recalculation when layout changes
+        const [layoutVersion, setLayoutVersion] = useState(0);
+        // Track if layout is in progress to avoid showing stale edges
+        const [isLayouting, setIsLayouting] = useState(false);
 
         useEffect(() => {
-          if (!nodes.length) return;
+          const debugMode = window.__hypernodes_debug_viz || false;
+          if (debugMode) console.log('[useLayout] nodes:', nodes.length, 'edges:', edges.length);
+          if (!nodes.length) {
+            if (debugMode) console.log('[useLayout] No nodes, returning early');
+            setIsLayouting(false);
+            return;
+          }
+          
+          // Mark layout as in progress - this will hide edges temporarily
+          setIsLayouting(true);
 
           const buildElkHierarchy = (nodes, edges) => {
             const visibleNodes = nodes.filter(n => !n.hidden);
             const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
             const visibleEdges = edges.filter(e => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target));
+            if (debugMode) console.log('[useLayout] visibleNodes:', visibleNodes.length, 'visibleEdges:', visibleEdges.length);
             
             const visibleNodeMap = new Map(visibleNodes.map(n => [n.id, { ...n, children: [], edges: [] }]));
             const rootChildren = [];
@@ -640,7 +781,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     const labelLen = n.data.label ? n.data.label.length : 10;
                     width = Math.max(140, labelLen * 8 + 80);
                     height = 68;
-                } else                 if (n.data?.nodeType === 'INPUT') {
+                } else if (n.data?.nodeType === 'INPUT') {
                     width = 160;
                     height = 46;
                 } else if (n.data?.nodeType === 'INPUT_GROUP') {
@@ -648,6 +789,38 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     // Dynamic height based on number of inputs
                     const paramCount = n.data.params ? n.data.params.length : 1;
                     height = 46 + (paramCount * 18);
+                } else {
+                    // Standard Function Node
+                    // Base width for label
+                    const labelLen = n.data.label ? n.data.label.length : 10;
+                    let calculatedWidth = Math.max(180, labelLen * 8 + 80);
+
+                    // If outputs are combined (separateOutputs=false), check if we need more width for them
+                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
+                        let maxOutputLen = 0;
+                        n.data.outputs.forEach(out => {
+                            // "→ " + name + ": " + type
+                            let len = 2 + (out.name ? out.name.length : 0);
+                            if (n.data.showTypes && out.type) {
+                                len += 2 + out.type.length;
+                            }
+                            if (len > maxOutputLen) maxOutputLen = len;
+                        });
+                        // Approx 7px per char + padding
+                        const requiredOutputWidth = (maxOutputLen * 7) + 50; 
+                        if (requiredOutputWidth > calculatedWidth) {
+                            calculatedWidth = requiredOutputWidth;
+                        }
+                    }
+                    
+                    width = calculatedWidth;
+                    height = 68; // Default height
+                    
+                    // Add height for outputs if combined
+                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
+                        // Base height 42px (header) + 10px (padding) + outputs * 24px
+                        height = 52 + (n.data.outputs.length * 24);
+                    }
                 }
                 
                 if (n.style && n.style.width) width = n.style.width;
@@ -746,6 +919,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               (graph.children || []).forEach(n => traverse(n));
               setLayoutedNodes(positionedNodes);
               setLayoutedEdges(visibleEdges);
+              setLayoutVersion(v => v + 1); // Increment version to force edge recalculation
+              setIsLayouting(false); // Layout complete - safe to show edges
               if (graph.height) setGraphHeight(graph.height);
               if (graph.width) setGraphWidth(graph.width);
             })
@@ -759,10 +934,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 }));
                 setLayoutedNodes(fallbackNodes);
                 setLayoutedEdges(edges);
+                setLayoutVersion(v => v + 1);
+                setIsLayouting(false);
             });
         }, [nodes, edges]);
 
-        return { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth };
+        return { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth, layoutVersion, isLayouting };
       };
 
       const initialData = JSON.parse(document.getElementById('graph-data').textContent || '{"nodes":[],"edges":[]}');
@@ -775,6 +952,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       const panOnScroll = Boolean(initialData.meta?.pan_on_scroll);
       const initialSeparateOutputs = Boolean(initialData.meta?.separate_outputs ?? false);
       const initialShowTypes = Boolean(initialData.meta?.show_types ?? true);
+      
+      // Parse URL parameters for debug mode: ?debug=overlays or ?debug=true
+      const urlParams = new URLSearchParams(window.location.search);
+      const debugParam = urlParams.get('debug');
+      const initialDebugOverlays = debugParam === 'overlays' || debugParam === 'true' || debugParam === '1';
+      // Initialize global debug flag for edge component access
+      if (initialDebugOverlays) window.__hypernodes_debug_overlays = true;
 
       const parseColorString = (value) => {
         if (themeUtils?.parseColorString) return themeUtils.parseColorString(value);
@@ -789,22 +973,91 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const nums = resolved.match(/[\d\.]+/g);
         if (nums && nums.length >= 3) {
             const [r, g, b] = nums.slice(0, 3).map(Number);
+            if (nums.length >= 4) {
+                const alpha = Number(nums[3]);
+                if (alpha < 0.1) return null;
+            }
             const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
             return { r, g, b, luminance, resolved, raw: value };
         }
         return null;
+      };
+      const detectHostTheme = () => {
+        if (themeUtils?.detectHostTheme) return themeUtils.detectHostTheme();
+
+        const attempts = [];
+        const pushCandidate = (value, source) => {
+            if (value) attempts.push({ value: value.trim(), source });
+        };
+
+        try {
+            const parentDoc = window.parent?.document;
+            if (parentDoc) {
+                const rootStyle = getComputedStyle(parentDoc.documentElement);
+                const bodyStyle = getComputedStyle(parentDoc.body);
+                pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
+                pushCandidate(bodyStyle.backgroundColor, 'parent body background');
+                pushCandidate(rootStyle.backgroundColor, 'parent root background');
+            }
+        } catch (e) {}
+
+        pushCandidate(getComputedStyle(document.body).backgroundColor, 'iframe body');
+
+        let chosen = attempts.find(c => parseColorString(c.value));
+        if (!chosen) chosen = { value: 'transparent', source: 'default' };
+        const parsed = parseColorString(chosen.value);
+        const luminance = parsed ? parsed.luminance : null;
+
+        let autoTheme = luminance !== null ? (luminance > 150 ? 'light' : 'dark') : 'light';
+        let source = luminance !== null ? `${chosen.source} luminance` : chosen.source;
+
+        try {
+            const parentDoc = window.parent?.document;
+            if (parentDoc) {
+                const themeKind = parentDoc.body.getAttribute('data-vscode-theme-kind');
+                if (themeKind) {
+                    autoTheme = themeKind.includes('light') ? 'light' : 'dark';
+                    source = 'vscode-theme-kind';
+                } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-light')) {
+                    autoTheme = 'light';
+                    source = 'vscode body class';
+                } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-dark')) {
+                    autoTheme = 'dark';
+                    source = 'vscode body class';
+                }
+            }
+        } catch (e) {}
+
+        if (source === 'default' && window.matchMedia) {
+            if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                autoTheme = 'light';
+                source = 'prefers-color-scheme';
+            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                autoTheme = 'dark';
+                source = 'prefers-color-scheme';
+            }
+        }
+
+        return {
+            theme: autoTheme,
+            background: parsed ? (parsed.resolved || parsed.raw || chosen.value) : chosen.value,
+            luminance,
+            source,
+        };
       };
 
       const App = () => {
         const [showMiniMap, setShowMiniMap] = useState(false);
         const [separateOutputs, setSeparateOutputs] = useState(initialSeparateOutputs);
         const [showTypes, setShowTypes] = useState(initialShowTypes);
+        const [debugOverlays, setDebugOverlays] = useState(initialDebugOverlays);
         const [themeDebug, setThemeDebug] = useState({ source: 'init', luminance: null, background: 'transparent', appliedTheme: themePreference });
-        const [detectedTheme, setDetectedTheme] = useState(() => {
-            if (themeUtils?.detectHostTheme) return themeUtils.detectHostTheme();
-            const fallback = parseColorString('transparent');
-            return { theme: themePreference === 'auto' ? 'dark' : themePreference, background: fallback?.resolved || 'transparent', luminance: fallback?.luminance ?? null, source: 'init' };
-        });
+        
+        // Sync debug overlay state with global flag for edge component access
+        useEffect(() => {
+          window.__hypernodes_debug_overlays = debugOverlays;
+        }, [debugOverlays]);
+        const [detectedTheme, setDetectedTheme] = useState(() => detectHostTheme());
         const [manualTheme, setManualTheme] = useState(null);
         const [bgColor, setBgColor] = useState(detectedTheme.background || 'transparent');
         
@@ -832,8 +1085,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }, [manualTheme, resolvedDetected.theme, themePreference]);
         const activeBackground = useMemo(() => {
             if (manualTheme) return manualTheme === 'light' ? '#f8fafc' : '#020617';
-            return resolvedDetected.background || 'transparent';
-        }, [manualTheme, resolvedDetected.background]);
+            
+            const bg = resolvedDetected.background;
+            if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') {
+                return activeTheme === 'light' ? '#f8fafc' : '#020617';
+            }
+            return bg;
+        }, [manualTheme, resolvedDetected.background, activeTheme]);
         const theme = activeTheme;
 
         // Expansion logic
@@ -868,6 +1126,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 });
             }
 
+            // Expose expansion state for debugging
+            window.__hypernodesVizExpansionState = newMap;
+
             return newMap;
           });
         }, []);
@@ -901,69 +1162,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           setEdges(stateResult.edges);
         }, [nodesWithVisibility, stateResult.edges, setNodes, setEdges]);
 
-        const detectHostTheme = useCallback(() => {
-            if (themeUtils?.detectHostTheme) return themeUtils.detectHostTheme();
 
-            const attempts = [];
-            const pushCandidate = (value, source) => {
-                if (value) attempts.push({ value: value.trim(), source });
-            };
-
-            try {
-                const parentDoc = window.parent?.document;
-                if (parentDoc) {
-                    const rootStyle = getComputedStyle(parentDoc.documentElement);
-                    const bodyStyle = getComputedStyle(parentDoc.body);
-                    pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
-                    pushCandidate(bodyStyle.backgroundColor, 'parent body background');
-                    pushCandidate(rootStyle.backgroundColor, 'parent root background');
-                }
-            } catch (e) {}
-
-            pushCandidate(getComputedStyle(document.body).backgroundColor, 'iframe body');
-
-            let chosen = attempts.find(c => parseColorString(c.value));
-            if (!chosen) chosen = { value: 'transparent', source: 'default' };
-            const parsed = parseColorString(chosen.value);
-            const luminance = parsed ? parsed.luminance : null;
-
-            let autoTheme = luminance !== null ? (luminance > 150 ? 'light' : 'dark') : 'dark';
-            let source = luminance !== null ? `${chosen.source} luminance` : chosen.source;
-
-            try {
-                const parentDoc = window.parent?.document;
-                if (parentDoc) {
-                    const themeKind = parentDoc.body.getAttribute('data-vscode-theme-kind');
-                    if (themeKind) {
-                        autoTheme = themeKind.includes('light') ? 'light' : 'dark';
-                        source = 'vscode-theme-kind';
-                    } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-light')) {
-                        autoTheme = 'light';
-                        source = 'vscode body class';
-                    } else if (parentDoc.body.className && parentDoc.body.className.includes('vscode-dark')) {
-                        autoTheme = 'dark';
-                        source = 'vscode body class';
-                    }
-                }
-            } catch (e) {}
-
-            if (source === 'default' && window.matchMedia) {
-                if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-                    autoTheme = 'light';
-                    source = 'prefers-color-scheme';
-                } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                    autoTheme = 'dark';
-                    source = 'prefers-color-scheme';
-                }
-            }
-
-            return {
-                theme: autoTheme,
-                background: parsed ? (parsed.resolved || parsed.raw || chosen.value) : chosen.value,
-                luminance,
-                source,
-            };
-        }, []);
 
         // Theme detection listener (updates detected theme only)
         useEffect(() => {
@@ -1002,22 +1201,36 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         useEffect(() => {
             setBgColor(activeBackground);
             document.body.classList.toggle('light-mode', activeTheme === 'light');
-            if (showThemeDebug) {
-                setThemeDebug({
+            
+            // Poll for node styles for debugging
+            const checkNodeStyles = () => {
+                const node = document.querySelector('.react-flow__node');
+                if (node) {
+                    const computed = window.getComputedStyle(node.querySelector('div') || node); // Target inner div if possible
+                    const nodeBg = computed.backgroundColor;
+                    const nodeClass = (node.querySelector('div') || node).className;
+                    setThemeDebug(prev => ({
+                        ...prev,
+                        nodeBg,
+                        nodeClass: nodeClass.split(' ').find(c => c.startsWith('node-function-')) || 'unknown'
+                    }));
+                }
+            };
+            
+            checkNodeStyles();
+            const interval = setInterval(checkNodeStyles, 1000);
+
+            if (showThemeDebug || debugOverlays) {
+                setThemeDebug(prev => ({
+                    ...prev,
                     source: manualTheme ? 'manual toggle' : resolvedDetected.source,
                     luminance: resolvedDetected.luminance,
                     background: activeBackground,
                     appliedTheme: activeTheme,
-                });
+                }));
             }
-            window.__hypernodesVizThemeState = {
-                ...resolvedDetected,
-                appliedTheme: activeTheme,
-                background: activeBackground,
-                preference: themePreference,
-                manualTheme,
-            };
-        }, [activeTheme, activeBackground, resolvedDetected, showThemeDebug, themePreference, manualTheme]);
+            return () => clearInterval(interval);
+        }, [activeTheme, activeBackground, resolvedDetected, showThemeDebug, themePreference, manualTheme, debugOverlays]);
 
         const toggleTheme = useCallback(() => {
             const current = manualTheme || (themePreference === 'auto' ? resolvedDetected.theme : themePreference);
@@ -1030,7 +1243,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // rfNodes/rfEdges (async via setNodes/setEdges) to avoid stale data on first render
         const compressedEdges = useMemo(() => {
             const compressor = stateUtils.compressEdges || ((nodes, edges) => edges);
-            return compressor(nodesWithVisibility, stateResult.edges);
+            const debugMode = window.__hypernodes_debug_viz || false;
+            return compressor(nodesWithVisibility, stateResult.edges, debugMode);
         }, [nodesWithVisibility, stateResult.edges]);
 
         // Group inputs that share the same targets after compression
@@ -1039,8 +1253,68 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             return grouper(nodesWithVisibility, compressedEdges);
         }, [nodesWithVisibility, compressedEdges]);
 
-        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(groupedNodes, groupedEdges);
+        const { layoutedNodes: rawLayoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth, layoutVersion, isLayouting } = useLayout(groupedNodes, groupedEdges);
         const { fitView } = useReactFlow();
+        const updateNodeInternals = useUpdateNodeInternals();
+        
+        // ========================================================================
+        // FIX: Force edge recalculation after node size changes (collapse/expand)
+        // ========================================================================
+        // PROBLEM: When a pipeline collapses, its DOM element shrinks, but React Flow
+        // caches edge paths based on old handle positions. This causes "hanging arrows".
+        // 
+        // SOLUTION: Wait for layout to complete, then regenerate edges with new IDs.
+        // The new edge components will calculate paths using updated node positions.
+        // ========================================================================
+        
+        // ========================================================================
+        // FIX: Force edge recalculation after collapse/expand
+        // ========================================================================
+        // PROBLEM: When a pipeline collapses, React Flow caches edge paths based on
+        // old node dimensions, causing "hanging arrows".
+        // 
+        // SOLUTION: After expansion state changes, rapidly toggle the theme. This
+        // triggers a full re-render of all nodes and edges, which recalculates
+        // edge paths using current node dimensions. The toggle is imperceptible.
+        // ========================================================================
+        
+        // ========================================================================
+        // FIX: Force edge recalculation after collapse/expand
+        // ========================================================================
+        // We use onTransitionEnd in the CustomNode component to trigger 
+        // updateNodeInternals exactly when the animation finishes.
+        // This replaces the previous hacky theme toggle.
+        // ========================================================================
+        
+        // Add debug mode to layouted nodes
+        const layoutedNodes = useMemo(() => {
+          return rawLayoutedNodes.map(n => ({
+            ...n,
+            data: { ...n.data, debugMode: debugOverlays }
+          }));
+        }, [rawLayoutedNodes, debugOverlays]);
+        
+        // Expose debug layout info to console API
+        useEffect(() => {
+          window.__hypernodesVizLayout = {
+            nodes: layoutedNodes.map(n => ({
+              id: n.id,
+              x: n.position?.x,
+              y: n.position?.y,
+              width: n.style?.width,
+              height: n.style?.height,
+              hidden: n.hidden,
+              nodeType: n.data?.nodeType,
+              isExpanded: n.data?.isExpanded,
+            })),
+            edges: layoutedEdges.map(e => ({
+              id: e.id,
+              source: e.source,
+              target: e.target,
+            })),
+            version: layoutVersion,
+          };
+        }, [layoutedNodes, layoutedEdges, layoutVersion]);
 
         // --- Iframe Resize Logic (Task 2) ---
         useEffect(() => {
@@ -1088,18 +1362,24 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             markerEnd: { type: MarkerType.ArrowClosed, color: theme === 'light' ? '#94a3b8' : '#64748b' },
         };
 
-        const styledEdges = useMemo(() => layoutedEdges.map(e => {
-            const isDataLink = e.data && e.data.isDataLink;
-            return { 
-                ...e, 
-                ...edgeOptions,
-                style: { 
-                    ...edgeOptions.style, 
-                    strokeWidth: isDataLink ? 1.5 : 2,
-                },
-                markerEnd: edgeOptions.markerEnd
-            };
-        }), [layoutedEdges, theme]);
+        // Style edges with theme-appropriate colors
+        const styledEdges = useMemo(() => {
+            if (isLayouting) return []; // Hide edges during layout
+            
+            return layoutedEdges.map(e => {
+                const isDataLink = e.data && e.data.isDataLink;
+                return { 
+                    ...e,
+                    ...edgeOptions,
+                    style: { 
+                        ...edgeOptions.style, 
+                        strokeWidth: isDataLink ? 1.5 : 2,
+                    },
+                    markerEnd: edgeOptions.markerEnd,
+                    data: { ...e.data, debugMode: debugOverlays }
+                };
+            });
+        }, [layoutedEdges, theme, isLayouting, debugOverlays]);
 
         return html`
           <div 
@@ -1140,18 +1420,32 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               <${ViewControls} 
                 separateOutputs=${separateOutputs} 
                 showTypes=${showTypes}
+                debugOverlays=${debugOverlays}
                 onToggleSeparate=${() => setSeparateOutputs(s => !s)}
                 onToggleTypes=${() => setShowTypes(t => !t)}
+                onToggleDebug=${() => setDebugOverlays(d => !d)}
                 theme=${theme} 
               />
-              ${showThemeDebug ? html`
-              <${Panel} position="top-left" className=${`backdrop-blur-sm rounded-lg shadow-lg border text-xs px-3 py-2 mt-3 ml-3 max-w-xs
+              ${(showThemeDebug || debugOverlays) ? html`
+              <${Panel} position="bottom-left" className=${`backdrop-blur-sm rounded-lg shadow-lg border text-xs px-3 py-2 mb-3 ml-3 max-w-xs pointer-events-auto
                     ${theme === 'light' ? 'bg-white/95 border-slate-200 text-slate-700' : 'bg-slate-900/90 border-slate-700 text-slate-200'}`}>
-                  <div className="text-[10px] font-semibold tracking-wide uppercase opacity-70">Theme debug</div>
-                  <div className="mt-0.5">Applied: <span className="font-semibold">${theme}</span> (pref: ${themePreference})</div>
-                  <div>Source: ${themeDebug.source || 'n/a'}</div>
-                  <div className="truncate" title=${bgColor}>BG: ${bgColor || 'transparent'}</div>
-                  ${themeDebug.luminance !== null ? html`<div>Luma: ${Math.round(themeDebug.luminance)}</div>` : null}
+                  <div className="text-[10px] font-semibold tracking-wide uppercase opacity-70 mb-1">Theme Debug</div>
+                  <div className="grid grid-cols-[60px_1fr] gap-x-2 gap-y-0.5">
+                      <div className="opacity-70">Active:</div>
+                      <div className="font-semibold">${theme}</div>
+                      
+                      <div className="opacity-70">Source:</div>
+                      <div className="truncate" title=${themeDebug.source}>${themeDebug.source || 'n/a'}</div>
+                      
+                      <div className="opacity-70">BG Color:</div>
+                      <div className="font-mono text-[10px] truncate" title=${bgColor}>${bgColor}</div>
+                      
+                      <div className="opacity-70">Node BG:</div>
+                      <div className="font-mono text-[10px] truncate" title=${themeDebug.nodeBg}>${themeDebug.nodeBg || '...'}</div>
+                      
+                      <div className="opacity-70">Node Cls:</div>
+                      <div className="font-mono text-[10px] truncate" title=${themeDebug.nodeClass}>${themeDebug.nodeClass || '...'}</div>
+                  </div>
               <//>
               ` : null}
               ${showMiniMap ? html`
@@ -1161,6 +1455,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 nodeColor=${(n) => theme === 'light' ? '#cbd5e1' : '#475569'}
               />
               ` : null}
+              ${debugOverlays ? html`<${DebugOverlay} nodes=${layoutedNodes} edges=${styledEdges} enabled=${debugOverlays} theme=${theme} />` : null}
             <//>
             ${(layoutError || (!layoutedNodes.length && rfNodes.length) || (!rfNodes.length)) ? html`
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
