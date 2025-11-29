@@ -162,6 +162,31 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
       const html = htm.bind(React.createElement);
       const elk = new ELK();
+      
+      // === LAYOUT CONSTANTS ===
+      // Truncation limit for type hints (both display and width calculation)
+      const TYPE_HINT_MAX_CHARS = 25;
+      // Truncation limit for node labels (function names, pipeline names)
+      const NODE_LABEL_MAX_CHARS = 25;
+      // Character width estimate for monospace font (text-xs ~12px)
+      const CHAR_WIDTH_PX = 7;
+      // Base padding for nodes: px-3 (12px) * 2 + icon (12px) + gaps (16px) = 52px
+      const NODE_BASE_PADDING = 52;
+      // Base padding for function nodes (now simpler without FUNCTION label)
+      const FUNCTION_NODE_BASE_PADDING = 48;
+      // Maximum node width to ensure uniform appearance
+      const MAX_NODE_WIDTH = 280;
+      
+      // Helper to truncate type hints consistently
+      const truncateTypeHint = (type) => type && type.length > TYPE_HINT_MAX_CHARS 
+        ? type.substring(0, TYPE_HINT_MAX_CHARS) + '...' 
+        : type;
+      
+      // Helper to truncate node labels consistently
+      const truncateLabel = (label) => label && label.length > NODE_LABEL_MAX_CHARS 
+        ? label.substring(0, NODE_LABEL_MAX_CHARS) + '...' 
+        : label;
+      
       const fallbackApplyState = (baseNodes, baseEdges, options) => {
         const { expansionState, separateOutputs, showTypes, theme } = options;
         const expMap = expansionState instanceof Map ? expansionState : new Map(Object.entries(expansionState || {}));
@@ -301,7 +326,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       // --- Custom Controls ---
-      const CustomControls = ({ theme, onToggleTheme, showMiniMap, onToggleMiniMap, separateOutputs, onToggleSeparate, showTypes, onToggleTypes }) => {
+      const CustomControls = ({ theme, onToggleTheme, separateOutputs, onToggleSeparate, showTypes, onToggleTypes }) => {
         const { zoomIn, zoomOut, fitView, setCenter } = useReactFlow();
 
         return html`
@@ -314,9 +339,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 <//>
                 <${TooltipButton} onClick=${() => fitView({ padding: 0.2, duration: 200 })} tooltip="Fit View" theme=${theme}>
                     <${Icons.Center} />
-                <//>
-                <${TooltipButton} onClick=${onToggleMiniMap} tooltip="Toggle Minimap" isActive=${showMiniMap} theme=${theme}>
-                    <${Icons.Map} />
                 <//>
                 <div className=${`h-px my-1 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
                 <${TooltipButton} onClick=${onToggleSeparate} tooltip=${separateOutputs ? "Merge Outputs" : "Separate Outputs"} isActive=${separateOutputs} theme=${theme}>
@@ -343,13 +365,13 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const borderClass = isLight ? "border-slate-100" : "border-slate-800/50";
         
         return html`
-            <div className=${`px-3 py-2.5 border-t transition-all duration-300 ${bgClass} ${borderClass}`}>
-                <div className="flex flex-col items-start gap-2">
+            <div className=${`px-2 py-2 border-t transition-all duration-300 overflow-hidden ${bgClass} ${borderClass}`}>
+                <div className="flex flex-col items-center gap-1.5">
                     ${outputs.map(out => html`
-                        <div key=${out.name} className=${`flex items-center gap-2 text-xs max-w-full overflow-hidden ${textClass}`}>
+                        <div key=${out.name} className=${`flex items-center gap-1.5 text-xs max-w-full ${textClass}`}>
                             <span className=${`shrink-0 ${arrowClass}`}>→</span>
                             <span className="font-mono font-medium shrink-0">${out.name}</span>
-                            ${showTypes && out.type ? html`<span className=${`font-mono truncate min-w-0 ${typeClass}`} title=${out.type}>: ${out.type}</span>` : null}
+                            ${showTypes && out.type ? html`<span className=${`font-mono truncate ${typeClass}`} title=${out.type}>: ${truncateTypeHint(out.type)}</span>` : null}
                         </div>
                     `)}
                 </div>
@@ -358,24 +380,104 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       // --- Debug Overlay Component ---
-      // Shows node bounding boxes and edge connection points for debugging layout issues
+      // Shows node bounding boxes, dimensions, and edge connection points for debugging layout issues
       const DebugOverlay = ({ nodes, edges, enabled, theme }) => {
         const [showPanel, setShowPanel] = useState(true);
+        const [activeTab, setActiveTab] = useState('bounds'); // 'bounds', 'widths', or 'texts'
         
         if (!enabled) return null;
         
         const visibleNodes = nodes.filter(n => !n.hidden);
         const isLight = theme === 'light';
         
-        // Calculate node boundaries
-        const nodeBounds = visibleNodes.map(n => ({
-          id: n.id,
-          shortId: n.id.length > 20 ? n.id.slice(-18) + '..' : n.id,
-          y: Math.round(n.position?.y || 0),
-          height: Math.round(n.style?.height || 68),
-          bottom: Math.round((n.position?.y || 0) + (n.style?.height || 68)),
-          nodeType: n.data?.nodeType,
-        }));
+        // Calculate node boundaries and widths
+        const nodeBounds = visibleNodes.map(n => {
+          const elkWidth = Math.round(n.style?.width || 200);
+          const label = n.data?.label || '';
+          const typeHint = n.data?.typeHint || '';
+          const showTypes = n.data?.showTypes;
+          const params = n.data?.params || [];
+          const paramTypes = n.data?.paramTypes || [];
+          const outputs = n.data?.outputs || [];
+          
+          // Calculate what width SHOULD be based on content
+          let expectedWidth = 0;
+          let contentDesc = '';
+          let longestText = '';
+          let longestTextLen = 0;
+          let allTexts = [];
+          
+          if (n.data?.nodeType === 'DATA' || n.data?.nodeType === 'INPUT') {
+            // Formula: (labelLen + typeLen) * CHAR_WIDTH_PX + NODE_BASE_PADDING (both truncated)
+            const truncLabelLen = Math.min(label.length, NODE_LABEL_MAX_CHARS);
+            const typeLen = (showTypes && typeHint) ? Math.min(typeHint.length, TYPE_HINT_MAX_CHARS) + 2 : 0;
+            expectedWidth = Math.min(MAX_NODE_WIDTH, (truncLabelLen + typeLen) * CHAR_WIDTH_PX + NODE_BASE_PADDING);
+            contentDesc = showTypes && typeHint ? `${label}: ${typeHint}` : label;
+            allTexts = [{ text: label, len: label.length, kind: 'label', truncated: label.length > NODE_LABEL_MAX_CHARS }];
+            if (typeHint) allTexts.push({ text: typeHint, len: typeHint.length, kind: 'type', truncated: typeHint.length > TYPE_HINT_MAX_CHARS });
+            longestText = typeHint && typeHint.length > label.length ? typeHint : label;
+            longestTextLen = Math.max(label.length, typeHint ? typeHint.length : 0);
+          } else if (n.data?.nodeType === 'INPUT_GROUP') {
+            // Find longest param + type (both truncated)
+            let maxLen = 0;
+            params.forEach((p, i) => {
+              const pLen = p ? p.length : 0;
+              const truncPLen = Math.min(pLen, NODE_LABEL_MAX_CHARS);
+              const t = paramTypes[i] || '';
+              allTexts.push({ text: p, len: pLen, kind: 'param', truncated: pLen > NODE_LABEL_MAX_CHARS });
+              if (t) allTexts.push({ text: t, len: t.length, kind: 'type', truncated: t.length > TYPE_HINT_MAX_CHARS });
+              let len = truncPLen;
+              if (showTypes && t) {
+                len += 2 + Math.min(t.length, TYPE_HINT_MAX_CHARS);
+              }
+              if (len > maxLen) {
+                maxLen = len;
+                longestText = showTypes && t ? `${p}: ${t}` : p;
+              }
+            });
+            longestTextLen = maxLen;
+            expectedWidth = Math.min(MAX_NODE_WIDTH, maxLen * CHAR_WIDTH_PX + NODE_BASE_PADDING);
+            contentDesc = params.join(', ');
+          } else if (n.data?.nodeType === 'FUNCTION' || n.data?.nodeType === 'PIPELINE') {
+            // Function/Pipeline nodes with outputs (label and output types truncated)
+            allTexts = [{ text: label, len: label.length, kind: 'label', truncated: label.length > NODE_LABEL_MAX_CHARS }];
+            longestText = label;
+            longestTextLen = label.length;
+            outputs.forEach(out => {
+              const outName = out.name || '';
+              const outType = out.type || '';
+              allTexts.push({ text: outName, len: outName.length, kind: 'output', truncated: outName.length > NODE_LABEL_MAX_CHARS });
+              if (outType) allTexts.push({ text: outType, len: outType.length, kind: 'type', truncated: outType.length > TYPE_HINT_MAX_CHARS });
+              const combined = showTypes && outType ? `${outName}: ${outType}` : outName;
+              if (combined.length > longestTextLen) {
+                longestText = combined;
+                longestTextLen = combined.length;
+              }
+            });
+          }
+          
+          return {
+            id: n.id,
+            shortId: n.id.length > 20 ? n.id.slice(-18) + '..' : n.id,
+            y: Math.round(n.position?.y || 0),
+            height: Math.round(n.style?.height || 68),
+            bottom: Math.round((n.position?.y || 0) + (n.style?.height || 68)),
+            nodeType: n.data?.nodeType,
+            width: elkWidth,
+            expectedWidth,
+            widthDiff: elkWidth - expectedWidth,
+            contentDesc: contentDesc.length > 25 ? contentDesc.slice(0, 22) + '...' : contentDesc,
+            label,
+            typeHint: typeHint || '',
+            longestText,
+            longestTextLen,
+            allTexts,
+            isTruncated: longestTextLen > TYPE_HINT_MAX_CHARS,
+          };
+        });
+        
+        // Filter to only show DATA/INPUT/INPUT_GROUP for width debugging
+        const inputNodes = nodeBounds.filter(n => ['DATA', 'INPUT', 'INPUT_GROUP'].includes(n.nodeType));
         
         const handleCopy = () => {
             const info = {
@@ -391,18 +493,35 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           <${React.Fragment}>
             <${Panel} position="top-center" className="pointer-events-none">
               <div className=${`text-[10px] font-mono px-2 py-1 rounded ${isLight ? 'bg-red-100 text-red-800' : 'bg-red-900/80 text-red-200'}`}>
-                DEBUG: Green=source, Blue=target | Check if edge Y matches node bottom/top
+                DEBUG: Green=source, Blue=target | Yellow highlight = width mismatch
               </div>
             <//>
             <${Panel} position="top-right" className="mt-16 mr-4 pointer-events-auto flex flex-col gap-2">
-              <div className=${`rounded-lg border shadow-xl max-h-[50vh] overflow-hidden flex flex-col ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'}`}>
+              <div className=${`rounded-lg border shadow-xl max-h-[60vh] overflow-hidden flex flex-col ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'}`}>
                 <div className="flex items-center border-b border-slate-500/20">
                     <button 
-                      onClick=${() => setShowPanel(p => !p)}
-                      className=${`flex-1 px-3 py-1.5 text-[10px] font-bold tracking-wide flex items-center justify-between ${isLight ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-red-900/50 text-red-300 hover:bg-red-900/70'}`}
+                      onClick=${() => setActiveTab('bounds')}
+                      className=${`flex-1 px-3 py-1.5 text-[10px] font-bold tracking-wide ${activeTab === 'bounds' ? (isLight ? 'bg-red-100 text-red-800' : 'bg-red-900/50 text-red-300') : (isLight ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-slate-800 text-slate-400 hover:bg-slate-700')}`}
                     >
-                      <span>NODE BOUNDS (Y)</span>
-                      <span>${showPanel ? '▼' : '▶'}</span>
+                      BOUNDS
+                    </button>
+                    <button 
+                      onClick=${() => setActiveTab('widths')}
+                      className=${`flex-1 px-3 py-1.5 text-[10px] font-bold tracking-wide border-l border-slate-500/20 ${activeTab === 'widths' ? (isLight ? 'bg-amber-100 text-amber-800' : 'bg-amber-900/50 text-amber-300') : (isLight ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-slate-800 text-slate-400 hover:bg-slate-700')}`}
+                    >
+                      WIDTHS
+                    </button>
+                    <button 
+                      onClick=${() => setActiveTab('texts')}
+                      className=${`flex-1 px-3 py-1.5 text-[10px] font-bold tracking-wide border-l border-slate-500/20 ${activeTab === 'texts' ? (isLight ? 'bg-cyan-100 text-cyan-800' : 'bg-cyan-900/50 text-cyan-300') : (isLight ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-slate-800 text-slate-400 hover:bg-slate-700')}`}
+                    >
+                      TEXTS
+                    </button>
+                    <button 
+                      onClick=${() => setShowPanel(p => !p)}
+                      className=${`px-3 py-1.5 text-[10px] font-bold tracking-wide border-l border-slate-500/20 ${isLight ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                    >
+                      ${showPanel ? '▼' : '▶'}
                     </button>
                     <button 
                       onClick=${handleCopy}
@@ -412,8 +531,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                       COPY
                     </button>
                 </div>
-                ${showPanel ? html`
-                  <div className="overflow-y-auto max-h-[40vh]">
+                ${showPanel && activeTab === 'bounds' ? html`
+                  <div className="overflow-y-auto max-h-[50vh]">
                     <table className=${`text-[9px] font-mono w-full ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
                       <thead className=${`sticky top-0 ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
                         <tr>
@@ -432,6 +551,72 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                             <td className="px-2 py-0.5 text-right font-bold text-amber-500">${n.bottom}</td>
                           </tr>
                         `)}
+                      </tbody>
+                    </table>
+                  </div>
+                ` : null}
+                ${showPanel && activeTab === 'widths' ? html`
+                  <div className="overflow-y-auto max-h-[50vh]">
+                    <div className="px-2 py-1 text-[8px] font-mono ${isLight ? 'bg-amber-50 text-amber-800' : 'bg-amber-900/30 text-amber-300'}">
+                      Formula: (labelLen + typeLen) * 7 + 52 | Green = OK, Yellow = too wide, Red = too narrow
+                    </div>
+                    <table className=${`text-[9px] font-mono w-full ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <thead className=${`sticky top-0 ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
+                        <tr>
+                          <th className="px-2 py-1 text-left">Node</th>
+                          <th className="px-2 py-1 text-left">Content</th>
+                          <th className="px-2 py-1 text-right">ELK W</th>
+                          <th className="px-2 py-1 text-right">Expect</th>
+                          <th className="px-2 py-1 text-right">Diff</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${inputNodes.map((n, i) => {
+                          const diffClass = n.widthDiff > 20 ? 'text-amber-500' : n.widthDiff < -5 ? 'text-red-500' : 'text-green-500';
+                          return html`
+                            <tr key=${n.id} className=${`${i % 2 === 0 ? (isLight ? 'bg-white' : 'bg-slate-900') : (isLight ? 'bg-slate-50' : 'bg-slate-800/50')}`}>
+                              <td className="px-2 py-0.5 truncate max-w-[80px]" title=${n.id}>${n.shortId}</td>
+                              <td className="px-2 py-0.5 truncate max-w-[100px]" title=${n.contentDesc}>${n.contentDesc}</td>
+                              <td className="px-2 py-0.5 text-right">${n.width}</td>
+                              <td className="px-2 py-0.5 text-right">${n.expectedWidth}</td>
+                              <td className=${`px-2 py-0.5 text-right font-bold ${diffClass}`}>${n.widthDiff > 0 ? '+' : ''}${n.widthDiff}</td>
+                            </tr>
+                          `;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ` : null}
+                ${showPanel && activeTab === 'texts' ? html`
+                  <div className="overflow-y-auto max-h-[50vh]">
+                    <div className="px-2 py-1 text-[8px] font-mono ${isLight ? 'bg-cyan-50 text-cyan-800' : 'bg-cyan-900/30 text-cyan-300'}">
+                      Type hints truncated at K=${TYPE_HINT_MAX_CHARS} chars | Red = truncated
+                    </div>
+                    <table className=${`text-[9px] font-mono w-full ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <thead className=${`sticky top-0 ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
+                        <tr>
+                          <th className="px-2 py-1 text-left">Node</th>
+                          <th className="px-2 py-1 text-left">Type</th>
+                          <th className="px-2 py-1 text-left">Label</th>
+                          <th className="px-2 py-1 text-left">TypeHint (full)</th>
+                          <th className="px-2 py-1 text-right">Longest</th>
+                          <th className="px-2 py-1 text-right">W</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${nodeBounds.map((n, i) => {
+                          const truncClass = n.isTruncated ? 'text-red-500' : 'text-green-500';
+                          return html`
+                            <tr key=${n.id} className=${`${i % 2 === 0 ? (isLight ? 'bg-white' : 'bg-slate-900') : (isLight ? 'bg-slate-50' : 'bg-slate-800/50')}`}>
+                              <td className="px-2 py-0.5 truncate max-w-[80px]" title=${n.id}>${n.shortId}</td>
+                              <td className="px-2 py-0.5">${n.nodeType || '-'}</td>
+                              <td className="px-2 py-0.5 truncate max-w-[80px]" title=${n.label}>${n.label || '-'}</td>
+                              <td className=${`px-2 py-0.5 truncate max-w-[120px] ${n.typeHint && n.typeHint.length > TYPE_HINT_MAX_CHARS ? 'text-red-500 font-bold' : ''}`} title=${n.typeHint}>${n.typeHint || '-'}</td>
+                              <td className=${`px-2 py-0.5 text-right ${truncClass}`}>${n.longestTextLen}</td>
+                              <td className="px-2 py-0.5 text-right">${n.width}</td>
+                            </tr>
+                          `;
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -571,6 +756,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const showTypes = data.showTypes;
             const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
             const hasTypeHint = showTypes && data.typeHint;
+            // Truncate type hint display using global constant
+            const displayTypeHint = truncateTypeHint(data.typeHint);
             return html`
                 <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-colors transition-shadow duration-200 hover:shadow-lg overflow-hidden
                     ${showAsOutput ? 'ring-2 ring-emerald-500/30' : ''}
@@ -580,7 +767,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 `}>
                      <span className=${`shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`}><${Icon} /></span>
                      <span className="text-xs font-mono font-medium shrink-0">${data.label}</span>
-                     ${hasTypeHint ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${data.typeHint}>: ${data.typeHint}</span>` : null}
+                     ${hasTypeHint ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${data.typeHint}>: ${displayTypeHint}</span>` : null}
                      <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-2px' }} />
                      <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
@@ -595,17 +782,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
              const typeHint = data.typeHint;
              const hasType = showTypes && typeHint;
              const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
+             // Truncate type hint using global constant
+             const displayType = truncateTypeHint(typeHint);
              // Reuse DATA node styling but preserve dashed border for bound inputs
              return html`
-                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-colors transition-shadow duration-200 hover:shadow-lg
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-colors transition-shadow duration-200 hover:shadow-lg overflow-hidden
                     ${isBound ? 'border-dashed' : ''}
                     ${isLight 
                         ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200 hover:border-slate-300' 
                         : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50 hover:border-slate-600'}
                 `}>
-                    <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} /></span>
-                    <span className="text-xs font-mono font-medium truncate">${data.label}</span>
-                    ${hasType ? html`<span className=${`text-[10px] font-mono truncate ${typeClass}`}>: ${typeHint}</span>` : null}
+                    <span className=${`shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`}><${Icons.Data} /></span>
+                    <span className="text-xs font-mono font-medium shrink-0">${data.label}</span>
+                    ${hasType ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${typeHint}>: ${displayType}</span>` : null}
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
              `;
@@ -631,7 +820,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                         <div className="flex items-center gap-2 whitespace-nowrap">
                             <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} className="w-3 h-3" /></span>
                             <div className="text-xs font-mono leading-tight">${p}</div>
-                            ${showTypes && paramTypes[i] ? html`<span className=${`text-[10px] font-mono ${typeClass}`}>: ${paramTypes[i]}</span>` : null}
+                            ${showTypes && paramTypes[i] ? html`<span className=${`text-[10px] font-mono ${typeClass}`} title=${paramTypes[i]}>: ${truncateTypeHint(paramTypes[i])}</span>` : null}
                         </div>
                     `)}
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
@@ -661,9 +850,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                             ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200'
                             : 'bg-slate-950 text-amber-400 hover:text-amber-300 border border-amber-500/50'}
                    `}
-                   onClick=${handleCollapseClick}>
+                   onClick=${handleCollapseClick}
+                   title=${data.label}>
                 <${Icon} />
-                ${data.label}
+                ${truncateLabel(data.label)}
                 <span className="text-[9px] opacity-60 normal-case font-normal ml-1">Click to collapse</span>
               </button>
               <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" />
@@ -682,30 +872,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         return html`
           <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-colors transition-shadow duration-200 cursor-pointer node-function-${theme} overflow-hidden
                ${isLight 
-                 ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200 hover:shadow-lg`
-                 : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/20 hover:shadow-lg`}
+                 ? `bg-white/90 border-${colors.border}-300 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200 hover:shadow-lg`
+                 : `bg-slate-950/90 border-${colors.border}-500/40 shadow-black/50 hover:border-${colors.border}-500/70 hover:shadow-${colors.border}-500/20 hover:shadow-lg`}
                `}
                onClick=${data.nodeType === 'PIPELINE' ? (e) => { e.stopPropagation(); if(data.onToggleExpand) data.onToggleExpand(); } : undefined}>
             
             <!-- Header -->
-            <div className=${`px-4 py-2.5 flex items-center gap-3
+            <div className=${`px-3 py-2.5 flex flex-col items-center justify-center
                  ${showCombined ? (isLight ? 'border-b border-slate-100' : 'border-b border-slate-800/50') : ''}`}>
-              <div className=${`p-1.5 rounded-md shrink-0
-                   ${isLight 
-                     ? `bg-${colors.bg}-50 text-${colors.text}-600` 
-                     : `bg-${colors.bg}-500/10 text-${colors.text}-400 border border-${colors.border}-500/20`}`}>
-                <${Icon} />
-                </div>
-              <div className="min-w-0 flex-1">
-                <div className=${`text-[9px] font-bold tracking-wider uppercase mb-0.5
-                     ${isLight ? `text-${colors.text}-600` : `text-${colors.text}-400`}`}>${labelType}</div>
-                <div className=${`text-sm font-semibold truncate
-                     ${isLight ? 'text-slate-800' : 'text-slate-100'}`} title=${data.label}>${data.label}</div>
-            </div>
+              <div className=${`text-sm font-semibold truncate max-w-full text-center
+                   ${isLight ? 'text-slate-800' : 'text-slate-100'}`} title=${data.label}>${truncateLabel(data.label)}</div>
 
               <!-- Bound Input Badge -->
               ${boundInputs > 0 ? html`
-                  <div className=${`w-2 h-2 rounded-full ring-2 ring-offset-1
+                  <div className=${`absolute top-2 right-2 w-2 h-2 rounded-full ring-2 ring-offset-1
                       ${isLight 
                           ? 'bg-indigo-400 ring-indigo-100 ring-offset-white' 
                           : 'bg-indigo-500 ring-indigo-500/30 ring-offset-slate-950'}`}
@@ -775,70 +955,86 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
             
             const mapToElk = (n) => {
-                let width = 200;
+                let width = 80; // Small default, will be calculated based on content
                 let height = 90;
                 
                 if (n.data?.nodeType === 'DATA') {
-                    width = 140;
                     height = 36;
-                    // Calculate width based on label + optional type hint
-                    const labelLen = n.data.label ? n.data.label.length : 0;
-                    const typeLen = (n.data.showTypes && n.data.typeHint) ? Math.min(n.data.typeHint.length, 15) : 0;
-                    width = Math.max(100, (labelLen + typeLen + 4) * 7 + 50);
+                    // Calculate width based on label + optional type hint (both truncated)
+                    const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
+                    const typeLen = (n.data.showTypes && n.data.typeHint) ? Math.min(n.data.typeHint.length, TYPE_HINT_MAX_CHARS) + 2 : 0; // +2 for ": "
+                    width = Math.min(MAX_NODE_WIDTH, (labelLen + typeLen) * CHAR_WIDTH_PX + NODE_BASE_PADDING);
                 } else if (n.data?.nodeType === 'PIPELINE' && !n.data?.isExpanded) {
-                    // Collapsed pipeline - compact size based on label
-                    const labelLen = n.data.label ? n.data.label.length : 10;
-                    width = Math.max(140, labelLen * 8 + 80);
-                    height = 68;
+                    // Collapsed pipeline - dynamic width based on label and outputs
+                    const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
+                    let maxContentLen = labelLen;
+                    
+                    // Consider output widths if combined (separateOutputs=false)
+                    // Note: outputs from fallbackApplyState have { name, type }, not { label, typeHint }
+                    const outputs = n.data.outputs || [];
+                    if (!n.data.separateOutputs && outputs.length > 0) {
+                        outputs.forEach(o => {
+                            const outName = o.name || o.label || '';
+                            const outType = o.type || o.typeHint || '';
+                            const outLabelLen = Math.min(outName.length, NODE_LABEL_MAX_CHARS);
+                            const outTypeLen = (n.data.showTypes && outType) ? Math.min(outType.length, TYPE_HINT_MAX_CHARS) + 2 : 0;
+                            const totalLen = outLabelLen + outTypeLen + 4; // +4 for arrow "→ " and spacing
+                            if (totalLen > maxContentLen) maxContentLen = totalLen;
+                        });
+                    }
+                    width = Math.min(MAX_NODE_WIDTH, maxContentLen * CHAR_WIDTH_PX + FUNCTION_NODE_BASE_PADDING);
+                    height = 52; // Compact height without label
                     
                     // Add height for outputs if combined
-                    // FIX: Measured actual DOM heights:
-                    // - Header with label: ~60px (py-2.5 padding + content)
-                    // - Outputs section: ~38px for 1 output, +24px per additional
-                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
-                        height = 60 + 38 + ((n.data.outputs.length - 1) * 24);
+                    if (!n.data.separateOutputs && outputs.length > 0) {
+                        height = 44 + 38 + ((outputs.length - 1) * 24);
                     }
                 } else if (n.data?.nodeType === 'INPUT') {
-                    width = 160;
                     height = 30;
+                    // Calculate width based on label + optional type hint (both truncated)
+                    const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
+                    const typeLen = (n.data.showTypes && n.data.typeHint) ? Math.min(n.data.typeHint.length, TYPE_HINT_MAX_CHARS) + 2 : 0; // +2 for ": "
+                    width = Math.min(MAX_NODE_WIDTH, (labelLen + typeLen) * CHAR_WIDTH_PX + NODE_BASE_PADDING);
                 } else if (n.data?.nodeType === 'INPUT_GROUP') {
-                    width = 200;
-                    // Dynamic height based on number of inputs
-                    const paramCount = n.data.params ? n.data.params.length : 1;
-                    height = 14 + (paramCount * 20);
-                } else {
-                    // Standard Function Node
-                    // Base width for label
-                    const labelLen = n.data.label ? n.data.label.length : 10;
-                    let calculatedWidth = Math.max(180, labelLen * 8 + 80);
-
-                    // If outputs are combined (separateOutputs=false), check if we need more width for them
-                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
-                        let maxOutputLen = 0;
-                        n.data.outputs.forEach(out => {
-                            // "→ " + name + ": " + type
-                            let len = 2 + (out.name ? out.name.length : 0);
-                            if (n.data.showTypes && out.type) {
-                                len += 2 + out.type.length;
-                            }
-                            if (len > maxOutputLen) maxOutputLen = len;
-                        });
-                        // Approx 7px per char + padding
-                        const requiredOutputWidth = (maxOutputLen * 7) + 50; 
-                        if (requiredOutputWidth > calculatedWidth) {
-                            calculatedWidth = requiredOutputWidth;
+                    // Calculate width based on longest param + type combination (both truncated)
+                    const params = n.data.params || [];
+                    const paramTypes = n.data.paramTypes || [];
+                    let maxLen = 0;
+                    params.forEach((p, i) => {
+                        let len = Math.min(p ? p.length : 0, NODE_LABEL_MAX_CHARS); // Truncate param name
+                        if (n.data.showTypes && paramTypes[i]) {
+                            len += 2 + Math.min(paramTypes[i].length, TYPE_HINT_MAX_CHARS); // ": " + truncated type
                         }
-                    }
+                        if (len > maxLen) maxLen = len;
+                    });
+                    width = Math.min(MAX_NODE_WIDTH, maxLen * CHAR_WIDTH_PX + NODE_BASE_PADDING);
+                    // Dynamic height based on number of inputs
+                    const paramCount = params.length || 1;
+                    height = 14 + (paramCount * 22);
+                } else {
+                    // Standard Function Node - dynamic width based on label and outputs
+                    const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
+                    let maxContentLen = labelLen;
                     
-                    width = calculatedWidth;
-                    height = 68; // Default height
+                    // Consider output widths if combined (separateOutputs=false)
+                    // Note: outputs from fallbackApplyState have { name, type }, not { label, typeHint }
+                    const outputs = n.data.outputs || [];
+                    if (!n.data.separateOutputs && outputs.length > 0) {
+                        outputs.forEach(o => {
+                            const outName = o.name || o.label || '';
+                            const outType = o.type || o.typeHint || '';
+                            const outLabelLen = Math.min(outName.length, NODE_LABEL_MAX_CHARS);
+                            const outTypeLen = (n.data.showTypes && outType) ? Math.min(outType.length, TYPE_HINT_MAX_CHARS) + 2 : 0;
+                            const totalLen = outLabelLen + outTypeLen + 4; // +4 for arrow "→ " and spacing
+                            if (totalLen > maxContentLen) maxContentLen = totalLen;
+                        });
+                    }
+                    width = Math.min(MAX_NODE_WIDTH, maxContentLen * CHAR_WIDTH_PX + FUNCTION_NODE_BASE_PADDING);
+                    height = 52; // Compact height without FUNCTION/PIPELINE label
                     
                     // Add height for outputs if combined
-                    // FIX: Measured actual DOM heights:
-                    // - Header with label: ~60px (py-2.5 padding + content)
-                    // - Outputs section: ~38px for 1 output, +24px per additional
-                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
-                        height = 60 + 38 + ((n.data.outputs.length - 1) * 24);
+                    if (!n.data.separateOutputs && outputs.length > 0) {
+                        height = 44 + 38 + ((outputs.length - 1) * 24);
                     }
                 }
                 
@@ -1092,7 +1288,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       const App = () => {
-        const [showMiniMap, setShowMiniMap] = useState(false);
         const [separateOutputs, setSeparateOutputs] = useState(initialSeparateOutputs);
         const [showTypes, setShowTypes] = useState(initialShowTypes);
         const [debugOverlays, setDebugOverlays] = useState(initialDebugOverlays);
@@ -1519,8 +1714,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               <${CustomControls} 
                 theme=${theme} 
                 onToggleTheme=${toggleTheme} 
-                showMiniMap=${showMiniMap} 
-                onToggleMiniMap=${() => setShowMiniMap(m => !m)}
                 separateOutputs=${separateOutputs}
                 onToggleSeparate=${() => setSeparateOutputs(s => !s)}
                 showTypes=${showTypes}
@@ -1547,13 +1740,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                       <div className="font-mono text-[10px] truncate" title=${themeDebug.nodeClass}>${themeDebug.nodeClass || '...'}</div>
                   </div>
               <//>
-              ` : null}
-              ${showMiniMap ? html`
-              <${MiniMap} 
-                className=${theme === 'light' ? '!bg-white !border-slate-200 !shadow-xl rounded-lg overflow-hidden' : '!bg-slate-900 !border-slate-700 !shadow-xl rounded-lg overflow-hidden'}
-                maskColor=${theme === 'light' ? 'rgba(241, 245, 249, 0.6)' : 'rgba(15, 23, 42, 0.6)'}
-                nodeColor=${(n) => theme === 'light' ? '#cbd5e1' : '#475569'}
-              />
               ` : null}
               ${debugOverlays ? html`<${DebugOverlay} nodes=${layoutedNodes} edges=${styledEdges} enabled=${debugOverlays} theme=${theme} />` : null}
             <//>

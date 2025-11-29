@@ -19,19 +19,21 @@ from .style import DESIGN_STYLES, GraphvizTheme
 class GraphvizRenderer:
     """Renders VisualizationGraph to Graphviz SVG via DOT format."""
 
-    def __init__(self, style: Union[str, GraphvizTheme] = "default", separate_outputs: bool = False):
+    def __init__(self, style: Union[str, GraphvizTheme] = "default", separate_outputs: bool = False, show_types: bool = False):
         """Initialize the renderer.
         
         Args:
             style: Visual style for the graph (theme name or GraphvizTheme object)
             separate_outputs: If True, render outputs as separate nodes.
                             If False (default), combine function nodes with their outputs.
+            show_types: If True, show type hints on nodes. Default is False.
         """
         if isinstance(style, str):
             self.style = DESIGN_STYLES.get(style, DESIGN_STYLES["default"])
         else:
             self.style = style
         self.separate_outputs = separate_outputs
+        self.show_types = show_types
         self.lines: List[str] = []
         self._indent_level = 0
         self.graph_data: Optional[VisualizationGraph] = None
@@ -222,7 +224,7 @@ class GraphvizRenderer:
             for sub_node in node.nodes:
                 label = sub_node.name
                 type_hint = getattr(sub_node, "type_hint", None)
-                if type_hint:
+                if self.show_types and type_hint:
                     label += f" : {type_hint}"
 
                 label_html = self._format_label_html(
@@ -235,7 +237,7 @@ class GraphvizRenderer:
             label = self._get_label(node)
             # Add type hint if available
             type_hint = getattr(node, "type_hint", None)
-            if type_hint:
+            if self.show_types and type_hint:
                 label += f" : {type_hint}"
 
             label_html = self._format_label_html(
@@ -328,7 +330,7 @@ class GraphvizRenderer:
 
                 # Add type hint if available
                 type_hint = getattr(out, "type_hint", None)
-                if type_hint:
+                if self.show_types and type_hint:
                     out_label_esc += f" : <I>{html.escape(type_hint)}</I>"
 
                 # Use same text color - outputs are typically not bold unless specified otherwise

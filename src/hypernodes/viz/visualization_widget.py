@@ -20,7 +20,7 @@ class PipelineWidget(widgets.HTML):
         theme: str = "auto",
         depth: Optional[int] = 1,
         group_inputs: bool = True,
-        show_types: bool = True,
+        show_types: bool = False,
         separate_outputs: bool = False,
         theme_debug: bool = False,
         **kwargs: Any,

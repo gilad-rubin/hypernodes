@@ -10,12 +10,18 @@ A comprehensive guide to working with the React Flow + ELK based visualization s
 2. [Dependencies & Versions](#dependencies--versions)
 3. [Data Flow](#data-flow)
 4. [Node Height Calculations](#node-height-calculations)
-5. [Edge & Handle System](#edge--handle-system)
-6. [Debugging Tools](#debugging-tools)
-7. [Testing with Playwright](#testing-with-playwright)
-8. [Common Issues & Solutions](#common-issues--solutions)
-9. [Do's and Don'ts](#dos-and-donts)
-10. [File Reference](#file-reference)
+5. [Node Width Calculations](#node-width-calculations)
+6. [Edge & Handle System](#edge--handle-system)
+7. [Debugging Tools](#debugging-tools)
+8. [Testing with Playwright](#testing-with-playwright)
+9. [Common Issues & Solutions](#common-issues--solutions)
+10. [Do's and Don'ts](#dos-and-donts)
+11. [File Reference](#file-reference)
+
+> **Related Guides:**
+> - [DEBUGGING_WORKFLOW_GUIDE.md](./DEBUGGING_WORKFLOW_GUIDE.md) - **Start here for debugging** - Complete workflow for finding and fixing bugs
+> - [WIDTH_AND_TRUNCATION_GUIDE.md](./WIDTH_AND_TRUNCATION_GUIDE.md) - Deep dive into width calculation and text truncation
+> - [VSCODE_NOTEBOOK_COMPATIBILITY.md](./VSCODE_NOTEBOOK_COMPATIBILITY.md) - VSCode-specific JavaScript compatibility
 
 ---
 
@@ -216,6 +222,50 @@ Or measure directly:
 const node = document.querySelector('[data-id="my_node"]');
 const domHeight = node.getBoundingClientRect().height;
 console.log(`DOM height: ${domHeight}px`);
+```
+
+---
+
+## Node Width Calculations
+
+> **Full details**: See [WIDTH_AND_TRUNCATION_GUIDE.md](./WIDTH_AND_TRUNCATION_GUIDE.md)
+
+### Overview
+
+Node widths are calculated **dynamically** in `mapToElk()` based on content:
+
+```javascript
+// Key constants (in html_generator.py)
+const TYPE_HINT_MAX_CHARS = 25;      // Truncation limit for types
+const NODE_LABEL_MAX_CHARS = 25;     // Truncation limit for labels
+const CHAR_WIDTH_PX = 7;              // Character width estimate
+const NODE_BASE_PADDING = 52;         // Padding for DATA/INPUT
+const FUNCTION_NODE_BASE_PADDING = 48; // Padding for FUNCTION/PIPELINE
+const MAX_NODE_WIDTH = 280;           // Maximum width cap
+```
+
+### ⚠️ Critical: Property Name Mismatch
+
+The `fallbackApplyState()` function creates outputs with `{ name, type }`, but width calculation might look for `{ label, typeHint }`:
+
+```javascript
+// fallbackApplyState creates:
+{ name: "output_name", type: "str" }
+
+// Width calculation MUST handle both:
+const outName = o.name || o.label || '';
+const outType = o.type || o.typeHint || '';
+```
+
+**Symptom**: Function node sized for its label only, ignoring longer output names.
+
+### Width Formula
+
+```javascript
+// FUNCTION/PIPELINE with combined outputs
+width = Math.min(MAX_NODE_WIDTH, maxContentLen * CHAR_WIDTH_PX + FUNCTION_NODE_BASE_PADDING);
+
+// Where maxContentLen = max(labelLen, outputLen + typeLen + 4)
 ```
 
 ---
@@ -534,6 +584,36 @@ function getVisibleAncestor(nodeId, nodesMap, expansionState) {
 }
 ```
 
+### Issue: Output names truncated in combined mode
+
+**Symptom**: Short output names like "retrieved_documents" are visually clipped.
+
+**Cause**: Property name mismatch in width calculation. `fallbackApplyState` creates outputs with `{ name, type }` but `mapToElk` looks for `{ label, typeHint }`.
+
+**Solution**: Handle both property naming conventions:
+
+```javascript
+// Before (broken)
+const outLabelLen = Math.min(o.label ? o.label.length : 0, NODE_LABEL_MAX_CHARS);
+const outTypeLen = o.typeHint ? ... ;
+
+// After (fixed)
+const outName = o.name || o.label || '';
+const outType = o.type || o.typeHint || '';
+const outLabelLen = Math.min(outName.length, NODE_LABEL_MAX_CHARS);
+const outTypeLen = outType ? ... ;
+```
+
+**Verification**: Use Playwright test to check `nodeWidth >= contentWidth`:
+```python
+result = page.evaluate("""() => {
+    const issues = [];
+    // ... check scrollWidth vs offsetWidth
+    return { issues, hasIssues: issues.length > 0 };
+}""")
+assert not result['hasIssues']
+```
+
 ---
 
 ## Do's and Don'ts
@@ -567,6 +647,18 @@ function getVisibleAncestor(nodeId, nodesMap, expansionState) {
    page.wait_for_timeout(1000)  # After collapse/expand
    ```
 
+8. **DO handle both property naming conventions** for outputs:
+   ```javascript
+   const outName = o.name || o.label || '';  // fallbackApplyState uses 'name'
+   const outType = o.type || o.typeHint || '';  // fallbackApplyState uses 'type'
+   ```
+
+9. **DO test width calculation with long output names**:
+   ```python
+   @node(output_name="retrieved_documents")  # longer than function name
+   def fn(x: str) -> str: ...
+   ```
+
 ### ❌ DON'Ts
 
 1. **DON'T assume ELK heights match DOM heights** - always verify
@@ -593,6 +685,24 @@ function getVisibleAncestor(nodeId, nodesMap, expansionState) {
    ```
 
 7. **DON'T trust Tailwind classes alone for sizing** - verify actual computed values
+
+8. **DON'T assume output property names** - `fallbackApplyState` uses `{ name, type }`, not `{ label, typeHint }`:
+   ```javascript
+   // Wrong - will be undefined
+   const len = o.label.length;
+   
+   // Right - handle both
+   const len = (o.name || o.label || '').length;
+   ```
+
+9. **DON'T rely on DOM innerText for truncation detection** - text in DOM may be full even if visually clipped:
+   ```javascript
+   // Wrong - DOM has full text even when clipped
+   const isTruncated = text.includes('...');
+   
+   // Right - compare widths
+   const isTruncated = contentWidth > nodeWidth;
+   ```
 
 ---
 
@@ -621,11 +731,14 @@ function getVisibleAncestor(nodeId, nodesMap, expansionState) {
 | File | Purpose |
 |------|---------|
 | `tests/viz/test_edge_alignment_playwright.py` | Playwright browser tests for edge validation |
+| `tests/viz/test_output_truncation_playwright.py` | **NEW** - Playwright tests for width/truncation |
+| `tests/viz/test_uniform_truncation.py` | Unit tests for truncation constants and logic |
 | `tests/viz/test_edge_coordinates.py` | Coordinate verification after collapse |
 | `tests/viz/test_collapse_coordinates.py` | Comprehensive collapse coordinate tests |
 | `tests/viz/test_debug_tools.py` | Debug API tests |
 | `tests/viz/test_state_utils_visibility.py` | Visibility logic tests |
 | `tests/viz/test_collapsed_pipelines_no_dangling_edges.py` | Edge compression tests |
+| `tests/viz/test_width_calculation_bug.py` | Width formula verification |
 
 ### Example Test Scripts
 
@@ -671,6 +784,22 @@ height = 60 + 38 + ((outputs.length - 1) * 24)
 // 1 output  → 98px
 // 2 outputs → 122px
 // 3 outputs → 146px
+```
+
+### Width Formula (html_generator.py)
+
+```javascript
+// Constants
+CHAR_WIDTH_PX = 7
+NODE_BASE_PADDING = 52           // DATA/INPUT
+FUNCTION_NODE_BASE_PADDING = 48  // FUNCTION/PIPELINE
+MAX_NODE_WIDTH = 280
+
+// FUNCTION with outputs
+width = Math.min(MAX_NODE_WIDTH, maxContentLen * CHAR_WIDTH_PX + FUNCTION_NODE_BASE_PADDING)
+
+// Where maxContentLen = max(labelLen, outputNameLen + typeLen + 4)
+// +4 accounts for arrow "→ " and spacing
 ```
 
 ### Key Locations to Edit

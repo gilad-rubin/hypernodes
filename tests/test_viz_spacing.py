@@ -29,12 +29,12 @@ def test_viz_spacing_height_calculation():
     
     html_content = generate_widget_html(react_flow_data)
     
-    # Check for the updated height formula
-    # We look for the string "height = 40 + (n.data.outputs.length * 24);"
-    assert "height = 40 + (n.data.outputs.length * 24)" in html_content
+    # Check for the updated height formula (refactored formula)
+    # We look for the string "height = 60 + 38 + ((n.data.outputs.length - 1) * 24);"
+    assert "height = 60 + 38 + ((n.data.outputs.length - 1) * 24)" in html_content
     
-    # Also check for the gap-2 class in OutputsSection
-    assert 'className="flex flex-col items-start gap-2"' in html_content
+    # Also check for the gap-2 class in OutputsSection (centered text)
+    assert 'className="flex flex-col items-center gap-2"' in html_content
 
 def test_viz_spacing_width_calculation():
     """
@@ -58,9 +58,10 @@ def test_viz_spacing_width_calculation():
     
     html_content = generate_widget_html(react_flow_data)
     
-    # Check for width calculation logic
-    assert "let calculatedWidth = Math.max(180, labelLen * 8 + 80);" in html_content
-    assert "const requiredOutputWidth = (maxOutputLen * 7) + 50;" in html_content
+    # Check for width calculation logic (refactored formulas using constants)
+    # The current implementation uses: Math.min(MAX_NODE_WIDTH, Math.max(MIN_*, (...) * CHAR_WIDTH_PX + NODE_BASE_PADDING))
+    assert "Math.min(MAX_NODE_WIDTH, Math.max(MIN_DATA_NODE_WIDTH," in html_content
+    assert "CHAR_WIDTH_PX + NODE_BASE_PADDING" in html_content
 
 def test_viz_spacing_collapsed_pipeline_height():
     """
@@ -90,8 +91,5 @@ def test_viz_spacing_collapsed_pipeline_height():
     html_content = generate_widget_html(react_flow_data)
     
     # Check for the height formula in the collapsed pipeline block
-    # We look for the specific block structure or just the formula presence 
-    # since we added it to a new location.
-    # To be safe, we can check if the formula appears twice in the file now 
-    # (once for standard nodes, once for pipelines)
-    assert html_content.count("height = 40 + (n.data.outputs.length * 24);") == 2
+    # The refactored formula appears in multiple places
+    assert html_content.count("height = 60 + 38 + ((n.data.outputs.length - 1) * 24);") == 2

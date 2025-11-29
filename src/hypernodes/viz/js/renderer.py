@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..structures import (
     DataNode,
@@ -26,7 +26,7 @@ class JSRenderer:
         theme_debug: bool = False,
         pan_on_scroll: bool = False,
         separate_outputs: bool = False,
-        show_types: bool = True,
+        show_types: bool = False,
     ) -> Dict[str, Any]:
         """Transform graph data to React Flow format.
         
@@ -38,7 +38,7 @@ class JSRenderer:
             pan_on_scroll: Enable pan on scroll (vs zoom on scroll).
             separate_outputs: If True, show outputs as separate nodes.
                             If False (default), combine outputs into function nodes.
-            show_types: If True (default), show type hints on nodes.
+            show_types: If True, show type hints on nodes. Default is False.
         """
         nodes = []
         edges = []

@@ -747,6 +747,121 @@
     },
 
     /**
+     * Get text analysis for all nodes including labels, type hints, and truncation status.
+     * Shows which nodes have truncated type hints and their calculated widths.
+     * Usage: HyperNodesVizState.debug.getTextAnalysis()
+     */
+    getTextAnalysis: () => {
+      if (typeof window === "undefined") {
+        console.log("[debug] Only available in browser.");
+        return null;
+      }
+
+      const layoutData = window.__hypernodesVizLayout;
+      const graphData = document.getElementById("graph-data");
+      if (!graphData || !layoutData) {
+        console.log("[debug] No graph or layout data available.");
+        return null;
+      }
+
+      const data = JSON.parse(graphData.textContent);
+      const TYPE_HINT_MAX_CHARS = 25; // Match the constant in html_generator.py
+      
+      const analysis = data.nodes.map(n => {
+        const label = n.data?.label || '';
+        const typeHint = n.data?.typeHint || '';
+        const nodeType = n.data?.nodeType || '';
+        const params = n.data?.params || [];
+        const paramTypes = n.data?.paramTypes || [];
+        const outputs = n.data?.outputs || [];
+        const showTypes = n.data?.showTypes;
+        
+        // Find all text content in this node
+        const texts = [];
+        if (label) texts.push({ kind: 'label', text: label, length: label.length });
+        if (typeHint) texts.push({ kind: 'typeHint', text: typeHint, length: typeHint.length, truncated: typeHint.length > TYPE_HINT_MAX_CHARS });
+        
+        // For INPUT_GROUP, add params and their types
+        params.forEach((p, i) => {
+          if (p) texts.push({ kind: 'param', text: p, length: p.length });
+          const t = paramTypes[i];
+          if (t) texts.push({ kind: 'paramType', text: t, length: t.length, truncated: t.length > TYPE_HINT_MAX_CHARS });
+        });
+        
+        // For FUNCTION/PIPELINE with outputs, add output names and types
+        outputs.forEach(out => {
+          if (out.name) texts.push({ kind: 'outputName', text: out.name, length: out.name.length });
+          if (out.type) texts.push({ kind: 'outputType', text: out.type, length: out.type.length, truncated: out.type.length > TYPE_HINT_MAX_CHARS });
+        });
+        
+        // Find longest text
+        const longestText = texts.reduce((max, t) => t.length > max.length ? t : max, { text: '', length: 0 });
+        
+        // Get width from layout data
+        const layoutNode = layoutData.nodes.find(ln => ln.id === n.id);
+        const width = layoutNode?.width || n.style?.width || 200;
+        
+        // Check if any type hint is truncated
+        const hasTruncatedType = texts.some(t => t.truncated);
+        
+        return {
+          id: n.id,
+          nodeType,
+          label,
+          typeHint,
+          typeHintLength: typeHint.length,
+          isTruncated: hasTruncatedType,
+          truncatedAt: TYPE_HINT_MAX_CHARS,
+          longestText: longestText.text,
+          longestTextLength: longestText.length,
+          width,
+          allTexts: texts,
+        };
+      });
+      
+      // Filter to nodes with type hints or multiple texts
+      const nodesWithTypes = analysis.filter(n => n.typeHint || n.allTexts.length > 1);
+      const truncatedNodes = analysis.filter(n => n.isTruncated);
+      
+      console.group("[debug] Text Analysis");
+      console.log(`TYPE_HINT_MAX_CHARS: ${TYPE_HINT_MAX_CHARS}`);
+      console.log(`Total nodes: ${analysis.length}`);
+      console.log(`Nodes with type hints: ${nodesWithTypes.length}`);
+      console.log(`Nodes with truncated types: ${truncatedNodes.length}`);
+      
+      if (truncatedNodes.length > 0) {
+        console.log("\nTruncated type hints:");
+        console.table(truncatedNodes.map(n => ({
+          id: n.id.slice(-20),
+          nodeType: n.nodeType,
+          typeHint: n.typeHint.slice(0, 30) + (n.typeHint.length > 30 ? '...' : ''),
+          length: n.typeHintLength,
+          width: n.width,
+        })));
+      }
+      
+      console.log("\nAll nodes with types:");
+      console.table(nodesWithTypes.slice(0, 20).map(n => ({
+        id: n.id.slice(-20),
+        type: n.nodeType,
+        label: n.label.slice(0, 15),
+        typeHint: n.typeHint ? n.typeHint.slice(0, 20) + (n.typeHint.length > 20 ? '..' : '') : '-',
+        longest: n.longestTextLength,
+        width: n.width,
+        truncated: n.isTruncated ? 'Y' : '-',
+      })));
+      console.groupEnd();
+      
+      return {
+        allNodes: analysis,
+        nodesWithTypes,
+        truncatedNodes,
+        typeHintMaxChars: TYPE_HINT_MAX_CHARS,
+        summary: `${truncatedNodes.length}/${nodesWithTypes.length} nodes have truncated type hints`,
+      };
+    },
+
+    /**
      * Get a comprehensive debug report combining all analysis.
      * Usage: HyperNodesVizState.debug.fullReport()
      */
@@ -757,6 +872,7 @@
       const layoutInspection = debug.inspectLayout();
       const connectionValidation = debug.validateConnections();
       const expansionState = debug.getExpansionState();
+      const textAnalysis = debug.getTextAnalysis();
       
       console.log("\n=== Summary ===");
       console.log("Expansion state:", expansionState);
@@ -766,6 +882,9 @@
           console.warn("Connection issues need attention!");
         }
       }
+      if (textAnalysis) {
+        console.log("Text analysis:", textAnalysis.summary);
+      }
       
       console.groupEnd();
       
@@ -774,6 +893,7 @@
         layoutInspection,
         connectionValidation,
         expansionState,
+        textAnalysis,
       };
     }
   };
