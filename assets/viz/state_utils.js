@@ -84,19 +84,32 @@
       edgesByTarget.get(e.target).push(e);
     });
 
-    // Find the actual producer for a node (follow sourceId chain)
-    const findProducer = (nodeId) => {
+    // Find the first visible producer for a node
+    // For separate mode: stop at any visible output node (not in boundaryOutputsToHide)
+    // For combined mode: trace back to the function that produces the value
+    const findVisibleProducer = (nodeId, stopAtVisibleOutput = false) => {
       const node = baseNodes.find((n) => n.id === nodeId);
       if (!node?.data?.sourceId) return nodeId;
+      
+      // Check incoming edges to find the actual producer node
+      const incomingEdges = edgesByTarget.get(nodeId) || [];
+      if (incomingEdges.length > 0) {
+        const producerNodeId = incomingEdges[0].source;
+        const producerNode = baseNodes.find((n) => n.id === producerNodeId);
+        
+        // If producer is visible (not hidden), return it
+        if (producerNode && stopAtVisibleOutput && !boundaryOutputsToHide.has(producerNodeId)) {
+          return producerNodeId;
+        }
+        
+        // Otherwise continue tracing
+        return findVisibleProducer(producerNodeId, stopAtVisibleOutput);
+      }
+      
+      // Fallback: use sourceId
       const sourceType = sourceNodeTypes.get(node.data.sourceId);
       if (sourceType === "FUNCTION" || sourceType === "DUAL") {
         return node.data.sourceId;
-      }
-      // For pipeline sources, need to find the internal producer
-      // Look at incoming edges to find who produces this node
-      const incomingEdges = edgesByTarget.get(nodeId) || [];
-      if (incomingEdges.length > 0) {
-        return findProducer(incomingEdges[0].source);
       }
       return node.data.sourceId;
     };
@@ -117,7 +130,8 @@
         .filter((e) => !boundaryOutputsToHide.has(e.target))
         .map((e) => {
           if (boundaryOutputsToHide.has(e.source)) {
-            const producer = findProducer(e.source);
+            // In separate mode, stop at the first visible output node
+            const producer = findVisibleProducer(e.source, true);
             return {
               ...e,
               id: `e_${producer}_${e.target}`,
@@ -192,7 +206,8 @@
         }
         // Remap from hidden boundary outputs
         if (boundaryOutputsToHide.has(e.source)) {
-          const producer = findProducer(e.source);
+          // In combined mode, trace back to the function
+          const producer = findVisibleProducer(e.source, false);
           return {
             ...e,
             id: `e_${producer}_${e.target}`,
