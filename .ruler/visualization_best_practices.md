@@ -1,5 +1,7 @@
 # Visualization System - Architecture & Debugging Guide
 
+> **See also**: [skills/viz/js/JS_FRONTEND_GUIDE.md](../skills/viz/js/JS_FRONTEND_GUIDE.md) for in-depth JS frontend documentation including React Flow v11 specifics, height calculation formulas, and Playwright testing patterns.
+
 ## Architecture Overview
 
 ```

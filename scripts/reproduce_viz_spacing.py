@@ -2,15 +2,22 @@ from hypernodes.node import Node
 from hypernodes.pipeline import Pipeline
 from typing import List, Dict, Any
 
-def complex_function(a: int) -> (List[Dict[str, Any]], str):
-    """A function with complex type hints."""
-    return [{"a": 1}], "done"
+def func_1_out(a: int) -> int:
+    return a
 
-# Create a node
-node = Node(complex_function, output_name=("data", "status"))
+def func_2_out(a: int) -> (int, int):
+    return a, a
+
+def func_3_out(a: int) -> (int, int, int):
+    return a, a, a
+
+# Create nodes with varying outputs
+n1 = Node(func_1_out, output_name="o1")
+n2 = Node(func_2_out, output_name=("o2a", "o2b"))
+n3 = Node(func_3_out, output_name=("o3a", "o3b", "o3c"))
 
 # Create a pipeline
-pipeline = Pipeline([node])
+pipeline = Pipeline([n1, n2, n3])
 
 # Visualize using JS renderer manually
 from hypernodes.viz.ui_handler import UIHandler
@@ -31,6 +38,12 @@ react_flow_data = renderer.render(
 
 print("Generating HTML...")
 html_content = generate_widget_html(react_flow_data)
+
+# Inject debug flag
+html_content = html_content.replace(
+    'const initialDebugOverlays = debugParam === \'overlays\' || debugParam === \'true\' || debugParam === \'1\';',
+    'const initialDebugOverlays = true;'
+)
 
 output_path = "outputs/viz_spacing_test.html"
 with open(output_path, "w") as f:

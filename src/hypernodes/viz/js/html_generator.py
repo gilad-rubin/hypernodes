@@ -352,7 +352,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         
         return html`
             <div className=${`px-3 py-2.5 border-t transition-all duration-300 ${bgClass} ${borderClass}`}>
-                <div className="flex flex-col items-start gap-1">
+                <div className="flex flex-col items-start gap-2">
                     ${outputs.map(out => html`
                         <div key=${out.name} className=${`flex items-center gap-2 text-xs max-w-full overflow-hidden ${textClass}`}>
                             <span className=${`shrink-0 ${arrowClass}`}>→</span>
@@ -385,6 +385,16 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           nodeType: n.data?.nodeType,
         }));
         
+        const handleCopy = () => {
+            const info = {
+                nodes: nodeBounds,
+                edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target }))
+            };
+            navigator.clipboard.writeText(JSON.stringify(info, null, 2))
+                .then(() => alert('Debug info copied!'))
+                .catch(e => console.error('Copy failed', e));
+        };
+
         return html`
           <${React.Fragment}>
             <${Panel} position="top-center" className="pointer-events-none">
@@ -392,15 +402,24 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 DEBUG: Green=source, Blue=target | Check if edge Y matches node bottom/top
               </div>
             <//>
-            <${Panel} position="top-right" className="mt-16 mr-4 pointer-events-auto">
-              <div className=${`rounded-lg border shadow-xl max-h-[50vh] overflow-hidden ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'}`}>
-                <button 
-                  onClick=${() => setShowPanel(p => !p)}
-                  className=${`w-full px-3 py-1.5 text-[10px] font-bold tracking-wide flex items-center justify-between ${isLight ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-red-900/50 text-red-300 hover:bg-red-900/70'}`}
-                >
-                  <span>NODE BOUNDS (Y)</span>
-                  <span>${showPanel ? '▼' : '▶'}</span>
-                </button>
+            <${Panel} position="top-right" className="mt-16 mr-4 pointer-events-auto flex flex-col gap-2">
+              <div className=${`rounded-lg border shadow-xl max-h-[50vh] overflow-hidden flex flex-col ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-700'}`}>
+                <div className="flex items-center border-b border-slate-500/20">
+                    <button 
+                      onClick=${() => setShowPanel(p => !p)}
+                      className=${`flex-1 px-3 py-1.5 text-[10px] font-bold tracking-wide flex items-center justify-between ${isLight ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-red-900/50 text-red-300 hover:bg-red-900/70'}`}
+                    >
+                      <span>NODE BOUNDS (Y)</span>
+                      <span>${showPanel ? '▼' : '▶'}</span>
+                    </button>
+                    <button 
+                      onClick=${handleCopy}
+                      className=${`px-3 py-1.5 text-[10px] font-bold tracking-wide border-l border-slate-500/20 ${isLight ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-blue-900/50 text-blue-300 hover:bg-blue-900/70'}`}
+                      title="Copy debug info to clipboard"
+                    >
+                      COPY
+                    </button>
+                </div>
                 ${showPanel ? html`
                   <div className="overflow-y-auto max-h-[40vh]">
                     <table className=${`text-[9px] font-mono w-full ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
@@ -432,7 +451,14 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
       };
 
       // --- Edge Component ---
-      const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, data }) => {
+      const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, data, source, target }) => {
+        // Debug: Log edge coordinates to help diagnose layout issues
+        React.useEffect(() => {
+            if (window.__hypernodes_debug_edges) {
+                console.log(`[Edge ${id}] source=${source} target=${target} sourceY=${sourceY} targetY=${targetY}`);
+            }
+        }, [id, sourceX, sourceY, targetX, targetY, source, target]);
+        
         const [edgePath, labelX, labelY] = getBezierPath({
           sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition
         });
@@ -544,14 +570,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           isExpanded,
           theme,
         ]);
-
-        const handleTransitionEnd = useCallback((e) => {
-            // Only trigger if the transition is on the root element (e.g. width/height/transform)
-            // and not bubbling up from a child
-            if (e.target === e.currentTarget) {
-                updateNodeInternals(id);
-            }
-        }, [id, updateNodeInternals]);
         
         // --- Render Data Node (Compact) ---
         if (data.nodeType === 'DATA') {
@@ -562,12 +580,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
             const hasTypeHint = showTypes && data.typeHint;
             return html`
-                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-colors transition-shadow duration-200 hover:shadow-lg overflow-hidden
                     ${showAsOutput ? 'ring-2 ring-emerald-500/30' : ''}
                     ${isLight 
-                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
-                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `} onTransitionEnd=${handleTransitionEnd}>
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200 hover:border-slate-300' 
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50 hover:border-slate-600'}
+                `}>
                      <span className=${`shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`}><${Icon} /></span>
                      <span className="text-xs font-mono font-medium shrink-0">${data.label}</span>
                      ${hasTypeHint ? html`<span className=${`text-[10px] font-mono truncate min-w-0 ${typeClass}`} title=${data.typeHint}>: ${data.typeHint}</span>` : null}
@@ -587,12 +605,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
              const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
              // Reuse DATA node styling but preserve dashed border for bound inputs
              return html`
-                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-all duration-200 hover:-translate-y-0.5
+                <div className=${`px-3 py-1.5 w-full relative rounded-full border shadow-sm flex items-center justify-center gap-2 transition-colors transition-shadow duration-200 hover:shadow-lg
                     ${isBound ? 'border-dashed' : ''}
                     ${isLight 
-                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200' 
-                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `} onTransitionEnd=${handleTransitionEnd}>
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200 hover:border-slate-300' 
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50 hover:border-slate-600'}
+                `}>
                     <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} /></span>
                     <span className="text-xs font-mono font-medium truncate">${data.label}</span>
                     ${hasType ? html`<span className=${`text-[10px] font-mono truncate ${typeClass}`}>: ${typeHint}</span>` : null}
@@ -611,12 +629,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
              const typeClass = isLight ? 'text-slate-400' : 'text-slate-500';
              
              return html`
-                <div className=${`px-3 py-2 w-full relative rounded-xl border shadow-sm flex flex-col gap-1 min-w-[120px] transition-all duration-200 hover:-translate-y-0.5
+                <div className=${`px-3 py-2 w-full relative rounded-xl border shadow-sm flex flex-col gap-1 min-w-[120px] transition-colors transition-shadow duration-200 hover:shadow-lg
                     ${isBound ? 'border-dashed' : ''}
                     ${isLight
-                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200'
-                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50'}
-                `} onTransitionEnd=${handleTransitionEnd}>
+                        ? 'bg-white border-slate-200 text-slate-700 shadow-slate-200 hover:border-slate-300'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 shadow-black/50 hover:border-slate-600'}
+                `}>
                     ${params.map((p, i) => html`
                         <div className="flex items-center gap-2 whitespace-nowrap">
                             <span className=${isLight ? 'text-slate-400' : 'text-slate-500'}><${Icons.Data} className="w-3 h-3" /></span>
@@ -639,11 +657,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           };
           
           return html`
-            <div className=${`relative w-full h-full rounded-2xl border-2 border-dashed p-6 transition-all duration-300
+            <div className=${`relative w-full h-full rounded-2xl border-2 border-dashed p-6 transition-colors duration-200
                 ${isLight 
                     ? 'border-amber-300 bg-amber-50/30' 
                     : 'border-amber-500/30 bg-amber-500/5'}
-            `} onTransitionEnd=${handleTransitionEnd}>
+            `}>
               <button 
                    type="button"
                    className=${`absolute -top-3 left-4 px-3 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors z-10
@@ -670,12 +688,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const showTypes = data.showTypes;
 
         return html`
-          <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-all duration-300 cursor-pointer hover:-translate-y-1 node-function-${theme} overflow-hidden
+          <div className=${`group relative w-full rounded-lg border shadow-lg backdrop-blur-sm transition-colors transition-shadow duration-200 cursor-pointer node-function-${theme} overflow-hidden
                ${isLight 
-                 ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200`
-                 : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/10`}
+                 ? `bg-white/90 border-slate-200 shadow-slate-200 hover:border-${colors.border}-400 hover:shadow-${colors.border}-200 hover:shadow-lg`
+                 : `bg-slate-950/90 border-slate-800 shadow-black/50 hover:border-${colors.border}-500/50 hover:shadow-${colors.border}-500/20 hover:shadow-lg`}
                `}
-               onTransitionEnd=${handleTransitionEnd}
                onClick=${data.nodeType === 'PIPELINE' ? (e) => { e.stopPropagation(); if(data.onToggleExpand) data.onToggleExpand(); } : undefined}>
             
             <!-- Header -->
@@ -781,14 +798,22 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     const labelLen = n.data.label ? n.data.label.length : 10;
                     width = Math.max(140, labelLen * 8 + 80);
                     height = 68;
+                    
+                    // Add height for outputs if combined
+                    // FIX: Measured actual DOM heights:
+                    // - Header with label: ~60px (py-2.5 padding + content)
+                    // - Outputs section: ~38px for 1 output, +24px per additional
+                    if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
+                        height = 60 + 38 + ((n.data.outputs.length - 1) * 24);
+                    }
                 } else if (n.data?.nodeType === 'INPUT') {
                     width = 160;
-                    height = 46;
+                    height = 30;
                 } else if (n.data?.nodeType === 'INPUT_GROUP') {
                     width = 200;
                     // Dynamic height based on number of inputs
                     const paramCount = n.data.params ? n.data.params.length : 1;
-                    height = 46 + (paramCount * 18);
+                    height = 14 + (paramCount * 20);
                 } else {
                     // Standard Function Node
                     // Base width for label
@@ -817,9 +842,11 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     height = 68; // Default height
                     
                     // Add height for outputs if combined
+                    // FIX: Measured actual DOM heights:
+                    // - Header with label: ~60px (py-2.5 padding + content)
+                    // - Outputs section: ~38px for 1 output, +24px per additional
                     if (!n.data.separateOutputs && n.data.outputs && n.data.outputs.length > 0) {
-                        // Base height 42px (header) + 10px (padding) + outputs * 24px
-                        height = 52 + (n.data.outputs.length * 24);
+                        height = 60 + 38 + ((n.data.outputs.length - 1) * 24);
                     }
                 }
                 
@@ -900,18 +927,34 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           elk.layout(elkGraph).then((graph) => {
               setLayoutError(null);
               const positionedNodes = [];
+              const debugMode = window.__hypernodes_debug_viz || false;
               
               const traverse = (node, parentX = 0, parentY = 0) => {
                 const x = node.x || 0;
                 const y = node.y || 0;
+                const w = node.width || 200;
+                const h = node.height || 68;
                 
                 const original = nodes.find(n => n.id === node.id);
                 if (original) {
-                  positionedNodes.push({
+                  // FIX: Provide explicit handle positions so React Flow doesn't need
+                  // to measure from DOM. This fixes edge path calculation issues when
+                  // node dimensions change (e.g., collapse/expand pipelines).
+                  // See: https://reactflow.dev/learn/advanced-use/ssr-ssg-configuration
+                  // NodeHandle requires: type, position, x, y, width, height
+                  const nodeWithHandles = {
                     ...original,
                     position: { x, y },
-                    style: { ...original.style, width: node.width, height: node.height },
-                  });
+                    width: w,
+                    height: h,
+                    style: { ...original.style, width: w, height: h },
+                    handles: [
+                      { type: 'target', position: 'top', x: w / 2, y: 0, width: 8, height: 8, id: null },
+                      { type: 'source', position: 'bottom', x: w / 2, y: h, width: 8, height: 8, id: null },
+                    ],
+                  };
+                  if (debugMode) console.log('[layout] Node with handles:', node.id, nodeWithHandles.handles);
+                  positionedNodes.push(nodeWithHandles);
                 }
                 if (node.children) node.children.forEach(child => traverse(child, x, y));
               };
@@ -927,11 +970,21 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             .catch((err) => {
                 console.error('ELK layout error', err);
                 setLayoutError(err?.message || 'Layout error');
-                // Fallback
-                const fallbackNodes = nodes.map((n, idx) => ({
-                    ...n,
-                    position: { x: 80 * (idx % 4), y: 120 * Math.floor(idx / 4) },
-                }));
+                // Fallback with explicit handle positions
+                const fallbackNodes = nodes.map((n, idx) => {
+                    const w = n.style?.width || 200;
+                    const h = n.style?.height || 68;
+                    return {
+                        ...n,
+                        position: { x: 80 * (idx % 4), y: 120 * Math.floor(idx / 4) },
+                        width: w,
+                        height: h,
+                        handles: [
+                            { type: 'target', position: 'top', x: w / 2, y: 0, width: 8, height: 8, id: null },
+                            { type: 'source', position: 'bottom', x: w / 2, y: h, width: 8, height: 8, id: null },
+                        ],
+                    };
+                });
                 setLayoutedNodes(fallbackNodes);
                 setLayoutedEdges(edges);
                 setLayoutVersion(v => v + 1);
@@ -1281,10 +1334,61 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // ========================================================================
         // FIX: Force edge recalculation after collapse/expand
         // ========================================================================
-        // We use onTransitionEnd in the CustomNode component to trigger 
-        // updateNodeInternals exactly when the animation finishes.
-        // This replaces the previous hacky theme toggle.
+        // PROBLEM: When a pipeline collapses, React Flow caches edge paths based on
+        // old node dimensions/handle positions. The onTransitionEnd handler only
+        // updates the collapsed node itself, but edges FROM this node still use
+        // stale path calculations.
+        // 
+        // SOLUTION: After expansion state changes AND layout completes, call
+        // updateNodeInternals for all visible nodes. This forces React Flow to
+        // recalculate edge paths using current handle positions.
         // ========================================================================
+        const prevExpansionRef = useRef(null);
+        const expansionKey = useMemo(() => {
+            return Array.from(expansionState.entries())
+                .filter(([_, v]) => !v)  // Get collapsed pipelines
+                .map(([k]) => k)
+                .sort()
+                .join(',');
+        }, [expansionState]);
+        
+        useEffect(() => {
+            // Skip on initial render
+            if (prevExpansionRef.current === null) {
+                prevExpansionRef.current = expansionKey;
+                return;
+            }
+            
+            // Only act if expansion state actually changed
+            if (prevExpansionRef.current === expansionKey) {
+                return;
+            }
+            prevExpansionRef.current = expansionKey;
+            
+            // Wait for layout AND DOM render to settle, then update all visible nodes
+            // Use requestAnimationFrame to ensure we're after the paint
+            const timer = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        // Double RAF ensures we're after React render + paint
+                        const visibleNodeIds = rawLayoutedNodes
+                            .filter(n => !n.hidden)
+                            .map(n => n.id);
+                        
+                        if (visibleNodeIds.length > 0 && window.__hypernodes_debug_edges) {
+                            console.log('[expansion] Updating node internals for:', visibleNodeIds);
+                        }
+                        
+                        if (visibleNodeIds.length > 0) {
+                            // Batch update all visible nodes
+                            visibleNodeIds.forEach(id => updateNodeInternals(id));
+                        }
+                    });
+                });
+            }, 500); // Increased delay to ensure DOM is fully settled
+            
+            return () => clearTimeout(timer);
+        }, [expansionKey, rawLayoutedNodes, updateNodeInternals]);
         
         // Add debug mode to layouted nodes
         const layoutedNodes = useMemo(() => {
@@ -1363,6 +1467,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         };
 
         // Style edges with theme-appropriate colors
+        // Include expansionKey in edge IDs to force edge re-creation when pipelines collapse/expand
         const styledEdges = useMemo(() => {
             if (isLayouting) return []; // Hide edges during layout
             
@@ -1370,6 +1475,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 const isDataLink = e.data && e.data.isDataLink;
                 return { 
                     ...e,
+                    // Add version suffix to force React to re-mount edge component
+                    id: expansionKey ? `${e.id}_exp_${expansionKey.replace(/,/g, '_')}` : e.id,
                     ...edgeOptions,
                     style: { 
                         ...edgeOptions.style, 
@@ -1379,7 +1486,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     data: { ...e.data, debugMode: debugOverlays }
                 };
             });
-        }, [layoutedEdges, theme, isLayouting, debugOverlays]);
+        }, [layoutedEdges, theme, isLayouting, debugOverlays, expansionKey]);
 
         return html`
           <div 
@@ -1390,6 +1497,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>
             
             <${ReactFlow}
+              key=${`rf_${expansionKey}`}
               nodes=${layoutedNodes}
               edges=${styledEdges}
               nodeTypes=${nodeTypes}
