@@ -530,8 +530,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 ${data.label}
                 <span className="text-[9px] opacity-60 normal-case font-normal ml-1">Click to collapse</span>
               </button>
-              <${Handle} type="target" position=${Position.Top} className="!w-0 !h-0 !opacity-0" />
-              <${Handle} type="source" position=${Position.Bottom} className="!w-0 !h-0 !opacity-0" />
+              <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" />
+              <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" />
             </div>
           `;
         }
@@ -1025,12 +1025,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             setManualTheme(next);
         }, [manualTheme, themePreference, resolvedDetected.theme]);
 
-        const visibleEdges = useMemo(() => {
+        // Compress edges first (remaps to visible ancestors when pipelines collapse)
+        const compressedEdges = useMemo(() => {
             const compressor = stateUtils.compressEdges || ((nodes, edges) => edges);
             return compressor(rfNodes, rfEdges);
         }, [rfNodes, rfEdges]);
 
-        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(rfNodes, visibleEdges);
+        // Group inputs that share the same targets after compression
+        const { nodes: groupedNodes, edges: groupedEdges } = useMemo(() => {
+            const grouper = stateUtils.groupInputs || ((nodes, edges) => ({ nodes, edges }));
+            return grouper(rfNodes, compressedEdges);
+        }, [rfNodes, compressedEdges]);
+
+        const { layoutedNodes, layoutedEdges, layoutError, graphHeight, graphWidth } = useLayout(groupedNodes, groupedEdges);
         const { fitView } = useReactFlow();
 
         // --- Iframe Resize Logic (Task 2) ---

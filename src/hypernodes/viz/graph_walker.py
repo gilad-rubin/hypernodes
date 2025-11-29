@@ -145,6 +145,7 @@ class GraphWalker:
                     continue
 
                 if inner_name and inner_name != outer_out:
+                    # Output name differs: always create boundary node
                     boundary_id = f"{prefix}{outer_out}" if prefix else outer_out
                     if boundary_id not in existing_ids:
                         boundary_node = DataNode(
@@ -152,7 +153,23 @@ class GraphWalker:
                             parent_id=parent_id,
                             name=outer_out,
                             type_hint=meta.get("type_hint"),
-                            source_id=node_id if self.traverse_collapsed else node_id,
+                            source_id=node_id,
+                        )
+                        nodes_out.append(boundary_node)
+                        existing_ids.add(boundary_id)
+                        edges_out.append(VizEdge(source=inner_id, target=boundary_id))
+                    scope[outer_out] = boundary_id
+                elif self.traverse_collapsed:
+                    # Same name but traversing for interactive viz: create boundary node
+                    # so collapsed pipelines can show outputs like function nodes
+                    boundary_id = f"{prefix}{outer_out}" if prefix else outer_out
+                    if boundary_id not in existing_ids:
+                        boundary_node = DataNode(
+                            id=boundary_id,
+                            parent_id=parent_id,
+                            name=outer_out,
+                            type_hint=meta.get("type_hint"),
+                            source_id=node_id,
                         )
                         nodes_out.append(boundary_node)
                         existing_ids.add(boundary_id)
@@ -251,11 +268,14 @@ class GraphWalker:
                 # Use just the argument name (with prefix for nested scopes)
                 input_node_id = f"{prefix}{outer_arg}" if prefix else outer_arg
                 if input_node_id not in [n.id for n in nodes_out]:
+                    # Extract type hint from the pipeline node
+                    type_hint = self._extract_input_type(node, outer_arg)
                     input_node = DataNode(
                         id=input_node_id,
                         parent_id=nodes_out[-1].parent_id if nodes_out else None,
                         name=outer_arg,
-                        is_bound=False
+                        is_bound=False,
+                        type_hint=type_hint
                     )
                     nodes_out.append(input_node)
                     scope[outer_arg] = input_node_id
@@ -373,15 +393,7 @@ class GraphWalker:
                     
                     if not exists:
                         # Extract type hint for input
-                        type_hint = None
-                        if hasattr(node, "func"):
-                            try:
-                                hints = get_type_hints(node.func)
-                                if actual_arg in hints:
-                                    type_str = str(hints[actual_arg]).replace("typing.", "").replace("<class '", "").replace("'>", "")
-                                    type_hint = self._simplify_type_string(type_str)
-                            except Exception:
-                                pass
+                        type_hint = self._extract_input_type(node, actual_arg)
 
                         input_node = DataNode(
                             id=input_node_id,
@@ -580,6 +592,51 @@ class GraphWalker:
                 return self._simplify_type_string(type_str)
         except Exception:
             pass
+        return None
+
+    def _extract_input_type(self, node: Any, input_name: str) -> Optional[str]:
+        """Extract type hint for an input parameter from a node.
+        
+        For regular function nodes, extracts from function annotations.
+        For pipeline nodes, looks inside the pipeline to find which function uses this input.
+        """
+        if hasattr(node, "func"):
+            # Regular function node - extract from function annotations
+            try:
+                hints = get_type_hints(node.func)
+                if input_name in hints:
+                    type_str = str(hints[input_name]).replace("typing.", "").replace("<class '", "").replace("'>", "")
+                    return self._simplify_type_string(type_str)
+            except Exception:
+                pass
+            return None
+
+        if isinstance(node, HyperPipelineNode):
+            # For pipeline nodes, map outer input name to inner name
+            inner_name = input_name
+            if node.input_mapping:
+                # input_mapping is {outer: inner}
+                inner_name = node.input_mapping.get(input_name, input_name)
+            
+            # Look through the pipeline's nodes to find which function uses this input
+            if hasattr(node.pipeline, "graph"):
+                for inner_node in node.pipeline.graph.execution_order:
+                    if hasattr(inner_node, "root_args") and inner_name in inner_node.root_args:
+                        # Found a node that uses this input
+                        type_hint = self._extract_input_type(inner_node, inner_name)
+                        if type_hint:
+                            return type_hint
+            
+            # Also check if any function in the pipeline's flat execution order uses it
+            if hasattr(node.pipeline, "nodes"):
+                for inner_node in node.pipeline.nodes:
+                    if hasattr(inner_node, "root_args") and inner_name in inner_node.root_args:
+                        type_hint = self._extract_input_type(inner_node, inner_name)
+                        if type_hint:
+                            return type_hint
+            
+            return None
+
         return None
     
     def _simplify_type_string(self, type_str: str) -> str:
