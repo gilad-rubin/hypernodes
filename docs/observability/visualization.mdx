@@ -7,29 +7,46 @@ Understanding complex DAGs can be difficult. HyperNodes provides built-in visual
 
 ## The `.visualize()` Method
 
-You can generate a Graphviz diagram of any pipeline using the `.visualize()` method.
+You can visualize any pipeline using the `.visualize()` method.
 
 ```python
 pipeline.visualize()
 ```
 
+By default, this generates an **interactive JavaScript visualization** using React Flow:
+
+- **Jupyter Notebooks**: Renders an interactive diagram directly in the cell with expand/collapse, pan, and zoom.
+- **Scripts**: Returns HTML string that can be saved or displayed.
+
+### Static Graphviz Mode
+
+For a static SVG diagram, use `engine="graphviz"`:
+
+```python
+pipeline.visualize(engine="graphviz")
+```
+
 - **Jupyter Notebooks**: Renders the SVG directly in the cell.
-- **Scripts**: Returns a `graphviz.Digraph` object.
+- **Scripts**: Returns an SVG string.
 
 ### Saving to File
 
 ```python
-pipeline.visualize(filename="my_pipeline.svg")
+# Interactive HTML
+pipeline.visualize(filename="my_pipeline.html")
+
+# Static SVG
+pipeline.visualize(filename="my_pipeline.svg", engine="graphviz")
 ```
 
 ## Customization
 
-### Orientation
+### Orientation (Graphviz only)
 
 Change the layout direction with `orient`:
 
 ```python
-pipeline.visualize(orient="LR")  # Left-to-Right (default is Top-Bottom)
+pipeline.visualize(engine="graphviz", orient="LR")  # Left-to-Right (default is Top-Bottom)
 ```
 
 ### Nesting Depth
@@ -48,19 +65,19 @@ Control how deep to expand nested pipelines.
 pipeline.visualize(depth=None)
 ```
 
-### Styles
+### Styles (Graphviz only)
 
-HyperNodes comes with visual styles.
+HyperNodes comes with visual styles for Graphviz output.
 
 ```python
-pipeline.visualize(style="modern")
+pipeline.visualize(engine="graphviz", style="modern")
 ```
 
-## Legend
+## Legend (Graphviz only)
 
 Enable a legend to explain node shapes and colors.
 
 ```python
-pipeline.visualize(show_legend=True)
+pipeline.visualize(engine="graphviz", show_legend=True)
 ```
 

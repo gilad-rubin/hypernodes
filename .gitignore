@@ -88,3 +88,7 @@ design_reference_nested/*
 tmp_data.json
 .playwright-mcp/*
 guides/*
+
+# Node.js / npm (for Tailwind CSS build in build/tailwind/)
+build/tailwind/node_modules/
+build/tailwind/package-lock.json

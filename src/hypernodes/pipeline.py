@@ -232,72 +232,72 @@ class Pipeline:
     def visualize(
         self,
         filename: Optional[str] = None,
-        engine: Union[str, Any] = "graphviz",
+        engine: Literal["js", "graphviz"] = "js",
         depth: Optional[int] = 1,
         separate_outputs: bool = False,
-        # Legacy parameters (kept for backward compatibility)
+        show_types: bool = False,
+        # Graphviz-only options (used when engine="graphviz"):
         orient: str = "TB",
         flatten: bool = False,
-        group_inputs: bool = True,
         show_legend: bool = False,
-        show_types: bool = True,
         style: Union[str, Any] = "default",
-        return_type: str = "auto",
-        interactive: bool = False,
-        **engine_options
+        **kwargs
     ):
-        """Visualize the pipeline using pluggable rendering engines.
+        """Visualize the pipeline.
         
         Args:
-            filename: Output filename (e.g., "pipeline.svg"). If None, returns object
-            engine: Visualization engine - "graphviz", "ipywidget", or custom engine
-            depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand)
+            filename: Optional filename to save the visualization.
+                      For JS engine: saves as .html
+                      For Graphviz engine: saves as .svg
+                      If None, displays inline (in Jupyter) or returns the content.
+            engine: Visualization engine to use:
+                   - "js" (default): Interactive JavaScript visualization with React Flow.
+                   - "graphviz": Static SVG rendering with Graphviz.
+            depth: Expansion depth for nested pipelines (1=collapsed, None=fully expand).
             separate_outputs: If True, render outputs as separate nodes.
-                             If False (default), combine function nodes with their outputs.
+                             If False (default), combine with function nodes.
+            show_types: If True, show type hints on nodes. Default is False.
             
-            Legacy graphviz-specific parameters (will be deprecated):
-            orient: Graph orientation ("TB", "LR", "BT", "RL")
-            flatten: If True, render nested pipelines inline without containers
-            group_inputs: Whether to group inputs in the frontend (graphviz)
-            show_legend: Whether to show a legend explaining node types
-            show_types: Whether to show type hints and default values
-            style: Style name from DESIGN_STYLES or GraphvizTheme object
-            show_mapping_labels: Graphviz-only flag to display mapping labels on edges
-            return_type: "auto", "graphviz", or "html"
-            interactive: If True, uses ipywidget engine
-            **engine_options: Additional engine-specific options
+            Graphviz-only options (when engine="graphviz"):
+            orient: Graph orientation ("TB", "LR", "BT", "RL").
+            flatten: If True, fully expand all nested pipelines (sets depth=None).
+            show_legend: If True, show a legend explaining node types.
+            style: Style name from DESIGN_STYLES or GraphvizTheme object.
+            **kwargs: Additional renderer-specific options.
         
         Returns:
-            Engine-specific output (graphviz.Digraph, HTML, or widget)
+            - If filename provided: None (saves to file)
+            - If engine="js" in Jupyter: displays inline, returns None
+            - If engine="js" outside Jupyter: returns HTML string
+            - If engine="graphviz" in Jupyter: returns IPython HTML object
+            - If engine="graphviz" outside Jupyter: returns SVG string
         """
-        # Handle legacy interactive parameter
-        if interactive:
-            from .viz.visualization_widget import PipelineWidget
-            return PipelineWidget(self, depth=depth, **engine_options)
-        
-        # For backward compatibility, pass legacy parameters as engine_options
-        # if engine is graphviz (default)
-        if engine == "graphviz":
-            engine_options.update({
-                "orient": orient,
-                "flatten": flatten,
-                "group_inputs": group_inputs,
-                "show_legend": show_legend,
-                "show_types": show_types,
-                "style": style,
-                "return_type": return_type,
-            })
-        
         from . import viz
         
-        return viz.visualize(
-            self,
-            filename=filename,
-            engine=engine,
-            depth=depth,
-            separate_outputs=separate_outputs,
-            **engine_options
-        )
+        if engine == "js":
+            return viz._render_interactive(
+                self,
+                filename=filename,
+                depth=depth,
+                separate_outputs=separate_outputs,
+                show_types=show_types,
+                **kwargs
+            )
+        elif engine == "graphviz":
+            return viz._render_graphviz(
+                self,
+                filename=filename,
+                depth=depth,
+                separate_outputs=separate_outputs,
+                show_types=show_types,
+                orient=orient,
+                flatten=flatten,
+                show_legend=show_legend,
+                style=style,
+                **kwargs
+            )
+        else:
+            raise ValueError(f"Unknown engine: {engine}. Use 'js' or 'graphviz'.")
 
     def with_engine(self, engine: Engine) -> "Pipeline":
         """Configure with a specific engine.

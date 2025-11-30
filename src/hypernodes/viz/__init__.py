@@ -1,12 +1,13 @@
 """Visualization package for hypernodes."""
 
+import html as html_module
 from typing import Any, Optional, Union
 
-from ..pipeline import Pipeline
-from .debug import diagnose_widget, quick_check
 from .graphviz.renderer import GraphvizRenderer
 from .graphviz.style import DESIGN_STYLES, GraphvizTheme
+from .js.html_generator import generate_widget_html
 from .js.renderer import JSRenderer
+from .layout_estimator import LayoutEstimator
 from .state_simulator import (
     diagnose_all_states,
     simulate_collapse_expand_cycle,
@@ -16,75 +17,162 @@ from .state_simulator import (
 )
 from .ui_handler import UIHandler
 
-# Public debugging API
+
+# Lazy imports for ipywidgets-dependent modules
+def diagnose_widget(*args, **kwargs):
+    """Diagnose widget rendering issues. Requires ipywidgets."""
+    from .debug import diagnose_widget as _diagnose_widget
+    return _diagnose_widget(*args, **kwargs)
+
+
+def quick_check(*args, **kwargs):
+    """Quick check for widget rendering. Requires ipywidgets."""
+    from .debug import quick_check as _quick_check
+    return _quick_check(*args, **kwargs)
+
+
 __all__ = [
-    "visualize",
+    # Internals (for advanced use)
     "UIHandler",
     "GraphvizRenderer",
     "JSRenderer",
+    # State simulation (for testing)
     "simulate_state",
     "verify_state",
     "verify_edge_alignment",
     "simulate_collapse_expand_cycle",
     "diagnose_all_states",
+    # Debug (requires ipywidgets)
     "diagnose_widget",
     "quick_check",
+    # Graphviz styling
     "DESIGN_STYLES",
     "GraphvizTheme",
 ]
 
 
-def visualize(
-    pipeline: Pipeline,
-    filename: Optional[str] = None,
-    engine: Union[str, Any] = "graphviz",
-    depth: Optional[int] = 1,
-    interactive: bool = False,
-    separate_outputs: bool = False,
-    show_types: bool = False,
+def _detect_environment() -> str:
+    """Detect the current execution environment."""
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+        if shell is None:
+            return "terminal"
+        shell_name = shell.__class__.__name__
+        if shell_name in ("ZMQInteractiveShell", "Shell"):  # Jupyter, Colab
+            return "jupyter"
+        return "terminal"
+    except ImportError:
+        return "terminal"
+
+
+def _render_interactive(
+    pipeline: Any,
+    filename: Optional[str],
+    depth: Optional[int],
+    separate_outputs: bool,
+    show_types: bool,
     **kwargs
-):
-    """Visualize a pipeline.
+) -> Optional[str]:
+    """Render interactive JS visualization."""
+    # Build visualization data
+    handler = UIHandler(pipeline, depth=depth, group_inputs=True)
+    graph_data = handler.get_visualization_data(traverse_collapsed=True)
+    
+    # Estimate dimensions
+    estimator = LayoutEstimator(graph_data)
+    est_width, est_height = estimator.estimate()
+    width = max(600, est_width)
+    height = max(400, est_height)
+    
+    # Render to React Flow format
+    renderer = JSRenderer()
+    rf_data = renderer.render(
+        graph_data,
+        theme="auto",
+        separate_outputs=separate_outputs,
+        show_types=show_types,
+    )
+    
+    # Generate HTML
+    html_content = generate_widget_html(rf_data)
+    
+    # Save to file if requested
+    if filename:
+        # Ensure .html extension
+        if not filename.endswith('.html'):
+            filename = filename + '.html'
+        with open(filename, "w") as f:
+            f.write(html_content)
+        return None
+    
+    # Display or return
+    env = _detect_environment()
+    if env == "jupyter":
+        from IPython.display import HTML, display
+        escaped = html_module.escape(html_content, quote=True)
+        # CSS fix for VS Code white background
+        css_fix = """
+        <style>
+        .cell-output-ipywidget-background { background-color: transparent !important; }
+        .jp-OutputArea-output { background-color: transparent; }
+        </style>
+        """
+        iframe_html = (
+            f"{css_fix}"
+            f'<iframe srcdoc="{escaped}" '
+            f'width="{width}" height="{height}" frameborder="0" '
+            f'style="border: none; width: {width}px; max-width: 100%; '
+            f'height: {height}px; display: block; background: transparent; margin: 0 auto;" '
+            f'sandbox="allow-scripts allow-same-origin allow-popups allow-forms">'
+            f"</iframe>"
+        )
+        display(HTML(iframe_html))
+        return None
+    else:
+        return html_content
 
-    Args:
-        pipeline: The pipeline to visualize.
-        filename: Optional filename to save the visualization to.
-        engine: "graphviz" or "ipywidget" (or custom).
-        depth: Initial expansion depth.
-        interactive: Whether to use interactive widget (for graphviz).
-        separate_outputs: If True, render outputs as separate nodes.
-                         If False (default), combine function nodes with their outputs.
-        show_types: If True, show type hints on nodes. Default is False.
-        **kwargs: Additional options passed to the renderer.
 
-    Returns:
-        The visualization object (Digraph, Widget, etc.)
-    """
-    if engine == "graphviz":
-        if interactive:
-            from .graphviz.widget import GraphvizWidget
-            return GraphvizWidget(pipeline, depth=depth, theme=kwargs.get("style", "default"), **kwargs)
-            
-        # Static rendering
-        # Default group_inputs to True for Graphviz unless explicitly disabled
-        group_inputs = kwargs.get("group_inputs", True)
-        handler = UIHandler(pipeline, depth=depth, group_inputs=group_inputs)
-        # For static Graphviz, don't traverse collapsed pipelines (they should remain truly collapsed)
-        graph_data = handler.get_visualization_data(traverse_collapsed=False)
-        
-        renderer = GraphvizRenderer(style=kwargs.get("style", "default"), separate_outputs=separate_outputs, show_types=show_types)
-        svg_content = renderer.render(graph_data)
-        
-        if filename:
-            with open(filename, "w") as f:
-                f.write(svg_content)
-                
+def _render_graphviz(
+    pipeline: Any,
+    filename: Optional[str],
+    depth: Optional[int],
+    separate_outputs: bool,
+    show_types: bool,
+    orient: str,
+    flatten: bool,
+    show_legend: bool,
+    style: Union[str, Any],
+    **kwargs
+) -> Any:
+    """Render static Graphviz visualization."""
+    # If flatten, set depth to None (fully expanded)
+    if flatten:
+        depth = None
+    
+    # Build visualization data
+    group_inputs = kwargs.get("group_inputs", True)
+    handler = UIHandler(pipeline, depth=depth, group_inputs=group_inputs)
+    graph_data = handler.get_visualization_data(traverse_collapsed=False)
+    
+    # Render to SVG
+    renderer = GraphvizRenderer(
+        style=style,
+        separate_outputs=separate_outputs,
+        show_types=show_types,
+    )
+    svg_content = renderer.render(graph_data)
+    
+    # Save to file if requested
+    if filename:
+        with open(filename, "w") as f:
+            f.write(svg_content)
+        return None
+    
+    # Display or return
+    env = _detect_environment()
+    if env == "jupyter":
         from IPython.display import HTML
         return HTML(svg_content)
-
-    elif engine == "ipywidget":
-        from .visualization_widget import PipelineWidget
-        return PipelineWidget(pipeline, depth=depth, separate_outputs=separate_outputs, show_types=show_types, **kwargs)
-
     else:
-        raise ValueError(f"Unknown engine: {engine}")
+        return svg_content

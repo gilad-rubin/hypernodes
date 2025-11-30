@@ -3,9 +3,8 @@ import subprocess
 from pathlib import Path
 
 from hypernodes import Pipeline, node
-from hypernodes.viz.ui_handler import UIHandler
 from hypernodes.viz.js.renderer import JSRenderer
-
+from hypernodes.viz.ui_handler import UIHandler
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,7 +52,7 @@ def test_double_collapsed_edges_rewire_to_visible_ancestors():
 
     script = (
         """
-    const utils = require('./assets/viz/state_utils.js');
+    const utils = require('./src/hypernodes/viz/assets/state_utils.js');
     const data = __DATA__;
     const nodes = data.nodes.map(n => ({...n, hidden: !!n.hidden}));
     const edges = data.edges;

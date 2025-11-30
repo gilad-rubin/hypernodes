@@ -1,4 +1,7 @@
-"""Tests for the separate_outputs parameter in visualization."""
+"""Tests for the separate_outputs parameter in visualization.
+
+Note: These tests use engine="graphviz" (Graphviz) to test SVG output parsing.
+"""
 
 import re
 from collections import Counter
@@ -44,8 +47,8 @@ class TestSeparateOutputsFalse:
         """Test that combined mode is the default."""
         pipeline = Pipeline(nodes=[double, triple])
         
-        # Default call
-        result = pipeline.visualize()
+        # Default call (graphviz mode)
+        result = pipeline.visualize(engine="graphviz")
         titles = get_svg_titles(result)
         
         # Should only have function names and inputs, not output names
@@ -60,7 +63,7 @@ class TestSeparateOutputsFalse:
         """Test explicit separate_outputs=False."""
         pipeline = Pipeline(nodes=[double, triple])
         
-        result = pipeline.visualize(separate_outputs=False)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=False)
         titles = get_svg_titles(result)
         
         # Same as default - outputs combined with functions
@@ -73,7 +76,7 @@ class TestSeparateOutputsFalse:
         """Test combined mode with a longer chain."""
         pipeline = Pipeline(nodes=[double, triple, add_ten])
         
-        result = pipeline.visualize(separate_outputs=False)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=False)
         titles = get_svg_titles(result)
         
         # All functions present
@@ -94,7 +97,7 @@ class TestSeparateOutputsTrue:
         """Test that separate_outputs=True shows output nodes."""
         pipeline = Pipeline(nodes=[double, triple])
         
-        result = pipeline.visualize(separate_outputs=True)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=True)
         titles = get_svg_titles(result)
         
         # Should have both function names AND output names
@@ -108,7 +111,7 @@ class TestSeparateOutputsTrue:
         """Test separate mode with a longer chain."""
         pipeline = Pipeline(nodes=[double, triple, add_ten])
         
-        result = pipeline.visualize(separate_outputs=True)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=True)
         titles = get_svg_titles(result)
         
         # All functions
@@ -125,7 +128,7 @@ class TestSeparateOutputsTrue:
         """Test that separate mode doesn't create duplicate nodes."""
         pipeline = Pipeline(nodes=[double, triple, add_ten])
         
-        result = pipeline.visualize(separate_outputs=True)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=True)
         titles = get_svg_titles(result)
         
         counts = Counter(titles)
@@ -143,7 +146,7 @@ class TestSeparateOutputsNested:
         outer = Pipeline(nodes=[inner.as_node()])
         
         # Combined mode at depth=2 (expanded)
-        result = outer.visualize(depth=2, separate_outputs=False)
+        result = outer.visualize(engine="graphviz", depth=2, separate_outputs=False)
         titles = get_svg_titles(result)
         
         # Functions should be visible
@@ -160,7 +163,7 @@ class TestSeparateOutputsNested:
         outer = Pipeline(nodes=[inner.as_node()])
         
         # Separate mode at depth=2 (expanded)
-        result = outer.visualize(depth=2, separate_outputs=True)
+        result = outer.visualize(engine="graphviz", depth=2, separate_outputs=True)
         titles = get_svg_titles(result)
         
         # Functions
@@ -182,7 +185,7 @@ class TestSeparateOutputsNested:
         
         outer = Pipeline(nodes=[inner_node, finalize])
         
-        result = outer.visualize(depth=2, separate_outputs=True)
+        result = outer.visualize(engine="graphviz", depth=2, separate_outputs=True)
         titles = get_svg_titles(result)
         
         # Inner outputs should exist
@@ -203,7 +206,7 @@ class TestSeparateOutputsEdgeCases:
         """Test single node pipeline in combined mode."""
         pipeline = Pipeline(nodes=[double])
         
-        result = pipeline.visualize(separate_outputs=False)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=False)
         titles = get_svg_titles(result)
         
         assert "double" in titles
@@ -214,7 +217,7 @@ class TestSeparateOutputsEdgeCases:
         """Test single node pipeline in separate mode."""
         pipeline = Pipeline(nodes=[double])
         
-        result = pipeline.visualize(separate_outputs=True)
+        result = pipeline.visualize(engine="graphviz", separate_outputs=True)
         titles = get_svg_titles(result)
         
         assert "double" in titles
@@ -226,12 +229,12 @@ class TestSeparateOutputsEdgeCases:
         pipeline = Pipeline(nodes=[double]).bind(x=5)
         
         # Combined mode
-        result_combined = pipeline.visualize(separate_outputs=False)
+        result_combined = pipeline.visualize(engine="graphviz", separate_outputs=False)
         titles_combined = get_svg_titles(result_combined)
         assert "x" in titles_combined
         
         # Separate mode
-        result_separate = pipeline.visualize(separate_outputs=True)
+        result_separate = pipeline.visualize(engine="graphviz", separate_outputs=True)
         titles_separate = get_svg_titles(result_separate)
         assert "x" in titles_separate
 

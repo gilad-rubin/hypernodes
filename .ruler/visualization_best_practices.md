@@ -45,13 +45,22 @@ src/hypernodes/viz/
 │   └── html_generator.py # Generates complete HTML with React/ELK/Tailwind
 ├── graphviz/
 │   └── renderer.py      # Static Graphviz SVG rendering
+├── assets/              # Bundled JS/CSS assets (included in wheel, NO CDN)
+│   ├── __init__.py      # Package marker for importlib.resources
+│   ├── react.production.min.js
+│   ├── react-dom.production.min.js
+│   ├── reactflow.umd.js
+│   ├── reactflow.css
+│   ├── elk.bundled.js
+│   ├── htm.min.js
+│   ├── tailwind.min.css # Pre-built from used classes
+│   ├── state_utils.js   # Client-side state transformations
+│   └── theme_utils.js   # Theme detection and color parsing
 
-assets/viz/
-├── state_utils.js       # Client-side state transformations (applyState, compressEdges, etc.)
-├── theme_utils.js       # Theme detection and color parsing
-├── reactflow.umd.js     # React Flow library
-├── elk.bundled.js       # ELK layout library
-└── custom.css           # Custom styling
+build/tailwind/          # Tailwind CSS build infrastructure
+├── tailwind.config.js   # Config with safelist for dynamic classes
+├── tailwind-input.css   # Input file
+└── rebuild.sh           # Run to rebuild tailwind.min.css
 
 tests/viz/
 ├── test_collapsed_pipeline_outputs_and_grouping.py  # Combined outputs, input grouping
@@ -293,7 +302,7 @@ print(json.dumps(rf_data, indent=2))
 **Debug with Node.js**:
 ```javascript
 // scripts/debug_state.js
-const utils = require('../assets/viz/state_utils.js');
+const utils = require('../src/hypernodes/viz/assets/state_utils.js');
 const fs = require('fs');
 
 const html = fs.readFileSync('outputs/test.html', 'utf-8');
@@ -375,15 +384,15 @@ After:  [eval_pair, model_name, num_results] → rag_pipeline
 
 | Issue | What to Check | Fix Location |
 |-------|---------------|--------------|
-| Missing edges after collapse | `compressEdges` output, `getVisibleAncestor` | `state_utils.js` |
-| Hanging/dangling arrows | Handle positions, node visibility, `updateNodeInternals` | `html_generator.py` |
-| Edge starts/ends outside node | Use `validateConnections()` to diagnose | `state_utils.js` debug API |
-| Stale edge paths after layout | Layout version, edge ID updates | `html_generator.py` |
-| Nodes not grouping | `groupInputs`, target matching | `state_utils.js` |
-| Outputs not combined | `applyState`, `sourceId` values | `state_utils.js` |
-| Wrong node positions | ELK layout, `parentNode` | `html_generator.py` |
-| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
-| Pipeline outputs not shown | `functionOutputs` collection | `state_utils.js` |
+| Missing edges after collapse | `compressEdges` output, `getVisibleAncestor` | `viz/assets/state_utils.js` |
+| Hanging/dangling arrows | Handle positions, node visibility, `updateNodeInternals` | `viz/js/html_generator.py` |
+| Edge starts/ends outside node | Use `validateConnections()` to diagnose | `viz/assets/state_utils.js` debug API |
+| Stale edge paths after layout | Layout version, edge ID updates | `viz/js/html_generator.py` |
+| Nodes not grouping | `groupInputs`, target matching | `viz/assets/state_utils.js` |
+| Outputs not combined | `applyState`, `sourceId` values | `viz/assets/state_utils.js` |
+| Wrong node positions | ELK layout, `parentNode` | `viz/js/html_generator.py` |
+| Types missing on inputs | `_extract_input_type` | `viz/graph_walker.py` |
+| Pipeline outputs not shown | `functionOutputs` collection | `viz/assets/state_utils.js` |
 
 ### Debugging Edge Alignment Issues
 

@@ -69,23 +69,24 @@ The visualization system consists of two main parts:
 | UIHandler | `viz/ui_handler.py` | Manage depth, expansion, serialization |
 | JSRenderer | `viz/js/renderer.py` | Transform to React Flow format |
 | html_generator | `viz/js/html_generator.py` | Generate complete HTML with embedded JS |
-| state_utils.js | `assets/viz/state_utils.js` | Client-side state transformations |
-| theme_utils.js | `assets/viz/theme_utils.js` | Theme detection (VS Code dark/light) |
+| state_utils.js | `hypernodes/viz/assets/state_utils.js` | Client-side state transformations |
+| theme_utils.js | `hypernodes/viz/assets/theme_utils.js` | Theme detection (VS Code dark/light) |
 
 ---
 
 ## Dependencies & Versions
 
-The visualization uses **CDN-hosted libraries** embedded in the HTML output:
+The visualization uses **bundled libraries** (no CDN required - fully offline capable).
 
-| Library | Version | CDN URL |
-|---------|---------|---------|
-| React | 18 | `unpkg.com/react@18` |
-| React DOM | 18 | `unpkg.com/react-dom@18` |
-| **React Flow** | **11.10.1** | `unpkg.com/@xyflow/react@11.10.1` |
-| ELK (elkjs) | 0.9.3 | `unpkg.com/elkjs@0.9.3` |
-| Dagre | - | `unpkg.com/dagre` |
-| Web Worker | - | `unpkg.com/web-worker` |
+All assets are located in `src/hypernodes/viz/assets/` and included in the wheel:
+
+| Library | Version | Bundled File |-----|
+| React | 18.2.0 | `react.production.min.js` |
+| React DOM | 18.2.0 | `react-dom.production.min.js` |
+| **React Flow** | **11.10.1** | `reactflow.umd.js` |
+| ELK (elkjs) | 0.8.2 | `elk.bundled.js` |
+| HTM | 3.1.1 | `htm.min.js` |
+| Tailwind CSS | 3.4.x | `tailwind.min.css` (pre-built) |
 
 > ⚠️ **IMPORTANT**: We use React Flow **v11.10.1**, NOT v12. The v12 API is different.
 > 
@@ -723,8 +724,8 @@ assert not result['hasIssues']
 
 | File | Purpose |
 |------|---------|
-| `assets/viz/state_utils.js` | applyState, compressEdges, groupInputs |
-| `assets/viz/theme_utils.js` | Theme detection (VS Code integration) |
+| `viz/assets/state_utils.js` | applyState, compressEdges, groupInputs |
+| `viz/assets/theme_utils.js` | Theme detection (VS Code integration) |
 
 ### Tests
 
@@ -806,7 +807,8 @@ width = Math.min(MAX_NODE_WIDTH, maxContentLen * CHAR_WIDTH_PX + FUNCTION_NODE_B
 
 | What | Where |
 |------|-------|
-| Node height calculation | `html_generator.py` → `useLayout` hook (~lines 800-860) |
-| Edge compression logic | `assets/viz/state_utils.js` → `compressEdges()` |
-| Custom node rendering | `html_generator.py` → `nodeTypes` definition |
-| Debug API | `html_generator.py` → `HyperNodesVizState.debug` object |
+| Node height calculation | `viz/js/html_generator.py` → `useLayout` hook |
+| Edge compression logic | `viz/assets/state_utils.js` → `compressEdges()` |
+| Custom node rendering | `viz/js/html_generator.py` → `nodeTypes` definition |
+| Debug API | `viz/js/html_generator.py` → `HyperNodesVizState.debug` object |
+| Tailwind rebuild | `build/tailwind/rebuild.sh` (run: `bash build/tailwind/rebuild.sh`) |

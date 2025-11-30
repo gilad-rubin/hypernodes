@@ -2,8 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+STATE_UTILS_PATH = 'src/hypernodes/viz/assets/state_utils.js'
 
 
 def run_node(script: str) -> dict:
@@ -22,7 +22,7 @@ def run_node(script: str) -> dict:
 def test_hidden_state_persists_across_toggles_for_collapsed_pipelines():
     script = r"""
     const path = require('path');
-    const utils = require(path.join(process.cwd(), 'assets', 'viz', 'state_utils.js'));
+    const utils = require(path.join(process.cwd(), 'src', 'hypernodes', 'viz', 'assets', 'state_utils.js'));
 
     const baseNodes = [
       { id: 'pipe', type: 'custom', data: { nodeType: 'PIPELINE', label: 'pipe', isExpanded: false } },

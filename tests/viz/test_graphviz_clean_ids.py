@@ -18,8 +18,8 @@ def test_graphviz_output_cleanliness():
     
     pipeline = Pipeline(nodes=[add, retrieve])
     
-    # Generate visualization HTML
-    result = pipeline.visualize()
+    # Generate Graphviz SVG
+    result = pipeline.visualize(engine="graphviz")
     
     # Extract HTML content
     if hasattr(result, 'data'):

@@ -1,7 +1,9 @@
 """Test that visualizations don't show raw Python object IDs."""
 
 import re
+
 import pytest
+
 from hypernodes import Pipeline
 from hypernodes.node import node
 
@@ -30,8 +32,8 @@ def test_no_raw_ids_in_visualization_html():
     
     outer_pipeline = Pipeline(nodes=[inner_node, add_ten], name="outer")
     
-    # Generate visualization HTML
-    result = outer_pipeline.visualize(depth=2)
+    # Generate Graphviz SVG
+    result = outer_pipeline.visualize(depth=2, engine="graphviz")
     
     # Extract HTML content
     if hasattr(result, 'data'):
@@ -85,8 +87,8 @@ def test_pipeline_nodes_have_labels_not_ids():
     
     outer = Pipeline(nodes=[inner_node, finalize])
     
-    # Generate visualization
-    result = outer.visualize(depth=2)
+    # Generate Graphviz SVG
+    result = outer.visualize(depth=2, engine="graphviz")
     
     if hasattr(result, 'data'):
         html_str = result.data
@@ -120,8 +122,8 @@ def test_function_nodes_use_function_names():
     
     pipeline = Pipeline(nodes=[step_one, step_two])
     
-    # Generate visualization
-    result = pipeline.visualize(depth=1)
+    # Generate Graphviz SVG
+    result = pipeline.visualize(depth=1, engine="graphviz")
     
     if hasattr(result, 'data'):
         html_str = result.data
@@ -170,8 +172,8 @@ def test_deeply_nested_pipelines_no_raw_ids():
     
     level1 = Pipeline(nodes=[level2_as_node, level1_node], name="level1")
     
-    # Generate deeply nested visualization
-    result = level1.visualize(depth=3)
+    # Generate deeply nested Graphviz SVG
+    result = level1.visualize(depth=3, engine="graphviz")
     
     if hasattr(result, 'data'):
         html_str = result.data
@@ -201,28 +203,28 @@ if __name__ == "__main__":
         test_no_raw_ids_in_visualization_html()
         print("✅ test_no_raw_ids_in_visualization_html PASSED")
     except AssertionError as e:
-        print(f"❌ test_no_raw_ids_in_visualization_html FAILED")
+        print("❌ test_no_raw_ids_in_visualization_html FAILED")
         print(f"   {e}")
     
     try:
         test_pipeline_nodes_have_labels_not_ids()
         print("✅ test_pipeline_nodes_have_labels_not_ids PASSED")
     except AssertionError as e:
-        print(f"❌ test_pipeline_nodes_have_labels_not_ids FAILED")
+        print("❌ test_pipeline_nodes_have_labels_not_ids FAILED")
         print(f"   {e}")
     
     try:
         test_function_nodes_use_function_names()
         print("✅ test_function_nodes_use_function_names PASSED")
     except AssertionError as e:
-        print(f"❌ test_function_nodes_use_function_names FAILED")
+        print("❌ test_function_nodes_use_function_names FAILED")
         print(f"   {e}")
     
     try:
         test_deeply_nested_pipelines_no_raw_ids()
         print("✅ test_deeply_nested_pipelines_no_raw_ids PASSED")
     except AssertionError as e:
-        print(f"❌ test_deeply_nested_pipelines_no_raw_ids FAILED")
+        print("❌ test_deeply_nested_pipelines_no_raw_ids FAILED")
         print(f"   {e}")
     
     print()

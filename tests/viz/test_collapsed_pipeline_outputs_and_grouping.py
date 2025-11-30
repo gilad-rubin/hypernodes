@@ -4,9 +4,8 @@ import subprocess
 from pathlib import Path
 
 from hypernodes import Pipeline, node
-from hypernodes.viz.ui_handler import UIHandler
 from hypernodes.viz.js.renderer import JSRenderer
-
+from hypernodes.viz.ui_handler import UIHandler
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,7 +73,7 @@ def test_input_grouping_after_compression():
     # Test the groupInputs function
     script = (
         """
-    const utils = require('./assets/viz/state_utils.js');
+    const utils = require('./src/hypernodes/viz/assets/state_utils.js');
     const data = __DATA__;
     
     // Simulate collapsed rag_pipeline state
@@ -132,7 +131,7 @@ def test_expected_not_grouped_with_rag_inputs():
 
     script = (
         """
-    const utils = require('./assets/viz/state_utils.js');
+    const utils = require('./src/hypernodes/viz/assets/state_utils.js');
     const data = __DATA__;
     
     // Simulate collapsed rag_pipeline state

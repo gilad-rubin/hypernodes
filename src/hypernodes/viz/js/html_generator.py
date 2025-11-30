@@ -1,40 +1,36 @@
 import json
-from pathlib import Path
+from importlib.resources import files
 from typing import Any, Dict, Optional
 
 
 def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     """Generate an HTML document for React Flow rendering.
 
-    Uses local vendored JS/CSS assets (assets/viz/*). Falls back to remote CDNs
-    only if a file is missing at runtime.
+    All JS/CSS assets are bundled within the package (hypernodes.viz.assets).
+    No external CDN dependencies are required - works fully offline.
     """
 
     graph_json = json.dumps(graph_data)
 
     def _read_asset(name: str, kind: str) -> Optional[str]:
-        """Read an asset file from assets/viz; return None if missing."""
+        """Read an asset file from the bundled package resources.
+        
+        Assets are located in hypernodes/viz/assets/ which is included in the wheel.
+        Uses importlib.resources for reliable access in installed packages.
+        """
         try:
-            # Adjust path relative to this file: src/hypernodes/viz/js/html_generator.py
-            # Assets are in: assets/viz
-            # So we go up: js -> viz -> hypernodes -> src -> root -> assets
-            path = (
-                Path(__file__).resolve().parent.parent.parent.parent.parent
-                / "assets"
-                / "viz"
-                / name
-            )
-            if not path.exists():
-                return None
-            text = path.read_text(encoding="utf-8")
+            # Access assets from the installed package using importlib.resources
+            asset_files = files("hypernodes.viz.assets")
+            text = (asset_files / name).read_text(encoding="utf-8")
             if kind == "js":
                 return f"<script>{text}</script>"
             if kind == "css":
                 return f"<style>{text}</style>"
+            return text
         except Exception:
             return None
-        return None
 
+    # Load all bundled assets
     react_js = _read_asset("react.production.min.js", "js")
     react_dom_js = _read_asset("react-dom.production.min.js", "js")
     htm_js = _read_asset("htm.min.js", "js")
@@ -43,24 +39,31 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
     rf_css = _read_asset("reactflow.css", "css")
     theme_js = _read_asset("theme_utils.js", "js")
     state_js = _read_asset("state_utils.js", "js")
+    tailwind_css = _read_asset("tailwind.min.css", "css")
 
     # If local assets are missing, keep a minimal external fallback.
-    fallback_css = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/style.css" />'
-    fallback_js = """
-    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/elkjs@0.8.2/lib/elk.bundled.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/reactflow@11.10.1/dist/umd/index.js"></script>
-    """
+    # Check that all required assets are available
+    required_assets = [react_js, react_dom_js, htm_js, elk_js, rf_js, rf_css, tailwind_css]
+    if not all(required_assets):
+        missing = []
+        asset_names = ["react", "react-dom", "htm", "elk", "reactflow.js", "reactflow.css", "tailwind.css"]
+        for asset, name in zip(required_assets, asset_names):
+            if not asset:
+                missing.append(name)
+        raise RuntimeError(
+            f"Missing bundled visualization assets: {missing}. "
+            "The hypernodes package may be incorrectly installed. "
+            "Try reinstalling with: pip install --force-reinstall hypernodes"
+        )
 
     # Build HTML header with Python string interpolation
     html_head = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <script src="https://cdn.tailwindcss.com"></script>
-    {rf_css or fallback_css}
+    <!-- All assets are bundled - no external CDN dependencies -->
+    {tailwind_css}
+    {rf_css}
     {_read_asset("custom.css", "css") or ""}
     <style>
         /* Reset and Base Styles */
@@ -88,15 +91,14 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             border-bottom-width: 1px !important; /* Prevent artifact */
         }}
     </style>
-    <!-- Prefer local vendored assets; fall back to CDN if missing -->
-    {react_js or ""}
-    {react_dom_js or ""}
-    {htm_js or ""}
-    {elk_js or ""}
-    {rf_js or ""}
+    <!-- Bundled JavaScript libraries -->
+    {react_js}
+    {react_dom_js}
+    {htm_js}
+    {elk_js}
+    {rf_js}
     {theme_js or ""}
     {state_js or ""}
-    {fallback_js if not all([react_js, react_dom_js, htm_js, elk_js, rf_js]) else ""}
 </head>"""
 
     # JavaScript body

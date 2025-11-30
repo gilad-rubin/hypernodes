@@ -4,6 +4,8 @@
 
 This guide documents critical compatibility requirements for running JavaScript visualizations inside VSCode notebook cells. These learnings apply to any ipywidget that embeds HTML/JS via iframes.
 
+> **Note**: As of the offline asset bundling update, all JS/CSS libraries are bundled into the package at `hypernodes/viz/assets/` and loaded via `importlib.resources`. No CDN access is required. This guide documents *why* we made those decisions.
+
 ## The Problem
 
 Interactive visualizations using React Flow (or any complex JS) may render correctly in:

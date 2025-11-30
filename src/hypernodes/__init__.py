@@ -41,7 +41,6 @@ from .pipeline import Pipeline
 from .viz import (
     DESIGN_STYLES,
     GraphvizTheme,
-    visualize,
 )
 
 # Optional: DaftEngine (requires daft to be installed)
@@ -69,10 +68,9 @@ __all__ = [
     "DiskCache",
     "PipelineCallback",
     "CallbackContext",
-    # Visualization
+    # Visualization (use pipeline.visualize())
     "GraphvizTheme",
     "DESIGN_STYLES",
-    "visualize",
     # Exceptions
     "HyperNodesError",
     "CycleError",

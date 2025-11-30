@@ -1,0 +1,12 @@
+{
+  "name": "hypernodes-tailwind-build",
+  "version": "1.0.0",
+  "description": "Tailwind CSS build tooling for hypernodes visualization",
+  "private": true,
+  "scripts": {
+    "build": "./rebuild.sh"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.18"
+  }
+}

@@ -49,7 +49,7 @@ results = pipeline.map(inputs={"x": [1,2,3]}, map_over="x")
 - `run()`: Execute pipeline once with given inputs
 - `map()`: Execute pipeline multiple times over collections (zip/product modes)
 - `as_node()`: Wrap pipeline as a node for nesting
-- `visualize()`: Generate Graphviz visualization
+- `visualize()`: Generate visualization (JS interactive by default, or Graphviz SVG with `engine="graphviz"`)
 
 ### 3. HyperNode Protocol (`hypernode.py`)
 Structural protocol (duck typing) for executable units. Both `Node` and `PipelineNode` implement this.
@@ -515,10 +515,29 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
 - **JSRenderer (`js/renderer.py`)**: Transforms VisualizationGraph → React Flow node/edge format.
-- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded.
-- **State Utils (`assets/viz/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
+- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded. Uses `importlib.resources` to load bundled assets.
+- **Bundled Assets (`viz/assets/`)**: All JS/CSS libraries are bundled in the package - **NO CDN dependencies**. Works fully offline.
+- **State Utils (`viz/assets/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
 - **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow.
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
+
+### Bundled Asset Architecture
+
+All visualization JS/CSS assets are bundled in `src/hypernodes/viz/assets/`:
+- `react.production.min.js`, `react-dom.production.min.js` - React 18.2.0
+- `reactflow.umd.js`, `reactflow.css` - React Flow 11.10.1
+- `elk.bundled.js` - ELK layout 0.8.2  
+- `htm.min.js` - HTM templating 3.1.1
+- `tailwind.min.css` - Pre-built Tailwind CSS (~24KB)
+- `state_utils.js`, `theme_utils.js` - Custom utilities
+
+**Asset loading** uses `importlib.resources.files('hypernodes.viz.assets')` for reliable access in installed packages.
+
+**To rebuild Tailwind CSS** (when adding new classes to `html_generator.py`):
+```bash
+npm install -D tailwindcss@3  # One-time setup
+./build/tailwind/rebuild.sh   # Rebuild CSS
+```
 
 ### Key Parameters
 
@@ -552,7 +571,7 @@ HyperNodesVizState.debug.getExpansionState()
 HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
 ```
 
-### Key Client-Side Functions (state_utils.js)
+### Key Client-Side Functions (viz/assets/state_utils.js)
 
 | Function | Purpose |
 |----------|---------|
@@ -565,10 +584,10 @@ HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
 
 | Issue | Check | Location |
 |-------|-------|----------|
-| Missing edges after collapse | `compressEdges` output | `state_utils.js` |
-| Hanging arrows | Handle positions | `html_generator.py` |
-| Nodes not grouping | `groupInputs` | `state_utils.js` |
-| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
+| Missing edges after collapse | `compressEdges` output | `viz/assets/state_utils.js` |
+| Hanging arrows | Handle positions | `viz/js/html_generator.py` |
+| Nodes not grouping | `groupInputs` | `viz/assets/state_utils.js` |
+| Types missing on inputs | `_extract_input_type` | `viz/graph_walker.py` |
 
 See `.ruler/visualization_best_practices.md` for complete debugging guide.
 

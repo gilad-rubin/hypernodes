@@ -31,9 +31,10 @@ def test_no_duplicate_nodes_in_expanded_nested_pipeline():
     outer = Pipeline(nodes=[retrieval_pipeline.as_node(), generate])
     
     # Visualize with depth=2 (expanded), separate_outputs=True for individual output nodes
-    result = outer.visualize(depth=2, separate_outputs=True)
+    # Use engine="graphviz" for SVG output with <title> elements
+    result = outer.visualize(depth=2, separate_outputs=True, engine="graphviz")
     
-    # Extract HTML
+    # Extract SVG content
     if hasattr(result, 'data'):
         html = str(result.data)
     elif hasattr(result, '_repr_html_'):
@@ -101,9 +102,10 @@ def test_no_duplicate_nodes_with_output_mapping():
     outer = Pipeline(nodes=[inner_node, add_ten])
     
     # Visualize with depth=2 (expanded), separate_outputs=True for individual output nodes
-    result = outer.visualize(depth=2, separate_outputs=True)
+    # Use engine="graphviz" for SVG output with <title> elements
+    result = outer.visualize(depth=2, separate_outputs=True, engine="graphviz")
     
-    # Extract HTML
+    # Extract SVG content
     if hasattr(result, 'data'):
         html = str(result.data)
     elif hasattr(result, '_repr_html_'):
