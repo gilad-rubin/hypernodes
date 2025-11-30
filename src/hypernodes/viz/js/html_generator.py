@@ -1234,15 +1234,60 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
 
         const attempts = [];
         const pushCandidate = (value, source) => {
-            if (value) attempts.push({ value: value.trim(), source });
+            if (value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') {
+                attempts.push({ value: value.trim(), source });
+            }
         };
+
+        // Detect host environment first
+        let hostEnv = 'unknown';
+        try {
+            const parentDoc = window.parent?.document;
+            if (parentDoc) {
+                // Check for VS Code
+                if (parentDoc.body.getAttribute('data-vscode-theme-kind') || 
+                    (parentDoc.body.className && parentDoc.body.className.includes('vscode'))) {
+                    hostEnv = 'vscode';
+                }
+                // Check for JupyterLab
+                else if (parentDoc.body.dataset.jpThemeLight !== undefined || 
+                         parentDoc.querySelector('.jp-Notebook')) {
+                    hostEnv = 'jupyterlab';
+                }
+                // Check for Marimo
+                else if (parentDoc.body.dataset.theme || parentDoc.body.dataset.mode ||
+                         (parentDoc.body.className && parentDoc.body.className.includes('marimo'))) {
+                    hostEnv = 'marimo';
+                }
+            }
+        } catch (e) {}
 
         try {
             const parentDoc = window.parent?.document;
             if (parentDoc) {
                 const rootStyle = getComputedStyle(parentDoc.documentElement);
                 const bodyStyle = getComputedStyle(parentDoc.body);
-                pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
+                
+                if (hostEnv === 'vscode') {
+                    // VS Code: use CSS variable
+                    pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
+                } else if (hostEnv === 'jupyterlab') {
+                    // JupyterLab: .jp-Notebook has the actual visible background
+                    const jpNotebook = parentDoc.querySelector('.jp-Notebook');
+                    if (jpNotebook) {
+                        const jpNotebookBg = getComputedStyle(jpNotebook).backgroundColor;
+                        pushCandidate(jpNotebookBg, '.jp-Notebook background');
+                    }
+                    // JupyterLab CSS variables (fallback)
+                    pushCandidate(rootStyle.getPropertyValue('--jp-layout-color0'), '--jp-layout-color0');
+                    pushCandidate(rootStyle.getPropertyValue('--jp-layout-color1'), '--jp-layout-color1');
+                } else {
+                    // Unknown/Marimo: try common sources
+                    pushCandidate(rootStyle.getPropertyValue('--vscode-editor-background'), '--vscode-editor-background');
+                    pushCandidate(rootStyle.getPropertyValue('--jp-layout-color0'), '--jp-layout-color0');
+                }
+                
+                // Fallback to computed backgrounds
                 pushCandidate(bodyStyle.backgroundColor, 'parent body background');
                 pushCandidate(rootStyle.backgroundColor, 'parent root background');
             }
