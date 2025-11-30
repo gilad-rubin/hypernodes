@@ -70,7 +70,32 @@
       : null;
     let source = chosen?.source || "fallback";
 
-    // VS Code explicit attributes win
+    // JupyterLab explicit attributes (check before VS Code)
+    try {
+      const parentDoc = window.parent?.document;
+      if (parentDoc) {
+        // JupyterLab uses data-jp-theme-light attribute ("true" or "false")
+        const jpThemeLight = parentDoc.body.dataset.jpThemeLight;
+        if (jpThemeLight === "true") {
+          theme = "light";
+          source = "jupyterlab data-jp-theme-light";
+        } else if (jpThemeLight === "false") {
+          theme = "dark";
+          source = "jupyterlab data-jp-theme-light";
+        }
+        // JupyterLab body classes
+        const bodyClass = parentDoc.body.className || "";
+        if (!theme && bodyClass.includes("jp-mod-dark")) {
+          theme = "dark";
+          source = "jupyterlab jp-mod-dark";
+        } else if (!theme && bodyClass.includes("jp-mod-light")) {
+          theme = "light";
+          source = "jupyterlab jp-mod-light";
+        }
+      }
+    } catch (_) {}
+
+    // VS Code explicit attributes
     try {
       const docForAttrs = window.parent?.document || document;
       const themeKind = docForAttrs?.body?.getAttribute("data-vscode-theme-kind") || "";
@@ -81,6 +106,40 @@
       } else if (themeKind.includes("dark") || bodyClass.includes("vscode-dark")) {
         theme = "dark";
         source = "vscode attribute";
+      }
+    } catch (_) {}
+
+    // Marimo notebook detection
+    try {
+      const parentDoc = window.parent?.document;
+      if (parentDoc && !theme) {
+        // Marimo uses data-theme or data-mode attributes
+        const dataTheme = parentDoc.body.dataset.theme || parentDoc.documentElement.dataset.theme;
+        const dataMode = parentDoc.body.dataset.mode || parentDoc.documentElement.dataset.mode;
+        if (dataTheme === "dark" || dataMode === "dark") {
+          theme = "dark";
+          source = "marimo data-theme/mode";
+        } else if (dataTheme === "light" || dataMode === "light") {
+          theme = "light";
+          source = "marimo data-theme/mode";
+        }
+        // Marimo body classes
+        const bodyClass = parentDoc.body.className || "";
+        if (!theme && (bodyClass.includes("dark-mode") || bodyClass.includes("dark"))) {
+          theme = "dark";
+          source = "marimo dark-mode class";
+        }
+        // Check color-scheme CSS property
+        if (!theme) {
+          const colorScheme = getComputedStyle(parentDoc.documentElement).getPropertyValue("color-scheme").trim();
+          if (colorScheme.includes("dark")) {
+            theme = "dark";
+            source = "color-scheme property";
+          } else if (colorScheme.includes("light")) {
+            theme = "light";
+            source = "color-scheme property";
+          }
+        }
       }
     } catch (_) {}
 

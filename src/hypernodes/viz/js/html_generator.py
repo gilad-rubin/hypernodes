@@ -90,6 +90,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         .node-function-light {{
             border-bottom-width: 1px !important; /* Prevent artifact */
         }}
+
+        /* Force default cursor (arrow) instead of grab hand */
+        .react-flow__pane {{ cursor: default !important; }}
+        .react-flow__pane.dragging {{ cursor: grabbing !important; }}
     </style>
     <!-- Bundled JavaScript libraries -->
     {react_js}
@@ -350,8 +354,8 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     <${Icons.Type} />
                 <//>
                 <div className=${`h-px my-1 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
-                <${TooltipButton} onClick=${onToggleTheme} tooltip="Toggle Theme" theme=${theme}>
-                    ${theme === 'light' ? html`<${Icons.Moon} />` : html`<${Icons.Sun} />`}
+                <${TooltipButton} onClick=${onToggleTheme} tooltip=${theme === 'dark' ? "Switch to Light Theme" : "Switch to Dark Theme"} theme=${theme}>
+                    ${theme === 'dark' ? html`<${Icons.Sun} />` : html`<${Icons.Moon} />`}
                 <//>
             <//>
         `;
@@ -1251,9 +1255,35 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const parsed = parseColorString(chosen.value);
         const luminance = parsed ? parsed.luminance : null;
 
-        let autoTheme = luminance !== null ? (luminance > 150 ? 'light' : 'dark') : 'light';
+        let autoTheme = luminance !== null ? (luminance > 150 ? 'light' : 'dark') : null;
         let source = luminance !== null ? `${chosen.source} luminance` : chosen.source;
 
+        // JupyterLab detection (check before VS Code)
+        try {
+            const parentDoc = window.parent?.document;
+            if (parentDoc) {
+                // JupyterLab uses data-jp-theme-light attribute ("true" or "false")
+                const jpThemeLight = parentDoc.body.dataset.jpThemeLight;
+                if (jpThemeLight === 'true') {
+                    autoTheme = 'light';
+                    source = 'jupyterlab data-jp-theme-light';
+                } else if (jpThemeLight === 'false') {
+                    autoTheme = 'dark';
+                    source = 'jupyterlab data-jp-theme-light';
+                }
+                // JupyterLab body classes
+                const bodyClass = parentDoc.body.className || '';
+                if (!autoTheme && bodyClass.includes('jp-mod-dark')) {
+                    autoTheme = 'dark';
+                    source = 'jupyterlab jp-mod-dark';
+                } else if (!autoTheme && bodyClass.includes('jp-mod-light')) {
+                    autoTheme = 'light';
+                    source = 'jupyterlab jp-mod-light';
+                }
+            }
+        } catch (e) {}
+
+        // VS Code detection
         try {
             const parentDoc = window.parent?.document;
             if (parentDoc) {
@@ -1271,7 +1301,42 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             }
         } catch (e) {}
 
-        if (source === 'default' && window.matchMedia) {
+        // Marimo detection
+        try {
+            const parentDoc = window.parent?.document;
+            if (parentDoc && !autoTheme) {
+                // Marimo uses data-theme or data-mode attributes
+                const dataTheme = parentDoc.body.dataset.theme || parentDoc.documentElement.dataset.theme;
+                const dataMode = parentDoc.body.dataset.mode || parentDoc.documentElement.dataset.mode;
+                if (dataTheme === 'dark' || dataMode === 'dark') {
+                    autoTheme = 'dark';
+                    source = 'marimo data-theme/mode';
+                } else if (dataTheme === 'light' || dataMode === 'light') {
+                    autoTheme = 'light';
+                    source = 'marimo data-theme/mode';
+                }
+                // Marimo body classes
+                const bodyClass = parentDoc.body.className || '';
+                if (!autoTheme && (bodyClass.includes('dark-mode') || bodyClass.includes('dark'))) {
+                    autoTheme = 'dark';
+                    source = 'marimo dark-mode class';
+                }
+                // Check color-scheme CSS property
+                if (!autoTheme) {
+                    const colorScheme = getComputedStyle(parentDoc.documentElement).getPropertyValue('color-scheme').trim();
+                    if (colorScheme.includes('dark')) {
+                        autoTheme = 'dark';
+                        source = 'color-scheme property';
+                    } else if (colorScheme.includes('light')) {
+                        autoTheme = 'light';
+                        source = 'color-scheme property';
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // Fallback to prefers-color-scheme
+        if (!autoTheme && window.matchMedia) {
             if (window.matchMedia('(prefers-color-scheme: light)').matches) {
                 autoTheme = 'light';
                 source = 'prefers-color-scheme';
@@ -1282,7 +1347,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         }
 
         return {
-            theme: autoTheme,
+            theme: autoTheme || 'dark',
             background: parsed ? (parsed.resolved || parsed.raw || chosen.value) : chosen.value,
             luminance,
             source,
@@ -1321,13 +1386,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         const nodesRef = useRef(initialData.nodes);
 
         const resolvedDetected = detectedTheme || { theme: themePreference === 'auto' ? 'dark' : themePreference, background: 'transparent', luminance: null, source: 'init' };
+        
+        // manualTheme: null = Auto (use detected), 'light' = forced light, 'dark' = forced dark
         const activeTheme = useMemo(() => {
+            if (manualTheme) return manualTheme;
             const base = themePreference === 'auto' ? (resolvedDetected.theme || 'dark') : themePreference;
-            return manualTheme || base;
+            return base;
         }, [manualTheme, resolvedDetected.theme, themePreference]);
+        
+        // Background: Auto mode uses dynamic detected background, manual modes use predefined colors
         const activeBackground = useMemo(() => {
+            // Manual override: use predefined colors
             if (manualTheme) return manualTheme === 'light' ? '#f8fafc' : '#020617';
             
+            // Auto mode: use detected background from notebook environment
             const bg = resolvedDetected.background;
             if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') {
                 return activeTheme === 'light' ? '#f8fafc' : '#020617';
@@ -1474,11 +1546,19 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             return () => clearInterval(interval);
         }, [activeTheme, activeBackground, resolvedDetected, showThemeDebug, themePreference, manualTheme, debugOverlays]);
 
+        // Simple 2-state theme toggle:
+        // - When in detected theme (manualTheme=null): show opposite theme's icon, click switches to opposite with predefined bg
+        // - When in manual theme: click returns to detected theme with notebook's bg
         const toggleTheme = useCallback(() => {
-            const current = manualTheme || (themePreference === 'auto' ? resolvedDetected.theme : themePreference);
-            const next = current === 'light' ? 'dark' : 'light';
-            setManualTheme(next);
-        }, [manualTheme, themePreference, resolvedDetected.theme]);
+            if (manualTheme === null) {
+                // Currently in auto/detected mode → switch to opposite theme (predefined bg)
+                const detected = resolvedDetected.theme || 'dark';
+                setManualTheme(detected === 'dark' ? 'light' : 'dark');
+            } else {
+                // Currently in manual mode → return to detected theme (notebook bg)
+                setManualTheme(null);
+            }
+        }, [manualTheme, resolvedDetected.theme]);
 
         // Compress edges first (remaps to visible ancestors when pipelines collapse)
         // IMPORTANT: Use nodesWithVisibility and stateResult.edges (synchronous) instead of 
@@ -1648,6 +1728,17 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 } catch (e) {
                     // Ignore cross-origin errors or missing frameElement
                 }
+                
+                // Notify parent window of size changes (for ScrollablePipelineWidget)
+                try {
+                    window.parent.postMessage({
+                        type: 'hypernodes-viz-resize',
+                        height: desiredHeight,
+                        width: desiredWidth
+                    }, '*');
+                } catch (e) {
+                    // Ignore if parent communication fails
+                }
             }
         }, [graphHeight, graphWidth]);
 
@@ -1702,10 +1793,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
             });
         }, [layoutedEdges, theme, isLayouting, debugOverlays, expansionKey]);
 
+        // Notify parent to re-enable scroll overlay after any click interaction
+        const notifyParentClick = useCallback(() => {
+            try {
+                window.parent.postMessage({ type: 'hypernodes-viz-click' }, '*');
+            } catch (e) {
+                // Ignore if parent communication fails
+            }
+        }, []);
+
         return html`
           <div 
             className=${`w-full relative overflow-hidden transition-colors duration-300`}
             style=${{ backgroundColor: bgColor, height: '100vh', width: '100vw' }}
+            onClick=${notifyParentClick}
           >
             <!-- Background Grid -->
             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none mix-blend-overlay"></div>

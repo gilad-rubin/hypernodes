@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2025-11-30
+
+### Added
+- **Interactive JS Visualization as Default**: The `pipeline.visualize()` method now defaults to `engine="js"` for an interactive React Flow-based visualization with expand/collapse support.
+- **Offline Support**: All JavaScript dependencies (React, React DOM, React Flow, ELK, Tailwind CSS) are now bundled within the package under `viz/assets/`, eliminating CDN dependencies for fully offline operation.
+- **`separate_outputs` Option**: Both JS and Graphviz renderers now support `separate_outputs=True` to render function outputs as distinct nodes rather than combining them with function nodes.
+- **`show_types` Option**: Both JS and Graphviz renderers now support `show_types=True` to display type hints on input and output nodes.
+- **Interactive View Controls**: The JS visualization now includes a control panel with toggle buttons for:
+  - Separate/merge outputs mode
+  - Show/hide type hints
+  - Theme toggle (light/dark/auto)
+  - Debug overlay toggle
+- **VSCode Notebook Compatibility**: Added comprehensive guide and debugging utilities (`quick_check`, `diagnose_widget`) for ensuring JS visualizations work correctly in VSCode notebook iframes.
+- **State Simulator**: New Python-side state simulation for testing visualization transformations (`simulate_state`, `verify_edge_alignment`, `simulate_collapse_expand_cycle`, `diagnose_all_states`).
+- **Debug Overlay**: Browser debug mode with coordinate validation, node bounding boxes, and edge connection point visualization. Enable via `HyperNodesVizState.debug.showOverlays()` or the bug icon.
+- **Edge Alignment Fixes**: Implemented `onTransitionEnd` handling to ensure edges connect correctly after collapse/expand animations.
+
+### Changed
+- **Bundled Assets Architecture**: Moved from external CDN loading to package-bundled assets for React, React Flow, ELK layout, and Tailwind CSS.
+- **Theme Detection**: Added `theme_utils.js` for robust theme detection that works across Jupyter, VSCode, and standalone HTML contexts.
+
+### Fixed
+- **Hanging Arrows After Collapse**: Fixed race condition where edges would appear disconnected after collapsing pipelines due to layout calculations happening during CSS transitions.
+- **Input Grouping**: Inputs targeting the same node are now properly grouped in the visualization.
+- **Boundary Output Visibility**: Collapsed pipelines correctly show their outputs at the pipeline boundary; expanded pipelines hide boundary outputs.
+- **Edge Compression**: Edges to internal nodes of collapsed pipelines are properly remapped to the collapsed pipeline node.
+
 ## [0.4.6] - 2025-11-26
 
 ### Added

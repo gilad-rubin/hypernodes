@@ -36,6 +36,9 @@ __all__ = [
     "UIHandler",
     "GraphvizRenderer",
     "JSRenderer",
+    # Widgets
+    "PipelineWidget",
+    "ScrollablePipelineWidget",
     # State simulation (for testing)
     "simulate_state",
     "verify_state",
@@ -49,6 +52,17 @@ __all__ = [
     "DESIGN_STYLES",
     "GraphvizTheme",
 ]
+
+
+# Lazy imports for widget classes (requires ipywidgets)
+def __getattr__(name):
+    if name == "PipelineWidget":
+        from .visualization_widget import PipelineWidget
+        return PipelineWidget
+    elif name == "ScrollablePipelineWidget":
+        from .visualization_widget import ScrollablePipelineWidget
+        return ScrollablePipelineWidget
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _detect_environment() -> str:
