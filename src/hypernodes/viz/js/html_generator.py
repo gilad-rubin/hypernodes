@@ -90,10 +90,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         .node-function-light {{
             border-bottom-width: 1px !important; /* Prevent artifact */
         }}
-
-        /* Force default cursor (arrow) instead of grab hand */
-        .react-flow__pane {{ cursor: default !important; }}
-        .react-flow__pane.dragging {{ cursor: grabbing !important; }}
     </style>
     <!-- Bundled JavaScript libraries -->
     {react_js}
@@ -1786,7 +1782,6 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 }
             }
         }, [graphHeight, graphWidth]);
-
         // --- Resize Handling (Task 2) ---
         useEffect(() => {
             const handleResize = () => {
@@ -1800,10 +1795,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         useEffect(() => {
             if (layoutedNodes.length > 0) {
                 // Immediate fit
-                window.requestAnimationFrame(() => fitView({ padding: 0.1, duration: 0, minZoom: 0.5, maxZoom: 1 }));
+                window.requestAnimationFrame(() => fitView({ padding: 0.1, duration: 0, minZoom: 0.5, maxZoom: 1.5 }));
                 // Delayed fit to catch iframe resize
                 setTimeout(() => {
-                    fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1 });
+                    fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1.5 });
                 }, 100);
             }
         }, [layoutedNodes, fitView]);

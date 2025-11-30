@@ -44,6 +44,8 @@ But show **blank space** in VSCode notebooks ❌
 </script>
 ```
 
+
+
 ### 2. Regular Scripts Need DOM Ready
 
 **Problem**: When switching from module to regular scripts, the script may execute before the DOM is fully parsed.

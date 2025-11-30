@@ -240,8 +240,15 @@ class ScrollablePipelineWidget(widgets.HTML):
     var overlay = document.getElementById('{overlay_id}');
     var iframe = document.getElementById('{iframe_id}');
     
-    // Disable overlay interaction entirely to allow direct access to the widget
-    overlay.style.pointerEvents = 'none';
+    // Click to enable interaction mode
+    overlay.addEventListener('click', function(e) {{
+        overlay.style.pointerEvents = 'none';
+    }});
+    
+    // Mouse leave: re-enable scroll passthrough
+    wrapper.addEventListener('mouseleave', function(e) {{
+        overlay.style.pointerEvents = 'auto';
+    }});
     
     // Listen for messages from the iframe
     window.addEventListener('message', function(event) {{
@@ -261,6 +268,10 @@ class ScrollablePipelineWidget(widgets.HTML):
                     iframe.style.width = '100%';
                 }}
             }}
+        }}
+        // Re-enable scroll after any click inside the visualization
+        if (event.data && event.data.type === 'hypernodes-viz-click') {{
+            overlay.style.pointerEvents = 'auto';
         }}
     }});
 }})();
