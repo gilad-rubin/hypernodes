@@ -1,13 +1,13 @@
 [project]
 name = "hypernodes"
-version = "0.4.7"
+version = "0.4.8"
 description = "A hierarchical, modular pipeline system for ML/AI workflows"
 authors = [
     {name = "Gilad Rubin", email = "me@giladrubin.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 keywords = ["pipeline", "caching", "ml", "ai", "workflow", "dag", "machine-learning"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -15,7 +15,10 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -73,16 +76,14 @@ examples = [
     "diskcache>=5.6.3",
     "ipykernel>=6.31.0",
     "model2vec>=0.7.0",
-    "numpy>=2.3.4",
-    "pandas>=2.3.3",
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
     "pydantic>=2.12.3",
     "pylate>=1.0.0",
     "pytrec-eval>=0.5",
     "rank-bm25>=0.2.2",
 ]
-dev = [
-    "numpy>=2.3.4",
-]
+dev = []
 
 [project.urls]
 Homepage = "https://github.com/gilad-rubin/hypernodes"

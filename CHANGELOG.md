@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2025-11-30
+
+### Changed
+- **Python Version Support**: Lowered minimum Python version from 3.12 to 3.10, broadening compatibility while maintaining support for all optional dependencies including Daft engine.
+
+### Fixed
+- **Python 3.10/3.11 Compatibility**: Fixed multi-line f-strings in test files that were using Python 3.12+ syntax.
+
 ## [0.4.7] - 2025-11-30
 
 ### Added

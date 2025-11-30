@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 from hypernodes import DiskCache, Pipeline, node
 
-
 # Helper to track execution
 execution_log = []
 
@@ -102,10 +101,11 @@ def test_3_8_caching_with_custom_cache_key():
             def __cache_key__(self) -> str:
                 import json
                 # Only model_name and temperature affect caching
-                return f"{self.__class__.__name__}::{json.dumps({
+                data = json.dumps({
                     'model': self.model_name,
                     'temp': self.temperature
-                }, sort_keys=True)}"
+                }, sort_keys=True)
+                return f"{self.__class__.__name__}::{data}"
             
             def generate(self, prompt: str) -> str:
                 self._call_count += 1

@@ -339,11 +339,10 @@ def test_caching_with_custom_cache_key():
             import json
 
             # Only model_name and temperature affect caching
-            return f"{self.__class__.__name__}::{
-                json.dumps(
-                    {'model': self.model_name, 'temp': self.temperature}, sort_keys=True
-                )
-            }"
+            data = json.dumps(
+                {'model': self.model_name, 'temp': self.temperature}, sort_keys=True
+            )
+            return f"{self.__class__.__name__}::{data}"
 
         def generate(self, prompt: str) -> str:
             self._call_count += 1
