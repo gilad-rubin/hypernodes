@@ -339,7 +339,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 <${TooltipButton} onClick=${() => zoomOut()} tooltip="Zoom Out" theme=${theme}>
                     <${Icons.ZoomOut} />
                 <//>
-                <${TooltipButton} onClick=${() => fitView({ padding: 0.2, duration: 200 })} tooltip="Fit View" theme=${theme}>
+                <${TooltipButton} onClick=${() => fitView({ padding: 0.2, duration: 0 })} tooltip="Fit View" theme=${theme}>
                     <${Icons.Center} />
                 <//>
                 <div className=${`h-px my-1 ${theme === 'light' ? 'bg-slate-200' : 'bg-slate-700'}`}></div>
@@ -1785,21 +1785,17 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Resize Handling (Task 2) ---
         useEffect(() => {
             const handleResize = () => {
-                fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1 });
+                fitView({ padding: 0.1, duration: 0, minZoom: 0.5, maxZoom: 1 });
             };
             window.addEventListener('resize', handleResize);
             return () => window.removeEventListener('resize', handleResize);
         }, [fitView]);
         
-        // Re-fit when layout changes - Forced recentering after slight delay to allow iframe resize
+        // Re-fit when layout changes - Instant fit without animation
         useEffect(() => {
             if (layoutedNodes.length > 0) {
-                // Immediate fit
+                // Immediate fit with no animation
                 window.requestAnimationFrame(() => fitView({ padding: 0.1, duration: 0, minZoom: 0.5, maxZoom: 1.5 }));
-                // Delayed fit to catch iframe resize
-                setTimeout(() => {
-                    fitView({ padding: 0.1, duration: 200, minZoom: 0.5, maxZoom: 1.5 });
-                }, 100);
             }
         }, [layoutedNodes, fitView]);
 
@@ -1867,7 +1863,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 }
               }}
               fitView
-              fitViewOptions=${{ padding: 0.02, minZoom: 0.5, maxZoom: 1 }}
+              fitViewOptions=${{ padding: 0.02, minZoom: 0.5, maxZoom: 1, duration: 0 }}
               minZoom=${0.1}
               maxZoom=${2}
               className=${'bg-transparent'}
@@ -1911,7 +1907,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
               ` : null}
               ${debugOverlays ? html`<${DebugOverlay} nodes=${layoutedNodes} edges=${styledEdges} enabled=${debugOverlays} theme=${theme} />` : null}
             <//>
-            ${(layoutError || (!layoutedNodes.length && rfNodes.length) || (!rfNodes.length)) ? html`
+            ${(!isLayouting && (layoutError || (!layoutedNodes.length && rfNodes.length) || (!rfNodes.length))) ? html`
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                   <div className="px-4 py-2 rounded-lg border text-xs font-mono bg-slate-900/80 text-amber-200 border-amber-500/40 shadow-lg pointer-events-auto">
                     ${layoutError ? `Layout error: ${layoutError}` : (!rfNodes.length ? 'No graph data' : 'Layout produced no nodes. Showing fallback.')}
