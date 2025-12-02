@@ -1,10 +1,12 @@
 from functools import singledispatchmethod
 from typing import Any, Dict, List, Optional, Set, get_type_hints
 
+from ..branch import BranchNode as HyperBranchNode
 from ..node import Node
 from ..pipeline import Pipeline
 from ..pipeline_node import PipelineNode as HyperPipelineNode
 from .structures import (
+    BranchVizNode,
     DataNode,
     DualNode,
     FunctionNode,
@@ -232,6 +234,43 @@ class GraphWalker:
         nodes_out.append(viz_node)
         
         self._handle_connections(node, node_id, prefix, nodes_out, edges_out, scope, parent_pipeline)
+
+    @_visit_node.register
+    def _(
+        self,
+        node: HyperBranchNode,
+        parent_id: Optional[str],
+        prefix: str,
+        nodes_out: List[VizNode],
+        edges_out: List[VizEdge],
+        scope: Dict[str, str],
+        parent_pipeline: Optional[Pipeline] = None,
+    ):
+        """Visit a BranchNode and create visualization structure."""
+        func_name = node.name
+        node_id = f"{prefix}{func_name}"
+        label = func_name
+        
+        # Get target node IDs
+        when_true_target = f"{prefix}{node.when_true_name}"
+        when_false_target = f"{prefix}{node.when_false_name}"
+        
+        viz_node = BranchVizNode(
+            id=node_id,
+            parent_id=parent_id,
+            label=label,
+            function_name=func_name,
+            when_true_target=when_true_target,
+            when_false_target=when_false_target,
+        )
+        nodes_out.append(viz_node)
+        
+        # Handle input connections (branch takes inputs like any other node)
+        self._handle_input_connections(node, node_id, prefix, nodes_out, edges_out, scope)
+        
+        # Create edges to targets with labels
+        edges_out.append(VizEdge(source=node_id, target=when_true_target, label="True"))
+        edges_out.append(VizEdge(source=node_id, target=when_false_target, label="False"))
 
     def _expand_pipeline_node(
         self,

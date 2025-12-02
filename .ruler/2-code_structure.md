@@ -57,6 +57,55 @@ Structural protocol (duck typing) for executable units. Both `Node` and `Pipelin
 **Required attributes:**
 - `name`, `cache`, `root_args`, `output_name`, `code_hash`
 
+### 3.5 Branch Nodes (`branch.py`)
+Conditional execution routing based on boolean conditions.
+
+```python
+from hypernodes import branch, node, Pipeline
+
+@branch(when_true=process_valid, when_false=handle_error)
+def is_valid(data: dict) -> bool:
+    return data.get("valid", False)
+
+@node(output_name="result")
+def process_valid(data: dict) -> str:
+    return "Valid!"
+
+@node(output_name="result")
+def handle_error(data: dict) -> str:
+    return "Error!"
+
+pipeline = Pipeline(nodes=[is_valid, process_valid, handle_error])
+```
+
+**How it works:**
+- Branch nodes produce mutually-exclusive "gate signals" (`_gate_{name}_true`, `_gate_{name}_false`)
+- Target nodes implicitly depend on these gate signals
+- Only the winning path executes; nodes in the losing path are skipped
+- Both paths can produce the same output name (exclusive producers)
+
+**Key properties:**
+- `when_true`: Target node/function for True branch
+- `when_false`: Target node/function for False branch
+- `true_gate`, `false_gate`: Gate signal output names
+- `cache`: Always False - branch decisions should be re-evaluated
+
+**Graph Builder integration:**
+- Tracks `branch_gates`: which outputs are gate signals
+- Tracks `gate_dependencies`: which nodes depend on which gates
+- Tracks `exclusive_producers`: nodes producing same output in different branches
+- Validates all branch targets exist in pipeline
+
+**Engine execution:**
+- `SeqEngine` tracks `satisfied_gates: Set[str]` during execution
+- Before executing a node, checks if its gate dependencies are satisfied
+- Skipped nodes trigger `on_node_skipped` callback
+
+**Visualization:**
+- Rendered as **diamond shapes** in both JS and Graphviz
+- Edges to targets labeled "True" / "False"
+- See `viz/structures.py::BranchVizNode` and `viz/graph_walker.py`
+
 ### 4. Engines & Orchestration
 
 #### Engines (`engines.py`, `sequential_engine.py`)
@@ -228,6 +277,8 @@ pipeline = Pipeline(nodes=[...], engine=engine)
 - `on_pipeline_start/end`
 - `on_node_start/end`
 - `on_node_cached` (cache hit)
+- `on_branch_decision` (branch node evaluated)
+- `on_node_skipped` (node skipped due to branch routing)
 - `on_map_start/end`
 - `on_map_item_start/end`
 - `on_nested_pipeline_start/end`
@@ -373,20 +424,26 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 
 ### Core (`src/hypernodes/`)
 - `node.py`: Node class and `@node` decorator
+- `branch.py`: BranchNode class and `@branch` decorator for conditional execution
 - `pipeline.py`: Pipeline class with run/map/as_node methods (pure definition, no execution state)
-- `sequential_engine.py`: Default execution engine (owns cache, callbacks)
-- `orchestrator.py`: **NEW** - Shared execution orchestration for all engines
+- `sequential_engine.py`: Default execution engine (owns cache, callbacks, handles branch routing)
+- `orchestrator.py`: Shared execution orchestration for all engines
 - `node_execution.py`: Single node execution logic (decoupled, accepts explicit cache/callbacks)
-- `graph_builder.py`: DAG construction from node list (SimpleGraphBuilder implementation)
+- `graph_builder.py`: DAG construction from node list, including branch gate tracking
 - `map_planner.py`: Map operation planning (zip vs product)
 - `cache.py`: Caching system with signature computation
-- `callbacks.py`: Callback protocol + context + dispatcher
+- `callbacks.py`: Callback protocol + context + dispatcher (includes `on_branch_decision`, `on_node_skipped`)
 
 ### Visualization (`src/hypernodes/viz/`)
 - `ui_handler.py`: Backend state manager + serialization for all frontends
+- `graph_walker.py`: Graph traversal, handles BranchNode → BranchVizNode conversion
+- `structures.py`: Data classes including `BranchVizNode` for diamond rendering
 - `graphviz_ui.py`: Graphviz rendering engine
 - `js_ui.py`: IPyWidget/React Flow rendering helpers
 - `visualization_engine.py`: Pluggable engine registry/protocol
+- `graphviz/renderer.py`: Renders branch nodes as diamonds with True/False edge labels
+- `js/renderer.py`: Maps BranchVizNode to React Flow BRANCH type
+- `js/html_generator.py`: CustomNode renders BRANCH as diamond shape
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine facade
@@ -404,6 +461,10 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `test_caching.py`: Cache behavior tests
 - `test_nested_pipelines.py`: Nested pipeline tests
 - `test_callbacks.py`: Callback system tests
+- `test_branch.py`: Branch node execution and validation tests
+
+### Visualization Tests (`tests/viz/`)
+- `test_branch_visualization.py`: Branch node rendering in JS and Graphviz
 
 ## Common Patterns
 
@@ -437,6 +498,31 @@ pipeline = Pipeline(nodes=[slow_node1, slow_node2], engine=engine)
 @node(output_name=("mean", "std"))
 def stats(data: list) -> tuple:
     return sum(data)/len(data), calculate_std(data)
+```
+
+### Conditional Execution with Branch Nodes
+```python
+from hypernodes import branch, node, Pipeline
+
+@node(output_name="score")
+def validate(data: dict) -> float:
+    return data.get("confidence", 0.0)
+
+@branch(when_true=process_valid, when_false=handle_error)
+def is_confident(score: float) -> bool:
+    return score > 0.8
+
+@node(output_name="result")
+def process_valid(score: float) -> str:
+    return f"High confidence: {score}"
+
+@node(output_name="result")  # Same output name OK - exclusive branches
+def handle_error(score: float) -> str:
+    return f"Low confidence: {score}"
+
+pipeline = Pipeline(nodes=[validate, is_confident, process_valid, handle_error])
+result = pipeline.run(inputs={"data": {"confidence": 0.95}})
+# {"score": 0.95, "result": "High confidence: 0.95"}
 ```
 
 ### Binding Default Inputs

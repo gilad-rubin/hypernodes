@@ -285,6 +285,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         Function: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line></svg>`,
         Pipeline: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
         Dual: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 12L2 12"></path><path d="M12 12L12 22"></path></svg>`,
+        Branch: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M6 3v12"></path><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>`,
         Input: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
         Data: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>`,
         Map: () => html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`,
@@ -666,17 +667,28 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 </div>
               <//>
             ` : null}
-            ${label && !showDebug ? html`
+            ${(label || data?.label) && !showDebug ? html`
               <${EdgeLabelRenderer}>
                 <div
                   style=${{
                     position: 'absolute',
                     transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
                     pointerEvents: 'all',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontFamily: 'ui-monospace, monospace',
+                    fontWeight: '600',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    ...((label || data?.label) === 'True' 
+                      ? { background: '#10b981', border: '1px solid #34d399', color: '#ffffff' }
+                      : (label || data?.label) === 'False' 
+                        ? { background: '#ef4444', border: '1px solid #f87171', color: '#ffffff' }
+                        : { background: 'rgba(15,23,42,0.9)', border: '1px solid #334155', color: '#cbd5e1' }
+                    ),
                   }}
-                  className="px-2 py-1 rounded bg-slate-900/90 border border-slate-700 text-[10px] text-slate-300 font-mono shadow-md backdrop-blur"
                 >
-                  ${label}
+                  ${label || data?.label}
                 </div>
               <//>
             ` : null}
@@ -720,6 +732,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           colors = { bg: "fuchsia", border: "fuchsia", text: "fuchsia", icon: "fuchsia" };
           Icon = Icons.Dual;
           labelType = "DUAL NODE";
+        } else if (data.nodeType === 'BRANCH') {
+          colors = { bg: "yellow", border: "yellow", text: "yellow", icon: "yellow" };
+          Icon = Icons.Branch;
+          labelType = "BRANCH";
         } else if (data.nodeType === 'INPUT') {
           colors = { bg: "cyan", border: "cyan", text: "cyan", icon: "cyan" };
           Icon = Icons.Input;
@@ -828,6 +844,61 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-2px' }} />
                 </div>
              `;
+        }
+
+        // --- Render Branch Node (Diamond Shape) ---
+        if (data.nodeType === 'BRANCH') {
+          const isLight = theme === 'light';
+          // Diamond colors
+          const diamondBg = isLight ? 'linear-gradient(135deg, #fef3c7, #fef08a)' : 'linear-gradient(135deg, #451a03, #78350f)';
+          const diamondBorder = isLight ? '#f59e0b' : '#f59e0b';
+          const diamondShadow = isLight ? '0 4px 8px rgba(245, 158, 11, 0.35)' : '0 4px 8px rgba(0, 0, 0, 0.5)';
+          const labelColor = isLight ? '#78350f' : '#fcd34d';
+          
+          return html`
+            <${DebugWrapper}>
+              <div className="relative flex items-center justify-center"
+                   style=${{ width: '90px', height: '90px' }}
+                   onTransitionEnd=${(e) => { if (e.target === e.currentTarget) updateNodeInternals(id); }}>
+                <!-- Diamond shape using rotated square -->
+                <div style=${{
+                  width: '60px',
+                  height: '60px',
+                  transform: 'rotate(45deg)',
+                  background: diamondBg,
+                  border: `2px solid ${diamondBorder}`,
+                  borderRadius: '6px',
+                  boxShadow: diamondShadow,
+                  transition: 'all 0.2s',
+                }}>
+                </div>
+                <!-- Label overlay (not rotated) -->
+                <div style=${{
+                  position: 'absolute',
+                  inset: '0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}>
+                  <span style=${{
+                    fontSize: '10px',
+                    fontFamily: 'ui-monospace, monospace',
+                    fontWeight: '600',
+                    color: labelColor,
+                    textAlign: 'center',
+                    maxWidth: '80px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }} title=${data.label}>${data.label}</span>
+                </div>
+                <!-- Handles -->
+                <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-4px' }} />
+                <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-4px' }} id="branch-source" />
+              </div>
+            <//>
+          `;
         }
 
         // --- Render Expanded Pipeline Group ---
@@ -1013,6 +1084,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     // Dynamic height based on number of inputs
                     const paramCount = params.length || 1;
                     height = 14 + (paramCount * 22);
+                } else if (n.data?.nodeType === 'BRANCH') {
+                    // Branch node (diamond shape) - fixed dimensions matching the rendered component
+                    width = 90;
+                    height = 90;
                 } else {
                     // Standard Function Node - dynamic width based on label and outputs
                     const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
@@ -1073,11 +1148,12 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.edgeRouting': 'POLYLINE',
                 'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '3.0',
                 
-                // Increased spacing to ensure edges don't touch nodes
-                'elk.layered.spacing.nodeNodeBetweenLayers': '60', // More breathing room vertically
-                'elk.spacing.nodeNode': '24', // Space between nodes in same layer
-                'elk.spacing.edgeNode': '40', // Increased from 30 - prevents edge-node contact
-                'elk.spacing.edgeEdge': '15', // Increased from 15 - space between parallel edges
+                // Increased spacing to ensure edges don't touch nodes and room for edge labels
+                'elk.layered.spacing.nodeNodeBetweenLayers': '80', // More breathing room vertically (was 60)
+                'elk.spacing.nodeNode': '30', // Space between nodes in same layer (was 24)
+                'elk.spacing.edgeNode': '45', // Increased from 40 - prevents edge-node contact
+                'elk.spacing.edgeEdge': '20', // Increased from 15 - space between parallel edges
+                'elk.spacing.edgeLabel': '10', // Space around edge labels
                 
                 // Advanced crossing minimization (Sugiyama algorithm core)
                 'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',

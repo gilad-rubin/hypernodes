@@ -101,7 +101,40 @@ class SeqEngine:
         outputs = {}
         node_signatures = {}
 
+        # Track which gate signals are active (for branch nodes)
+        satisfied_gates: set = set()
+        gate_dependencies = pipeline.graph.gate_dependencies
+        branch_gates = pipeline.graph.branch_gates
+
         for node in nodes:
+            # Check if this node should be skipped due to unsatisfied gate dependencies
+            if self._should_skip_node(node, satisfied_gates, gate_dependencies):
+                # Notify callbacks that node was skipped
+                for callback in self.callbacks:
+                    if hasattr(callback, "on_node_skipped"):
+                        callback.on_node_skipped(
+                            node.name,
+                            f"Gate dependency not satisfied",
+                            ctx,
+                        )
+                continue
+
+            # Check if all required inputs are available
+            # (some might be missing if upstream nodes were skipped due to branching)
+            missing_inputs = [
+                param for param in node.root_args if param not in available_values
+            ]
+            if missing_inputs:
+                # Skip this node - its upstream was in a different branch
+                for callback in self.callbacks:
+                    if hasattr(callback, "on_node_skipped"):
+                        callback.on_node_skipped(
+                            node.name,
+                            f"Input(s) not available: {missing_inputs}",
+                            ctx,
+                        )
+                continue
+
             node_inputs = {param: available_values[param] for param in node.root_args}
             result, signature = execute_single_node(
                 node,
@@ -112,11 +145,99 @@ class SeqEngine:
                 ctx,
                 node_signatures,
             )
-            self._store_node_result(
-                node, result, signature, available_values, outputs, node_signatures
-            )
 
-        return outputs
+            # Handle branch node results specially
+            if hasattr(node, "_is_branch") and node._is_branch:
+                # result is a boolean - add the winning gate to satisfied_gates
+                if result:
+                    satisfied_gates.add(node.true_gate)
+                    # Notify callbacks of branch decision
+                    for callback in self.callbacks:
+                        if hasattr(callback, "on_branch_decision"):
+                            callback.on_branch_decision(node.name, True, ctx)
+                else:
+                    satisfied_gates.add(node.false_gate)
+                    for callback in self.callbacks:
+                        if hasattr(callback, "on_branch_decision"):
+                            callback.on_branch_decision(node.name, False, ctx)
+                # Store gate signals in available_values (for consistency)
+                self._store_branch_result(
+                    node, result, signature, available_values, outputs, node_signatures
+                )
+            else:
+                self._store_node_result(
+                    node, result, signature, available_values, outputs, node_signatures
+                )
+
+        # Filter out gate signals from outputs (they're internal)
+        return {k: v for k, v in outputs.items() if k not in branch_gates}
+
+    def _should_skip_node(
+        self,
+        node: Any,
+        satisfied_gates: set,
+        gate_dependencies: Dict[Any, List[str]],
+    ) -> bool:
+        """Check if a node should be skipped due to unsatisfied gate dependencies.
+
+        A node is skipped if it has gate dependencies and none of them are satisfied.
+
+        Args:
+            node: The node to check
+            satisfied_gates: Set of gate signals that have been activated
+            gate_dependencies: Mapping from node to list of gate signals it depends on
+
+        Returns:
+            True if the node should be skipped
+        """
+        if node not in gate_dependencies:
+            return False
+
+        # Get the gates this node depends on
+        required_gates = gate_dependencies[node]
+        if not required_gates:
+            return False
+
+        # Check if ANY of the required gates are satisfied
+        # (a node might have multiple gates if it's in nested branches)
+        for gate in required_gates:
+            if gate in satisfied_gates:
+                return False
+
+        # None of the required gates are satisfied - skip this node
+        return True
+
+    def _store_branch_result(
+        self,
+        node: Any,
+        result: bool,
+        signature: str,
+        available_values: Dict[str, Any],
+        outputs: Dict[str, Any],
+        node_signatures: Dict[str, str],
+    ) -> None:
+        """Store the result of a branch node execution.
+
+        Branch nodes produce gate signals, not data outputs.
+        Only the winning gate is stored.
+
+        Args:
+            node: The BranchNode
+            result: Boolean result of the branch condition
+            signature: Computed signature for caching
+            available_values: Dict of available values to update
+            outputs: Dict of outputs to update
+            node_signatures: Dict of signatures to update
+        """
+        if result:
+            gate_name = node.true_gate
+        else:
+            gate_name = node.false_gate
+
+        # Store the gate signal (value is True to indicate it's active)
+        available_values[gate_name] = True
+        outputs[gate_name] = True
+        node_signatures[gate_name] = signature
 
     def _store_node_result(
         self,

@@ -1,6 +1,7 @@
 from typing import Any, Dict
 
 from ..structures import (
+    BranchVizNode,
     DataNode,
     DualNode,
     FunctionNode,
@@ -60,7 +61,17 @@ class JSRenderer:
                 rf_node["extent"] = "parent"
 
             # Map specific node types
-            if isinstance(node, FunctionNode):
+            if isinstance(node, BranchVizNode):
+                # Branch nodes are rendered as diamonds
+                rf_node["type"] = "custom"
+                rf_node["data"].update({
+                    "label": node.label,
+                    "nodeType": "BRANCH",
+                    "functionName": node.function_name,
+                    "whenTrueTarget": node.when_true_target,
+                    "whenFalseTarget": node.when_false_target,
+                })
+            elif isinstance(node, FunctionNode):
                 rf_node["type"] = "custom"
                 rf_node["data"].update({
                     "label": node.label,

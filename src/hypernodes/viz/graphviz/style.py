@@ -272,6 +272,7 @@ def create_custom_theme(
             "function": NodeStyle(is_bold=True, color=func_color),
             "pipeline": NodeStyle(is_bold=True, color=pipe_color),
             "dual": NodeStyle(is_bold=True, color=func_color),
+            "branch": NodeStyle(is_bold=True, shape="diamond", color=SelectedColors.BRANCH),
             "data": NodeStyle(is_bold=False, color=input_color),
             "bound_data": NodeStyle(style="filled,rounded", color=input_color),
             "group": NodeStyle(is_bold=False, color=input_color),
@@ -293,6 +294,9 @@ class SelectedColors:
 
     # Input / data nodes: soft green
     INPUT = ColorPair(fill="#b2f2bb", outline="#2f9e44")
+
+    # Branch/decision nodes: amber/gold
+    BRANCH = ColorPair(fill="#fef3c7", outline="#f59e0b", text="#92400e")
 
 
 class LegacyColors:

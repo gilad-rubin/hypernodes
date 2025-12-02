@@ -4,6 +4,7 @@ import subprocess
 from typing import Dict, List, Optional, Union
 
 from ..structures import (
+    BranchVizNode,
     DataNode,
     DualNode,
     FunctionNode,
@@ -142,6 +143,11 @@ class GraphvizRenderer:
         nodes = self.nodes_by_parent.get(parent_id, [])
 
         for node in nodes:
+            # Handle BranchVizNode specially (both modes)
+            if isinstance(node, BranchVizNode):
+                self._render_branch_node(node)
+                continue
+
             if self.separate_outputs:
                 # Separate mode: outputs are rendered as individual nodes
                 # 1. If PipelineNode AND expanded -> CLUSTER
@@ -294,6 +300,34 @@ class GraphvizRenderer:
             f'"{gv_id}" [label={table}, shape="{config.shape}", style="{config.style}", fillcolor="{config.color.fill}", color="{config.color.outline}", margin="{config.margin}", penwidth="{config.penwidth}"];'
         )
 
+    def _render_branch_node(self, node: BranchVizNode):
+        """Render a BranchVizNode as a diamond shape."""
+        # Use branch-specific styling (gold/amber colors)
+        # Get branch config or fall back to function style
+        config = self.style.node_styles.get("branch", self.style.node_styles.get("function"))
+        
+        node_label = node.label
+        node_label_html = self._format_label_html(
+            node_label, color=config.color.text if config else None, is_bold=True
+        )
+
+        # Simple label without table for diamond shape
+        gv_id = self._get_graphviz_id(node)
+        
+        # Use diamond shape with gold/amber colors
+        fill_color = config.color.fill if config else "#fef3c7"  # amber-100
+        outline_color = config.color.outline if config else "#f59e0b"  # amber-500
+        text_color = config.color.text if config else "#92400e"  # amber-800
+        
+        # Escape the label for Graphviz
+        escaped_label = html.escape(node_label)
+        
+        self._add_line(
+            f'"{gv_id}" [label="{escaped_label}", shape="diamond", style="filled", '
+            f'fillcolor="{fill_color}", color="{outline_color}", fontcolor="{text_color}", '
+            f'fontname="{self.style.font_name}", margin="0.2", penwidth="2"];'
+        )
+
     def _render_combined_node(
         self, node: VizNode, outputs: List[Union[DataNode, GroupDataNode]]
     ):
@@ -391,7 +425,22 @@ class GraphvizRenderer:
             gv_source = f'"{self._get_graphviz_id(actual_source_node)}"'
             gv_target = f'"{self._get_graphviz_id(target_node)}"'
 
-        self._add_line(f"{gv_source} -> {gv_target};")
+        # Add edge label if present (e.g., "True" / "False" for branch edges)
+        if edge.label:
+            # Color the label based on True/False
+            if edge.label == "True":
+                label_color = "#22c55e"  # green-500
+            elif edge.label == "False":
+                label_color = "#ef4444"  # red-500
+            else:
+                label_color = self.style.edge_color or "#64748b"
+            
+            self._add_line(
+                f'{gv_source} -> {gv_target} [label="{edge.label}", fontcolor="{label_color}", '
+                f'fontsize="10", fontname="{self.style.font_name}"];'
+            )
+        else:
+            self._add_line(f"{gv_source} -> {gv_target};")
 
     def _get_graphviz_id(self, node: VizNode) -> str:
         """Get a human-readable Graphviz identifier for a node.

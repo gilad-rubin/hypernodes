@@ -1,0 +1,192 @@
+---
+title: Branch Nodes
+description: Conditional execution routing based on boolean conditions.
+---
+
+Branch nodes enable **conditional execution** in your pipelines. Based on a boolean condition, execution continues down one of two paths while the other path is skipped entirely.
+
+## Creating a Branch Node
+
+Use the `@branch` decorator to create a conditional routing point:
+
+```python
+from hypernodes import branch, node, Pipeline
+
+@node(output_name="score")
+def validate(data: dict) -> float:
+    return data.get("confidence", 0.0)
+
+@branch(when_true=process_valid, when_false=handle_invalid)
+def is_confident(score: float) -> bool:
+    return score > 0.8
+
+@node(output_name="result")
+def process_valid(score: float) -> str:
+    return f"High confidence: {score}"
+
+@node(output_name="result")
+def handle_invalid(score: float) -> str:
+    return f"Low confidence: {score}"
+
+pipeline = Pipeline(nodes=[validate, is_confident, process_valid, handle_invalid])
+
+# High confidence path
+result = pipeline.run(inputs={"data": {"confidence": 0.95}})
+# {"score": 0.95, "result": "High confidence: 0.95"}
+
+# Low confidence path
+result = pipeline.run(inputs={"data": {"confidence": 0.3}})
+# {"score": 0.3, "result": "Low confidence: 0.3"}
+```
+
+## How It Works
+
+Branch nodes work through **gate signals** — implicit dependencies that control which path executes:
+
+1. **Branch evaluates**: The decorated function runs and returns `True` or `False`
+2. **Gate signal produced**: Either `_gate_{name}_true` or `_gate_{name}_false` becomes "satisfied"
+3. **Target nodes execute**: Only nodes depending on the satisfied gate will run
+4. **Skipped nodes**: Nodes in the other path are skipped entirely (no computation wasted)
+
+### Exclusive Outputs
+
+Notice that both `process_valid` and `handle_invalid` produce `output_name="result"`. This is allowed because they're in **mutually exclusive branches** — only one will ever execute.
+
+## Visualization
+
+Branch nodes are rendered as **diamond shapes** with labeled edges:
+
+- **Graphviz**: Diamond with amber/yellow fill
+- **React Flow (JS)**: Interactive diamond with "True" (green) and "False" (red) edge labels
+
+```python
+# Generate visualization
+pipeline.visualize(filename="branch_example.svg", engine="graphviz")
+
+# Or interactive HTML
+html = pipeline.visualize(engine="js")
+```
+
+## Callbacks
+
+Branch nodes trigger two special callback events:
+
+```python
+from hypernodes import PipelineCallback
+
+class BranchLogger(PipelineCallback):
+    def on_branch_decision(self, branch_node_id: str, decision: bool, ctx):
+        path = "True" if decision else "False"
+        print(f"Branch '{branch_node_id}' took {path} path")
+    
+    def on_node_skipped(self, node_id: str, reason: str, ctx):
+        print(f"Skipped '{node_id}': {reason}")
+```
+
+## Best Practices
+
+### 1. Keep Branch Functions Simple
+
+Branch conditions should be fast and side-effect free:
+
+```python
+# ✅ Good - simple condition
+@branch(when_true=process, when_false=skip)
+def has_data(items: list) -> bool:
+    return len(items) > 0
+
+# ❌ Avoid - expensive computation in branch
+@branch(when_true=process, when_false=skip)
+def complex_check(data: dict) -> bool:
+    result = expensive_ml_inference(data)  # Don't do this
+    return result > 0.5
+```
+
+### 2. Use Descriptive Names
+
+Branch function names should read like questions:
+
+```python
+# ✅ Good - reads as a question
+@branch(when_true=..., when_false=...)
+def is_valid(data): ...
+
+@branch(when_true=..., when_false=...)
+def has_permission(user): ...
+
+# ❌ Less clear
+@branch(when_true=..., when_false=...)
+def check(data): ...
+```
+
+### 3. Consider Data Flow
+
+Both branches receive the same upstream inputs. Design your pipeline so the condition and both paths can work with the available data:
+
+```python
+@node(output_name="validated")
+def validate(raw_data: str) -> dict:
+    # Both branches will receive this validated dict
+    return {"data": raw_data, "is_valid": len(raw_data) > 0}
+
+@branch(when_true=process, when_false=reject)
+def should_process(validated: dict) -> bool:
+    return validated["is_valid"]
+
+@node(output_name="result")
+def process(validated: dict) -> str:
+    return f"Processed: {validated['data']}"
+
+@node(output_name="result")
+def reject(validated: dict) -> str:
+    return "Rejected: empty data"
+```
+
+## Nested Pipelines
+
+Branch nodes work with nested pipelines. You can branch to a nested pipeline or have branches inside a nested pipeline:
+
+```python
+# Inner pipeline with branch
+@node(output_name="checked")
+def check(x: int) -> int:
+    return x
+
+@branch(when_true=double, when_false=negate)
+def is_positive(checked: int) -> bool:
+    return checked > 0
+
+@node(output_name="result")
+def double(checked: int) -> int:
+    return checked * 2
+
+@node(output_name="result")
+def negate(checked: int) -> int:
+    return -checked
+
+inner = Pipeline(nodes=[check, is_positive, double, negate])
+
+# Use in outer pipeline
+outer = Pipeline(nodes=[some_node, inner.as_node(), final_node])
+```
+
+## Limitations
+
+<Warning>
+Branch nodes are currently supported only in `SeqEngine`. Support for `DaftEngine` and `DaskEngine` is planned for future releases.
+</Warning>
+
+- **Boolean only**: Currently only supports True/False routing. Enum-based `@switch` for multiple paths is planned.
+- **No caching**: Branch node results are never cached — conditions are always re-evaluated.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Nested Pipelines" icon="layer-group" href="./nested-pipelines">
+    Compose pipelines hierarchically.
+  </Card>
+  <Card title="Callbacks" icon="bell" href="../observability/callbacks">
+    Monitor branch decisions and skipped nodes.
+  </Card>
+</CardGroup>
+

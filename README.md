@@ -132,6 +132,45 @@ batch_processor = text_processor.as_node(
 <br/><em>Batch processing with <code>map_over</code></em>
 </p>
 
+## 🔀 Control Flow with Branch Nodes
+
+Branch nodes enable **conditional execution** in your pipelines. Based on a boolean condition, execution continues down one of two paths.
+
+```python
+from hypernodes import branch, node, Pipeline
+
+@node(output_name="value")
+def validate(data: dict) -> dict:
+    return {"score": data.get("score", 0)}
+
+@branch(when_true=process_valid, when_false=handle_error)
+def is_valid(value: dict) -> bool:
+    return value["score"] > 0.5
+
+@node(output_name="result")
+def process_valid(value: dict) -> str:
+    return f"Valid: {value['score']}"
+
+@node(output_name="result")  
+def handle_error(value: dict) -> str:
+    return "Invalid data"
+
+pipeline = Pipeline(nodes=[validate, is_valid, process_valid, handle_error])
+```
+
+<p align="center">
+<img src="assets/readme/branch_example.svg" width="350"/>
+<br/><em>Branch node visualized as a diamond with True/False paths</em>
+</p>
+
+**How it works:**
+- Branch nodes are rendered as **diamond shapes** in visualizations
+- The engine evaluates the condition and **only executes the winning path**
+- Nodes in the skipped branch don't run at all (no wasted computation)
+- Both paths can produce the same output name (`result` above) — the active path wins
+
+---
+
 ## 📦 Smart Caching
 
 HyperNodes implements a content-addressable cache that keeps runs fast **and** correct.
@@ -312,6 +351,10 @@ The full documentation is available in the `docs/` directory:
     - [Nodes](docs/01-core-concepts/01-nodes.md)
     - [Pipelines](docs/01-core-concepts/02-pipelines.md)
     - [Execution](docs/01-core-concepts/03-execution.md)
+- **Composition**
+    - [Nested Pipelines](docs/composition/nested-pipelines.mdx)
+    - [Branch Nodes (Control Flow)](docs/composition/branch-nodes.mdx)
+    - [Dual Nodes](docs/composition/dual-nodes.mdx)
 - **Data Processing**
     - [Mapping (Parallel Processing)](docs/02-data-processing/01-mapping.md)
     - [Nesting Pipelines](docs/02-data-processing/02-nesting.md)

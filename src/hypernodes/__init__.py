@@ -24,6 +24,7 @@ Example:
     {'doubled': 10, 'result': 11}
 """
 
+from .branch import BranchNode, branch
 from .cache import DiskCache
 from .callbacks import CallbackContext, PipelineCallback
 from .decorators import stateful
@@ -56,8 +57,10 @@ __version__ = "0.4.2"
 __all__ = [
     # Decorators
     "node",
+    "branch",
     "stateful",
     # Classes
+    "BranchNode",
     "DualNode",
     "HyperNode",
     "Node",

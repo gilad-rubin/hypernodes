@@ -18,6 +18,18 @@ class DualNode(FunctionNode):
     pass
 
 @dataclass
+class BranchVizNode(BaseVizNode):
+    """Represents a branch/decision node (diamond shape).
+    
+    Branch nodes route execution based on a boolean condition.
+    They have two output paths: True and False.
+    """
+    label: str
+    function_name: str
+    when_true_target: str  # ID of the True target node
+    when_false_target: str  # ID of the False target node
+
+@dataclass
 class PipelineNode(BaseVizNode):
     """Represents a nested pipeline (sub-graph)."""
     label: str
@@ -39,7 +51,7 @@ class GroupDataNode(BaseVizNode):
     source_id: Optional[str] = None
 
 # Union type for all nodes
-VizNode = Union[FunctionNode, DualNode, PipelineNode, DataNode, GroupDataNode]
+VizNode = Union[FunctionNode, DualNode, BranchVizNode, PipelineNode, DataNode, GroupDataNode]
 
 @dataclass
 class VizEdge:

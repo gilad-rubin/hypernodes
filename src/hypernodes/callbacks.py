@@ -273,6 +273,31 @@ class PipelineCallback:
         """
         pass
 
+    # Branch operation hooks
+    def on_branch_decision(
+        self, branch_id: str, decision: bool, ctx: CallbackContext
+    ) -> None:
+        """Called when a branch node makes a routing decision.
+
+        Args:
+            branch_id: ID of the branch node
+            decision: Boolean result of the branch condition (True/False)
+            ctx: Callback context
+        """
+        pass
+
+    def on_node_skipped(
+        self, node_id: str, reason: str, ctx: CallbackContext
+    ) -> None:
+        """Called when a node is skipped due to branch routing.
+
+        Args:
+            node_id: ID of the skipped node
+            reason: Reason for skipping (e.g., "Gate dependency not satisfied")
+            ctx: Callback context
+        """
+        pass
+
     @property
     def supported_engines(self) -> Optional[List[str]]:
         """List of supported engine class names (e.g. ['SeqEngine', 'DaftEngine']).
@@ -349,3 +374,15 @@ class CallbackDispatcher:
     ) -> None:
         for callback in self.callbacks:
             callback.on_error(node_id, error, ctx)
+
+    def notify_branch_decision(
+        self, branch_id: str, decision: bool, ctx: CallbackContext
+    ) -> None:
+        for callback in self.callbacks:
+            callback.on_branch_decision(branch_id, decision, ctx)
+
+    def notify_node_skipped(
+        self, node_id: str, reason: str, ctx: CallbackContext
+    ) -> None:
+        for callback in self.callbacks:
+            callback.on_node_skipped(node_id, reason, ctx)
