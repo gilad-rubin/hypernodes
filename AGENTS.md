@@ -93,13 +93,63 @@ results = pipeline.map(inputs={"x": [1,2,3]}, map_over="x")
 - `run()`: Execute pipeline once with given inputs
 - `map()`: Execute pipeline multiple times over collections (zip/product modes)
 - `as_node()`: Wrap pipeline as a node for nesting
-- `visualize()`: Generate Graphviz visualization
+- `visualize()`: Generate visualization (JS interactive by default, or Graphviz SVG with `engine="graphviz"`)
 
 ### 3. HyperNode Protocol (`hypernode.py`)
 Structural protocol (duck typing) for executable units. Both `Node` and `PipelineNode` implement this.
 
 **Required attributes:**
 - `name`, `cache`, `root_args`, `output_name`, `code_hash`
+
+### 3.5 Branch Nodes (`branch.py`)
+Conditional execution routing based on boolean conditions.
+
+```python
+from hypernodes import branch, node, Pipeline
+
+@branch(when_true=process_valid, when_false=handle_error)
+def is_valid(data: dict) -> bool:
+    return data.get("valid", False)
+
+@node(output_name="result")
+def process_valid(data: dict) -> str:
+    return "Valid!"
+
+@node(output_name="result")
+def handle_error(data: dict) -> str:
+    return "Error!"
+
+pipeline = Pipeline(nodes=[is_valid, process_valid, handle_error])
+```
+
+**How it works:**
+- Branch nodes produce mutually-exclusive "gate signals" (`_gate_{name}_true`, `_gate_{name}_false`)
+- Target nodes implicitly depend on these gate signals
+- Only the winning path executes; nodes in the losing path are skipped
+- Both paths can produce the same output name (exclusive producers)
+- **Nested branches**: Exclusivity is computed transitively through both gate and data dependencies
+
+**Key properties:**
+- `when_true`: Target node/function for True branch
+- `when_false`: Target node/function for False branch
+- `true_gate`, `false_gate`: Gate signal output names
+- `cache`: Always False - branch decisions should be re-evaluated
+
+**Graph Builder integration:**
+- Tracks `branch_gates`: which outputs are gate signals
+- Tracks `gate_dependencies`: which nodes depend on which gates
+- Tracks `exclusive_producers`: nodes producing same output in different branches
+- Validates all branch targets exist in pipeline
+
+**Engine execution:**
+- `SeqEngine` tracks `satisfied_gates: Set[str]` during execution
+- Before executing a node, checks if its gate dependencies are satisfied
+- Skipped nodes trigger `on_node_skipped` callback
+
+**Visualization:**
+- Rendered as **diamond shapes** in both JS and Graphviz
+- Edges to targets labeled "True" / "False"
+- See `viz/structures.py::BranchVizNode` and `viz/graph_walker.py`
 
 ### 4. Engines & Orchestration
 
@@ -272,6 +322,8 @@ pipeline = Pipeline(nodes=[...], engine=engine)
 - `on_pipeline_start/end`
 - `on_node_start/end`
 - `on_node_cached` (cache hit)
+- `on_branch_decision` (branch node evaluated)
+- `on_node_skipped` (node skipped due to branch routing)
 - `on_map_start/end`
 - `on_map_item_start/end`
 - `on_nested_pipeline_start/end`
@@ -417,20 +469,26 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 
 ### Core (`src/hypernodes/`)
 - `node.py`: Node class and `@node` decorator
+- `branch.py`: BranchNode class and `@branch` decorator for conditional execution
 - `pipeline.py`: Pipeline class with run/map/as_node methods (pure definition, no execution state)
-- `sequential_engine.py`: Default execution engine (owns cache, callbacks)
-- `orchestrator.py`: **NEW** - Shared execution orchestration for all engines
+- `sequential_engine.py`: Default execution engine (owns cache, callbacks, handles branch routing)
+- `orchestrator.py`: Shared execution orchestration for all engines
 - `node_execution.py`: Single node execution logic (decoupled, accepts explicit cache/callbacks)
-- `graph_builder.py`: DAG construction from node list (SimpleGraphBuilder implementation)
+- `graph_builder.py`: DAG construction from node list, including branch gate tracking
 - `map_planner.py`: Map operation planning (zip vs product)
 - `cache.py`: Caching system with signature computation
-- `callbacks.py`: Callback protocol + context + dispatcher
+- `callbacks.py`: Callback protocol + context + dispatcher (includes `on_branch_decision`, `on_node_skipped`)
 
 ### Visualization (`src/hypernodes/viz/`)
 - `ui_handler.py`: Backend state manager + serialization for all frontends
+- `graph_walker.py`: Graph traversal, handles BranchNode → BranchVizNode conversion
+- `structures.py`: Data classes including `BranchVizNode` for diamond rendering
 - `graphviz_ui.py`: Graphviz rendering engine
 - `js_ui.py`: IPyWidget/React Flow rendering helpers
 - `visualization_engine.py`: Pluggable engine registry/protocol
+- `graphviz/renderer.py`: Renders branch nodes as diamonds with True/False edge labels
+- `js/renderer.py`: Maps BranchVizNode to React Flow BRANCH type
+- `js/html_generator.py`: CustomNode renders BRANCH as diamond shape
 
 ### Integrations (`src/hypernodes/integrations/`)
 - `daft/engine.py`: DaftEngine facade
@@ -448,6 +506,11 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `test_caching.py`: Cache behavior tests
 - `test_nested_pipelines.py`: Nested pipeline tests
 - `test_callbacks.py`: Callback system tests
+- `test_branch.py`: Branch node execution and validation tests
+- `test_branch_same_output.py`: Same output name in mutually exclusive branches (including nested)
+
+### Visualization Tests (`tests/viz/`)
+- `test_branch_visualization.py`: Branch node rendering in JS and Graphviz
 
 ## Common Patterns
 
@@ -481,6 +544,31 @@ pipeline = Pipeline(nodes=[slow_node1, slow_node2], engine=engine)
 @node(output_name=("mean", "std"))
 def stats(data: list) -> tuple:
     return sum(data)/len(data), calculate_std(data)
+```
+
+### Conditional Execution with Branch Nodes
+```python
+from hypernodes import branch, node, Pipeline
+
+@node(output_name="score")
+def validate(data: dict) -> float:
+    return data.get("confidence", 0.0)
+
+@branch(when_true=process_valid, when_false=handle_error)
+def is_confident(score: float) -> bool:
+    return score > 0.8
+
+@node(output_name="result")
+def process_valid(score: float) -> str:
+    return f"High confidence: {score}"
+
+@node(output_name="result")  # Same output name OK - exclusive branches
+def handle_error(score: float) -> str:
+    return f"Low confidence: {score}"
+
+pipeline = Pipeline(nodes=[validate, is_confident, process_valid, handle_error])
+result = pipeline.run(inputs={"data": {"confidence": 0.95}})
+# {"score": 0.95, "result": "High confidence: 0.95"}
 ```
 
 ### Binding Default Inputs
@@ -559,10 +647,29 @@ The visualization system is organized in `src/hypernodes/viz/` with a clean sepa
 - **GraphWalker (`graph_walker.py`)**: Core graph traversal that generates node/edge structure from pipeline. **CRITICAL**: Uses `traverse_collapsed` parameter to control whether collapsed pipelines expose internal structure.
 - **UIHandler (`ui_handler.py`)**: Backend state manager and serializer powering all frontends (Graphviz + React Flow). Handles depth, grouping, expansion/collapse, and emits semantic graph data (nodes/edges/levels) with grouped inputs and mapping labels.
 - **JSRenderer (`js/renderer.py`)**: Transforms VisualizationGraph → React Flow node/edge format.
-- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded.
-- **State Utils (`assets/viz/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
+- **HTML Generator (`js/html_generator.py`)**: Generates complete HTML with React/ELK/Tailwind embedded. Uses `importlib.resources` to load bundled assets.
+- **Bundled Assets (`viz/assets/`)**: All JS/CSS libraries are bundled in the package - **NO CDN dependencies**. Works fully offline.
+- **State Utils (`viz/assets/state_utils.js`)**: Client-side state transformations (applyState, applyVisibility, compressEdges, groupInputs) and debug API.
 - **Rendering Engines** (`visualization_engine.py` + implementations): Graphviz (`graphviz/renderer.py`) and IPyWidget/React Flow.
 - **Legacy Visualization**: Older helpers live under `viz/graphviz_ui.py`; ignore `src/hypernodes/old/`.
+
+### Bundled Asset Architecture
+
+All visualization JS/CSS assets are bundled in `src/hypernodes/viz/assets/`:
+- `react.production.min.js`, `react-dom.production.min.js` - React 18.2.0
+- `reactflow.umd.js`, `reactflow.css` - React Flow 11.10.1
+- `elk.bundled.js` - ELK layout 0.8.2  
+- `htm.min.js` - HTM templating 3.1.1
+- `tailwind.min.css` - Pre-built Tailwind CSS (~24KB)
+- `state_utils.js`, `theme_utils.js` - Custom utilities
+
+**Asset loading** uses `importlib.resources.files('hypernodes.viz.assets')` for reliable access in installed packages.
+
+**To rebuild Tailwind CSS** (when adding new classes to `html_generator.py`):
+```bash
+npm install -D tailwindcss@3  # One-time setup
+./build/tailwind/rebuild.sh   # Rebuild CSS
+```
 
 ### Key Parameters
 
@@ -596,7 +703,7 @@ HyperNodesVizState.debug.getExpansionState()
 HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
 ```
 
-### Key Client-Side Functions (state_utils.js)
+### Key Client-Side Functions (viz/assets/state_utils.js)
 
 | Function | Purpose |
 |----------|---------|
@@ -609,10 +716,10 @@ HyperNodesVizState.debug.simulateCompression({ 'rag_pipeline': false })
 
 | Issue | Check | Location |
 |-------|-------|----------|
-| Missing edges after collapse | `compressEdges` output | `state_utils.js` |
-| Hanging arrows | Handle positions | `html_generator.py` |
-| Nodes not grouping | `groupInputs` | `state_utils.js` |
-| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
+| Missing edges after collapse | `compressEdges` output | `viz/assets/state_utils.js` |
+| Hanging arrows | Handle positions | `viz/js/html_generator.py` |
+| Nodes not grouping | `groupInputs` | `viz/assets/state_utils.js` |
+| Types missing on inputs | `_extract_input_type` | `viz/graph_walker.py` |
 
 See `.ruler/visualization_best_practices.md` for complete debugging guide.
 
@@ -630,26 +737,151 @@ See `.ruler/visualization_best_practices.md` for complete debugging guide.
 ---
 Source: .ruler/3-theme_detection.md
 ---
-# Trial 5: Parent CSS Variables
-# Checks if we can read CSS variables from the parent document.
-js = """
+# Theme Detection Patterns
+
+This document describes the working theme detection methods for each notebook environment.
+
+## Host Environment Detection
+
+**IMPORTANT**: Detect the host environment FIRST, then use environment-specific methods for background color.
+
+```javascript
+let hostEnv = 'unknown';
+const parentDoc = window.parent?.document;
+if (parentDoc) {
+    // VS Code detection
+    if (parentDoc.body.getAttribute('data-vscode-theme-kind') || 
+        (parentDoc.body.className && parentDoc.body.className.includes('vscode'))) {
+        hostEnv = 'vscode';
+    }
+    // JupyterLab detection
+    else if (parentDoc.body.dataset.jpThemeLight !== undefined || 
+             parentDoc.querySelector('.jp-Notebook')) {
+        hostEnv = 'jupyterlab';
+    }
+    // Marimo detection
+    else if (parentDoc.body.dataset.theme || parentDoc.body.dataset.mode ||
+             (parentDoc.body.className && parentDoc.body.className.includes('marimo'))) {
+        hostEnv = 'marimo';
+    }
+}
+```
+
+---
+
+## VS Code Notebook
+
+### Background Color (Reliable)
+```javascript
 const style = getComputedStyle(window.parent.document.documentElement);
 const bg = style.getPropertyValue('--vscode-editor-background');
-document.getElementById('result').innerText = 'VS Code Bg Var (Parent): ' + (bg || 'Not found');
-"""
-create_test_widget(js, "Trial 5: Parent CSS Variables")
+// Returns actual background color like "rgb(30, 30, 30)" or "#1e1e1e"
+```
 
-this works for bg color!
-
-# Trial 6: Body Attribute
-# Checks for data-vscode-theme-kind attribute on parent body.
-js = """
+### Theme Detection
+```javascript
 const kind = window.parent.document.body.getAttribute('data-vscode-theme-kind');
-document.getElementById('result').innerText = 'Theme Kind Attr: ' + (kind || 'Not found');
-"""
-create_test_widget(js, "Trial 6: Body Attribute")
+// Returns "vscode-dark", "vscode-light", or "vscode-high-contrast"
+```
 
-this works for light/dark theme. you just need to search for "dark" or "light" in the text
+Also works: `vscode-light`/`vscode-dark` classes on body
+
+---
+
+## JupyterLab
+
+### Background Color (Reliable)
+
+**Best source**: `.jp-Notebook` element background
+```javascript
+const jpNotebook = parentDoc.querySelector('.jp-Notebook');
+const bg = getComputedStyle(jpNotebook).backgroundColor;
+// Light: rgb(255, 255, 255)
+// Dark: rgb(17, 17, 17)
+```
+
+**Fallback**: CSS variables (these may return named colors like "white")
+```javascript
+const rootStyle = getComputedStyle(parentDoc.documentElement);
+const bg = rootStyle.getPropertyValue('--jp-layout-color0');
+// Light: "white" 
+// Dark: "#111"
+```
+
+### Theme Detection
+```javascript
+const jpThemeLight = parentDoc.body.dataset.jpThemeLight;
+// Returns "true" for light theme, "false" for dark theme
+
+const themeName = parentDoc.body.dataset.jpThemeName;
+// Returns "JupyterLab Light" or "JupyterLab Dark"
+```
+
+### JupyterLab CSS Variables Reference
+| Variable | Light | Dark |
+|----------|-------|------|
+| `--jp-layout-color0` | white | #111 |
+| `--jp-layout-color1` | white | #212121 |
+| `--jp-layout-color2` | #eee | #424242 |
+| `--jp-cell-editor-background` | #f5f5f5 | #212121 |
+| `--jp-content-font-color1` | rgba(0,0,0,0.87) | rgba(255,255,255,1) |
+
+**Note**: `--jp-notebook-background` does NOT exist (returns empty)
+
+---
+
+## Marimo Notebook
+
+### Theme Detection
+```javascript
+const dataTheme = parentDoc.body.dataset.theme || parentDoc.documentElement.dataset.theme;
+const dataMode = parentDoc.body.dataset.mode || parentDoc.documentElement.dataset.mode;
+// Returns "dark" or "light"
+
+// Body classes
+const bodyClass = parentDoc.body.className;
+// Check for "dark-mode" or "dark" class
+
+// color-scheme CSS property
+const colorScheme = getComputedStyle(parentDoc.documentElement).getPropertyValue('color-scheme');
+// Returns "dark", "light", "dark light", etc.
+```
+
+---
+
+## Theme Toggle Behavior (2-State)
+
+The widget implements a 2-state toggle:
+
+1. **Auto/Detected** (default) → Uses detected notebook background color + theme
+2. **Manual/Opposite** → Uses predefined background for opposite theme
+
+Icons:
+- In dark mode → Show ☀️ (sun) icon → Click switches to light with predefined bg
+- In light mode → Show 🌙 (moon) icon → Click switches to dark with predefined bg
+- Click again → Returns to auto mode with notebook's actual background
+
+Predefined backgrounds:
+- Light: `#f8fafc` (slate-50)
+- Dark: `#020617` (slate-950)
+
+---
+
+## Filtering Invalid Colors
+
+Always filter out transparent values when building candidate list:
+```javascript
+if (value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)') {
+    attempts.push({ value, source });
+}
+```
+
+---
+
+## Implementation Files
+
+- `src/hypernodes/viz/js/html_generator.py` - Inline `detectHostTheme()` function (~line 1232)
+- `src/hypernodes/viz/assets/theme_utils.js` - Standalone `detectHostTheme()` function
 
 ---
 Source: .ruler/debugging_visualization.md
@@ -803,13 +1035,22 @@ src/hypernodes/viz/
 │   └── html_generator.py # Generates complete HTML with React/ELK/Tailwind
 ├── graphviz/
 │   └── renderer.py      # Static Graphviz SVG rendering
+├── assets/              # Bundled JS/CSS assets (included in wheel, NO CDN)
+│   ├── __init__.py      # Package marker for importlib.resources
+│   ├── react.production.min.js
+│   ├── react-dom.production.min.js
+│   ├── reactflow.umd.js
+│   ├── reactflow.css
+│   ├── elk.bundled.js
+│   ├── htm.min.js
+│   ├── tailwind.min.css # Pre-built from used classes
+│   ├── state_utils.js   # Client-side state transformations
+│   └── theme_utils.js   # Theme detection and color parsing
 
-assets/viz/
-├── state_utils.js       # Client-side state transformations (applyState, compressEdges, etc.)
-├── theme_utils.js       # Theme detection and color parsing
-├── reactflow.umd.js     # React Flow library
-├── elk.bundled.js       # ELK layout library
-└── custom.css           # Custom styling
+build/tailwind/          # Tailwind CSS build infrastructure
+├── tailwind.config.js   # Config with safelist for dynamic classes
+├── tailwind-input.css   # Input file
+└── rebuild.sh           # Run to rebuild tailwind.min.css
 
 tests/viz/
 ├── test_collapsed_pipeline_outputs_and_grouping.py  # Combined outputs, input grouping
@@ -1051,7 +1292,7 @@ print(json.dumps(rf_data, indent=2))
 **Debug with Node.js**:
 ```javascript
 // scripts/debug_state.js
-const utils = require('../assets/viz/state_utils.js');
+const utils = require('../src/hypernodes/viz/assets/state_utils.js');
 const fs = require('fs');
 
 const html = fs.readFileSync('outputs/test.html', 'utf-8');
@@ -1133,15 +1374,15 @@ After:  [eval_pair, model_name, num_results] → rag_pipeline
 
 | Issue | What to Check | Fix Location |
 |-------|---------------|--------------|
-| Missing edges after collapse | `compressEdges` output, `getVisibleAncestor` | `state_utils.js` |
-| Hanging/dangling arrows | Handle positions, node visibility, `updateNodeInternals` | `html_generator.py` |
-| Edge starts/ends outside node | Use `validateConnections()` to diagnose | `state_utils.js` debug API |
-| Stale edge paths after layout | Layout version, edge ID updates | `html_generator.py` |
-| Nodes not grouping | `groupInputs`, target matching | `state_utils.js` |
-| Outputs not combined | `applyState`, `sourceId` values | `state_utils.js` |
-| Wrong node positions | ELK layout, `parentNode` | `html_generator.py` |
-| Types missing on inputs | `_extract_input_type` | `graph_walker.py` |
-| Pipeline outputs not shown | `functionOutputs` collection | `state_utils.js` |
+| Missing edges after collapse | `compressEdges` output, `getVisibleAncestor` | `viz/assets/state_utils.js` |
+| Hanging/dangling arrows | Handle positions, node visibility, `updateNodeInternals` | `viz/js/html_generator.py` |
+| Edge starts/ends outside node | Use `validateConnections()` to diagnose | `viz/assets/state_utils.js` debug API |
+| Stale edge paths after layout | Layout version, edge ID updates | `viz/js/html_generator.py` |
+| Nodes not grouping | `groupInputs`, target matching | `viz/assets/state_utils.js` |
+| Outputs not combined | `applyState`, `sourceId` values | `viz/assets/state_utils.js` |
+| Wrong node positions | ELK layout, `parentNode` | `viz/js/html_generator.py` |
+| Types missing on inputs | `_extract_input_type` | `viz/graph_walker.py` |
+| Pipeline outputs not shown | `functionOutputs` collection | `viz/assets/state_utils.js` |
 
 ### Debugging Edge Alignment Issues
 

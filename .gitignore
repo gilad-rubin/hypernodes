@@ -73,8 +73,6 @@ cache/*
 
 # START Ruler Generated Files
 *.bak
-.codex/config.toml
-.codex/config.toml.bak
 .vscode/mcp.json
 .vscode/mcp.json.bak
 AGENTS.md
@@ -92,3 +90,4 @@ guides/*
 # Node.js / npm (for Tailwind CSS build in build/tailwind/)
 build/tailwind/node_modules/
 build/tailwind/package-lock.json
+*.log
