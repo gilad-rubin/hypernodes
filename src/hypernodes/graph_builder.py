@@ -236,7 +236,40 @@ class SimpleGraphBuilder(GraphBuilder):
                 gate_dependencies[false_target] = []
             gate_dependencies[false_target].append(branch.false_gate)
 
-        # 3. Build output_to_node mapping (handle exclusive branches)
+        # 3. Build preliminary output_to_node for dependency resolution
+        # (without exclusive producer checking - we need dependencies first)
+        preliminary_output_to_node: Dict[str, Node] = {}
+        for node in nodes:
+            outputs = node.output_name
+            if isinstance(outputs, str):
+                outputs = (outputs,)
+            for output in outputs:
+                if output not in branch_gates:
+                    # For now, just track first producer (we'll validate later)
+                    if output not in preliminary_output_to_node:
+                        preliminary_output_to_node[output] = node
+
+        # 4. Build preliminary data dependencies (needed for exclusivity check)
+        preliminary_dependencies: Dict[Node, List[Node]] = {}
+        for node in nodes:
+            node_deps_set: Set[Node] = set()
+            params = node.root_args
+            for param in params:
+                if param in preliminary_output_to_node:
+                    producer = preliminary_output_to_node[param]
+                    if producer != node:
+                        node_deps_set.add(producer)
+            # Add branch node as dependency if this node has gate dependencies
+            if node in gate_dependencies:
+                for gate in gate_dependencies[node]:
+                    for branch in branch_nodes:
+                        if gate == branch.true_gate or gate == branch.false_gate:
+                            if branch != node:
+                                node_deps_set.add(branch)
+                            break
+            preliminary_dependencies[node] = list(node_deps_set)
+
+        # 5. Build final output_to_node mapping (handle exclusive branches)
         output_to_node: Dict[str, Node] = {}
         for node in nodes:
             outputs = node.output_name
@@ -250,7 +283,15 @@ class SimpleGraphBuilder(GraphBuilder):
                 if output in output_to_node:
                     existing_producer = output_to_node[output]
                     # Check if both producers are in exclusive branches
-                    if self._are_exclusive(node, existing_producer, gate_dependencies):
+                    # (including transitive exclusivity through nested branches and data deps)
+                    if self._are_exclusive(
+                        node,
+                        existing_producer,
+                        gate_dependencies,
+                        node_by_name,
+                        branch_nodes,
+                        preliminary_dependencies,
+                    ):
                         # Allow multiple producers in exclusive branches
                         if output not in exclusive_producers:
                             exclusive_producers[output] = [existing_producer]
@@ -266,7 +307,8 @@ class SimpleGraphBuilder(GraphBuilder):
                 else:
                     output_to_node[output] = node
 
-        # 4. Build dependencies: node -> [nodes it depends on]
+        # 6. Build final dependencies: node -> [nodes it depends on]
+        # (Use final output_to_node which may differ from preliminary due to exclusive producers)
         dependencies: Dict[Node, List[Node]] = {}
         for node in nodes:
             node_deps_set: Set[Node] = set()
@@ -293,13 +335,13 @@ class SimpleGraphBuilder(GraphBuilder):
 
             dependencies[node] = list(node_deps_set)
 
-        # 5. Validate: check for missing dependencies and cycles
+        # 7. Validate: check for missing dependencies and cycles
         self._validate_dependencies(nodes, dependencies, output_to_node)
 
-        # 6. Compute topological execution order
+        # 8. Compute topological execution order
         execution_order = self._topological_sort(nodes, dependencies)
 
-        # 7. Compute root arguments (external inputs)
+        # 9. Compute root arguments (external inputs)
         all_params = set()
         for node in nodes:
             all_params.update(node.root_args)
@@ -307,7 +349,7 @@ class SimpleGraphBuilder(GraphBuilder):
         # Exclude gate outputs from root args
         root_args = sorted(all_params - set(output_to_node.keys()) - branch_gates)
 
-        # 8. Compute required outputs for PipelineNodes (optimization)
+        # 10. Compute required outputs for PipelineNodes (optimization)
         required_outputs = self._compute_required_outputs(
             nodes, dependencies, output_to_node
         )
@@ -331,27 +373,103 @@ class SimpleGraphBuilder(GraphBuilder):
         node1: "Node",
         node2: "Node",
         gate_dependencies: Dict["Node", List[str]],
+        node_by_name: Dict[str, "Node"],
+        branch_nodes: List["Node"],
+        data_dependencies: Dict["Node", List["Node"]] = None,
     ) -> bool:
         """Check if two nodes are in mutually exclusive branches.
 
-        Two nodes are exclusive if they depend on opposite gates from the same branch.
+        Two nodes are exclusive if they depend on opposite gates from the same branch,
+        either directly or transitively through nested branches or data dependencies.
 
         Args:
             node1: First node
             node2: Second node
             gate_dependencies: Mapping from node to gate signals it depends on
+            node_by_name: Mapping from node names to node instances
+            branch_nodes: List of all branch nodes in the pipeline
+            data_dependencies: Optional mapping from node to its data dependencies
 
         Returns:
             True if nodes are in mutually exclusive branches
         """
-        gates1 = set(gate_dependencies.get(node1, []))
-        gates2 = set(gate_dependencies.get(node2, []))
+        # Compute transitive gate dependencies for both nodes
+        gates1 = self._get_transitive_gates(
+            node1, gate_dependencies, node_by_name, branch_nodes, data_dependencies
+        )
+        gates2 = self._get_transitive_gates(
+            node2, gate_dependencies, node_by_name, branch_nodes, data_dependencies
+        )
 
         if not gates1 or not gates2:
             return False
 
-        # Check for opposite gates from the same branch
-        # Gate names are like "_gate_{branch_name}_true" and "_gate_{branch_name}_false"
+        # Check for opposite gates from the same branch at any level
+        return self._have_opposite_gates(gates1, gates2)
+
+    def _get_transitive_gates(
+        self,
+        node: "Node",
+        gate_dependencies: Dict["Node", List[str]],
+        node_by_name: Dict[str, "Node"],
+        branch_nodes: List["Node"],
+        data_dependencies: Dict["Node", List["Node"]] = None,
+    ) -> Set[str]:
+        """Get all gate signals a node depends on, including transitive dependencies.
+
+        Traverses both:
+        1. Gate dependencies: if node depends on gate X, and the branch producing X
+           depends on gate Y, node transitively depends on Y
+        2. Data dependencies: if node depends on data from node A, and A depends on
+           gate X, then node transitively depends on X
+
+        Args:
+            node: The node to analyze
+            gate_dependencies: Direct gate dependencies
+            node_by_name: Node name -> Node mapping
+            branch_nodes: All branch nodes in pipeline
+            data_dependencies: Optional data dependency graph
+
+        Returns:
+            Set of all gate signals (direct + transitive)
+        """
+        result = set()
+        visited = set()
+
+        def collect_gates(n: "Node"):
+            if n in visited:
+                return
+            visited.add(n)
+
+            # Collect direct gate dependencies
+            direct_gates = gate_dependencies.get(n, [])
+            for gate in direct_gates:
+                result.add(gate)
+                # Find the branch that produces this gate and collect its gates too
+                for branch in branch_nodes:
+                    if gate == branch.true_gate or gate == branch.false_gate:
+                        # This branch produces the gate - collect the branch's own gates
+                        collect_gates(branch)
+                        break
+
+            # Also traverse data dependencies to find inherited gates
+            if data_dependencies:
+                for dep in data_dependencies.get(n, []):
+                    collect_gates(dep)
+
+        collect_gates(node)
+        return result
+
+    def _have_opposite_gates(self, gates1: Set[str], gates2: Set[str]) -> bool:
+        """Check if two sets of gates contain opposite gates from the same branch.
+
+        Args:
+            gates1: First set of gate signals
+            gates2: Second set of gate signals
+
+        Returns:
+            True if any gate in gates1 has its opposite in gates2
+        """
         for g1 in gates1:
             if g1.endswith("_true"):
                 opposite = g1[:-5] + "_false"
@@ -361,7 +479,6 @@ class SimpleGraphBuilder(GraphBuilder):
                 opposite = g1[:-6] + "_true"
                 if opposite in gates2:
                     return True
-
         return False
 
     def _validate_dependencies(

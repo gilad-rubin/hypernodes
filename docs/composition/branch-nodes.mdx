@@ -52,6 +52,22 @@ Branch nodes work through **gate signals** — implicit dependencies that contro
 
 Notice that both `process_valid` and `handle_invalid` produce `output_name="result"`. This is allowed because they're in **mutually exclusive branches** — only one will ever execute.
 
+This works with **nested branches** too. In a RAG pipeline pattern, you might have:
+
+```python
+# Three nodes producing "response" in mutually exclusive paths
+@node(output_name="response")  # Path: is_valid=False
+def reject(query): ...
+
+@node(output_name="response")  # Path: is_valid=True, has_figures=True
+def figure_response(doc): ...
+
+@node(output_name="response")  # Path: is_valid=True, has_figures=False
+def generate(doc): ...
+```
+
+HyperNodes computes exclusivity transitively through both gate and data dependencies, so all three are recognized as mutually exclusive.
+
 ## Visualization
 
 Branch nodes are rendered as **diamond shapes** with labeled edges:

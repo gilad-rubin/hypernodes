@@ -83,6 +83,7 @@ pipeline = Pipeline(nodes=[is_valid, process_valid, handle_error])
 - Target nodes implicitly depend on these gate signals
 - Only the winning path executes; nodes in the losing path are skipped
 - Both paths can produce the same output name (exclusive producers)
+- **Nested branches**: Exclusivity is computed transitively through both gate and data dependencies
 
 **Key properties:**
 - `when_true`: Target node/function for True branch
@@ -462,6 +463,7 @@ result = pipeline.run(inputs={"x": 5}, output_name=["result1", "result2"])
 - `test_nested_pipelines.py`: Nested pipeline tests
 - `test_callbacks.py`: Callback system tests
 - `test_branch.py`: Branch node execution and validation tests
+- `test_branch_same_output.py`: Same output name in mutually exclusive branches (including nested)
 
 ### Visualization Tests (`tests/viz/`)
 - `test_branch_visualization.py`: Branch node rendering in JS and Graphviz
