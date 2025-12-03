@@ -28,7 +28,6 @@ when the customization involves methods called by other base class methods,
 which is a common pattern for testing (creating mock subclasses).
 """
 
-import pytest
 from hypernodes import stateful
 
 
@@ -66,7 +65,7 @@ class TestStatefulInheritance:
 
     def test_direct_method_override_works(self):
         """Direct method override DOES work (surprisingly).
-        
+
         When you call an overridden method directly, it works because
         __getattr__ finds the method on the subclass wrapper first.
         """
@@ -97,7 +96,7 @@ class TestStatefulInheritance:
 
     def test_chained_method_call_fails(self):
         """When base method calls overridden helper, override is NOT used.
-        
+
         THIS IS THE BUG: compute() calls self.get_multiplier(), but since
         self._instance is BaseProcessor, it calls BaseProcessor.get_multiplier()
         not DoubleProcessor.get_multiplier().
@@ -121,7 +120,7 @@ class TestStatefulInheritance:
 
     def test_subclass_init_override_should_work(self):
         """Subclass __init__ override should be called.
-        
+
         CURRENTLY FAILS: Subclass __init__ is never called.
         """
 
@@ -142,7 +141,7 @@ class TestStatefulInheritance:
 
     def test_isinstance_check_fails(self):
         """isinstance checks don't work with @stateful wrapper.
-        
+
         This is a secondary issue - the wrapper class is not recognized
         as an instance of the original class.
         """
@@ -239,7 +238,7 @@ def demonstrate_bug():
     print("\n1. Base class works:")
     base = MockLLM(default_response="base response")
     print(f"   base.generate('test') = '{base.generate('test')}'")
-    print(f"   ✓ Expected: 'base response'")
+    print("   ✓ Expected: 'base response'")
 
     print("\n2. Direct override call WORKS:")
     custom = CustomMockLLM(default_response="ignored")
@@ -253,7 +252,7 @@ def demonstrate_bug():
     print("\n3. Chained call through base method FAILS:")
     chained_result = custom.generate("test")
     print(f"   custom.generate('test') = '{chained_result}'")
-    print(f"   Expected: 'CUSTOM RESPONSE'")
+    print("   Expected: 'CUSTOM RESPONSE'")
     print(f"   Actual: '{chained_result}'")
 
     if chained_result == "CUSTOM RESPONSE":
@@ -278,4 +277,3 @@ def demonstrate_bug():
 
 if __name__ == "__main__":
     demonstrate_bug()
-

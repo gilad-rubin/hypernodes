@@ -73,7 +73,7 @@ def stateful(cls: type) -> type:
 
         def _patch_overridden_methods(self):
             """Patch _instance methods to use wrapper subclass overrides.
-            
+
             When a subclass of a @stateful class overrides methods, those
             overrides are on the wrapper class, not on _instance. This patches
             _instance methods to dispatch back through the wrapper for any
@@ -81,19 +81,22 @@ def stateful(cls: type) -> type:
             """
             wrapper_type = type(self)
             base_wrapper_name = cls.__name__  # The original decorated class name
-            
+
             # Only patch if this is a subclass of the original wrapper
             if wrapper_type.__name__ == base_wrapper_name:
                 return  # No subclassing, nothing to patch
-            
+
             # Find methods defined directly on wrapper subclass (not inherited)
+            # Skip dunder methods (__init__, __call__, etc.) which are wrapper machinery
+            # BUT allow single-underscore methods (_helper, _get_response) which are
+            # commonly used as protected methods meant to be overridden
             for name in wrapper_type.__dict__:
-                if name.startswith('_'):
+                if name.startswith("__"):
                     continue
                 wrapper_attr = wrapper_type.__dict__[name]
                 if not callable(wrapper_attr):
                     continue
-                
+
                 # Check if _instance also has this method (it's an override)
                 if hasattr(self._instance, name):
                     # Create dispatcher that calls wrapper's method
@@ -101,8 +104,9 @@ def stateful(cls: type) -> type:
                         def dispatcher(*args, **kwargs):
                             method = getattr(type(wrapper_ref), method_name)
                             return method(wrapper_ref, *args, **kwargs)
+
                         return dispatcher
-                    
+
                     setattr(self._instance, name, make_dispatcher(name, self))
 
         def __call__(self, *args, **kwargs):
