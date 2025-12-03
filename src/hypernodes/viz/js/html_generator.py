@@ -674,20 +674,48 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     position: 'absolute',
                     transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
                     pointerEvents: 'all',
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '3px 10px',
+                    borderRadius: '10px',
+                    fontSize: '10px',
                     fontFamily: 'ui-monospace, monospace',
                     fontWeight: '600',
-                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                    letterSpacing: '0.02em',
                     ...((label || data?.label) === 'True' 
-                      ? { background: '#10b981', border: '1px solid #34d399', color: '#ffffff' }
+                      ? { 
+                          background: 'rgba(16, 185, 129, 0.9)', 
+                          border: '1px solid #34d399', 
+                          color: '#ffffff',
+                          boxShadow: '0 2px 6px rgba(16, 185, 129, 0.3)',
+                        }
                       : (label || data?.label) === 'False' 
-                        ? { background: '#ef4444', border: '1px solid #f87171', color: '#ffffff' }
-                        : { background: 'rgba(15,23,42,0.9)', border: '1px solid #334155', color: '#cbd5e1' }
+                        ? { 
+                            background: 'rgba(239, 68, 68, 0.9)', 
+                            border: '1px solid #f87171', 
+                            color: '#ffffff',
+                            boxShadow: '0 2px 6px rgba(239, 68, 68, 0.3)',
+                          }
+                        : { 
+                            background: 'rgba(15,23,42,0.9)', 
+                            border: '1px solid #334155', 
+                            color: '#cbd5e1',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                          }
                     ),
                   }}
                 >
+                  ${(label || data?.label) === 'True' ? html`
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  ` : (label || data?.label) === 'False' ? html`
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  ` : null}
                   ${label || data?.label}
                 </div>
               <//>
@@ -849,30 +877,40 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
         // --- Render Branch Node (Diamond Shape) ---
         if (data.nodeType === 'BRANCH') {
           const isLight = theme === 'light';
-          // Diamond colors
-          const diamondBg = isLight ? 'linear-gradient(135deg, #fef3c7, #fef08a)' : 'linear-gradient(135deg, #451a03, #78350f)';
-          const diamondBorder = isLight ? '#f59e0b' : '#f59e0b';
-          const diamondShadow = isLight ? '0 4px 8px rgba(245, 158, 11, 0.35)' : '0 4px 8px rgba(0, 0, 0, 0.5)';
-          const labelColor = isLight ? '#78350f' : '#fcd34d';
+          const [isHovered, setIsHovered] = useState(false);
+          
+          // Diamond colors - solid colors (no gradients)
+          const diamondBg = isLight ? '#fde68a' : '#78350f';
+          const diamondBorder = isLight ? '#d97706' : '#f59e0b';
+          const diamondShadow = isHovered
+            ? (isLight 
+                ? '0 8px 20px rgba(217, 119, 6, 0.35), 0 4px 8px rgba(217, 119, 6, 0.2)' 
+                : '0 8px 20px rgba(245, 158, 11, 0.25), 0 0 0 1px rgba(245, 158, 11, 0.3)')
+            : (isLight 
+                ? '0 4px 12px rgba(217, 119, 6, 0.2), 0 2px 4px rgba(217, 119, 6, 0.1)' 
+                : '0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(245, 158, 11, 0.1)');
+          const labelColor = isLight ? '#78350f' : '#fef3c7';
           
           return html`
             <${DebugWrapper}>
-              <div className="relative flex items-center justify-center"
-                   style=${{ width: '90px', height: '90px' }}
+              <div className="relative flex items-center justify-center cursor-pointer"
+                   style=${{ width: '140px', height: '140px' }}
+                   onMouseEnter=${() => setIsHovered(true)}
+                   onMouseLeave=${() => setIsHovered(false)}
                    onTransitionEnd=${(e) => { if (e.target === e.currentTarget) updateNodeInternals(id); }}>
                 <!-- Diamond shape using rotated square -->
                 <div style=${{
-                  width: '60px',
-                  height: '60px',
+                  width: '95px',
+                  height: '95px',
                   transform: 'rotate(45deg)',
                   background: diamondBg,
-                  border: `2px solid ${diamondBorder}`,
-                  borderRadius: '6px',
+                  border: `2px solid ${isHovered ? (isLight ? '#b45309' : '#fbbf24') : diamondBorder}`,
+                  borderRadius: '8px',
                   boxShadow: diamondShadow,
-                  transition: 'all 0.2s',
+                  transition: 'all 0.2s ease',
                 }}>
                 </div>
-                <!-- Label overlay (not rotated) -->
+                <!-- Label overlay (not rotated) - centered text only -->
                 <div style=${{
                   position: 'absolute',
                   inset: '0',
@@ -880,18 +918,16 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                   alignItems: 'center',
                   justifyContent: 'center',
                   pointerEvents: 'none',
+                  padding: '0 10px',
                 }}>
-                  <span style=${{
-                    fontSize: '10px',
-                    fontFamily: 'ui-monospace, monospace',
-                    fontWeight: '600',
-                    color: labelColor,
-                    textAlign: 'center',
-                    maxWidth: '80px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }} title=${data.label}>${data.label}</span>
+                  <span className="text-sm font-semibold text-center"
+                        style=${{
+                          color: labelColor,
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }} title=${data.label}>${data.label}</span>
                 </div>
                 <!-- Handles -->
                 <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-4px' }} />
@@ -1085,9 +1121,9 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                     const paramCount = params.length || 1;
                     height = 14 + (paramCount * 22);
                 } else if (n.data?.nodeType === 'BRANCH') {
-                    // Branch node (diamond shape) - fixed dimensions matching the rendered component
-                    width = 90;
-                    height = 90;
+                    // Branch node (diamond shape) - larger for better text visibility
+                    width = 140;
+                    height = 140;
                 } else {
                     // Standard Function Node - dynamic width based on label and outputs
                     const labelLen = Math.min(n.data.label ? n.data.label.length : 0, NODE_LABEL_MAX_CHARS);
