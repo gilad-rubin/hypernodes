@@ -1196,12 +1196,17 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
                 'elk.layered.thoroughness': '10', // Higher = better quality (default 7)
                 
-                // Node placement for straighter edges
-                'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX', // Better than BRANDES_KOEPF for DAGs
+                // Node placement for symmetric, balanced layouts
+                'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF', // Better for symmetric layouts
+                'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED', // Balanced alignment for symmetry
                 'elk.layered.nodePlacement.favorStraightEdges': 'true',
                 
-                // Compaction for tighter, cleaner layout
-                'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+                // Alignment and centering for symmetric layouts
+                'elk.alignment': 'CENTER', // Center nodes within their layer
+                'elk.contentAlignment': 'V_CENTER H_CENTER', // Center content in compound nodes
+                
+                // Compaction - use LEFT_RIGHT_CONNECTION_LOCKING for more symmetric results
+                'elk.layered.compaction.postCompaction.strategy': 'LEFT_RIGHT_CONNECTION_LOCKING',
                 'elk.layered.compaction.connectedComponents': 'true',
                 
                 // Hierarchical handling for nested pipelines
