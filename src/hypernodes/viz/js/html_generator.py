@@ -879,17 +879,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
           const isLight = theme === 'light';
           const [isHovered, setIsHovered] = useState(false);
           
-          // Diamond colors - solid colors (no gradients)
-          const diamondBg = isLight ? '#fde68a' : '#78350f';
-          const diamondBorder = isLight ? '#d97706' : '#f59e0b';
-          const diamondShadow = isHovered
-            ? (isLight 
-                ? '0 8px 20px rgba(217, 119, 6, 0.35), 0 4px 8px rgba(217, 119, 6, 0.2)' 
-                : '0 8px 20px rgba(245, 158, 11, 0.25), 0 0 0 1px rgba(245, 158, 11, 0.3)')
-            : (isLight 
-                ? '0 4px 12px rgba(217, 119, 6, 0.2), 0 2px 4px rgba(217, 119, 6, 0.1)' 
-                : '0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(245, 158, 11, 0.1)');
-          const labelColor = isLight ? '#78350f' : '#fef3c7';
+          // Use inline styles for colors since Tailwind CSS bundle may not include all classes
+          // CYAN color scheme to differentiate from amber pipeline nodes
+          const diamondBgColor = isLight ? '#ecfeff' : '#083344';  // cyan-50 / cyan-950
+          const diamondBorderColor = isLight ? '#22d3ee' : 'rgba(6,182,212,0.6)';  // cyan-400 / cyan-500/60
+          const diamondHoverBorderColor = isLight ? '#06b6d4' : 'rgba(34,211,238,0.8)';  // cyan-500 / cyan-400/80
+          
+          // Glow effect colors
+          const glowColor = 'rgba(6,182,212,0.4)';  // cyan-500 with opacity
+          
+          const labelColor = isLight ? '#0e7490' : '#a5f3fc';  // cyan-700 / cyan-200
+          
+          // Diamond geometry: 95px square rotated 45deg = ~134px diagonal
+          // Container is 140px, so diamond tips are ~3px from container edges
+          const diamondTipOffset = '3px';
           
           return html`
             <${DebugWrapper}>
@@ -898,18 +901,24 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                    onMouseEnter=${() => setIsHovered(true)}
                    onMouseLeave=${() => setIsHovered(false)}
                    onTransitionEnd=${(e) => { if (e.target === e.currentTarget) updateNodeInternals(id); }}>
-                <!-- Diamond shape using rotated square -->
-                <div style=${{
-                  width: '95px',
-                  height: '95px',
-                  transform: 'rotate(45deg)',
-                  background: diamondBg,
-                  border: `2px solid ${isHovered ? (isLight ? '#b45309' : '#fbbf24') : diamondBorder}`,
-                  borderRadius: '8px',
-                  boxShadow: diamondShadow,
-                  transition: 'all 0.2s ease',
-                }}>
+                
+                <!-- Wrapper for Drop Shadow (Not Rotated) -->
+                <div className="transition-all duration-200 ease-out"
+                     style=${{ filter: 'drop-shadow(0 10px 8px rgb(0 0 0 / 0.04)) drop-shadow(0 4px 3px rgb(0 0 0 / 0.1))' }}>
+                    <!-- Diamond shape using rotated square -->
+                    <div className="transition-all duration-200 ease-out border"
+                         style=${{
+                            width: '95px',
+                            height: '95px',
+                            transform: 'rotate(45deg)',
+                            borderRadius: '10px',
+                            backgroundColor: diamondBgColor,
+                            borderColor: isHovered ? diamondHoverBorderColor : diamondBorderColor,
+                            boxShadow: isHovered ? `0 0 15px ${glowColor}` : '0 0 0 rgba(6,182,212,0)',
+                         }}>
+                    </div>
                 </div>
+
                 <!-- Label overlay (not rotated) - centered text only -->
                 <div style=${{
                   position: 'absolute',
@@ -929,9 +938,10 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                           whiteSpace: 'nowrap',
                         }} title=${data.label}>${data.label}</span>
                 </div>
-                <!-- Handles -->
-                <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: '-4px' }} />
-                <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: '-4px' }} id="branch-source" />
+                
+                <!-- Handles: Target at top, Source at bottom -->
+                <${Handle} type="target" position=${Position.Top} className="!w-2 !h-2 !opacity-0" style=${{ top: diamondTipOffset }} />
+                <${Handle} type="source" position=${Position.Bottom} className="!w-2 !h-2 !opacity-0" style=${{ bottom: diamondTipOffset }} id="branch-source" />
               </div>
             <//>
           `;
@@ -1157,7 +1167,7 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 // For compound nodes (with children), let ELK calculate dimensions unless explicit
                 const isCompound = n.children && n.children.length > 0;
                 
-                return {
+                const elkNode = {
                   id: n.id,
                   width: width,
                   height: height,
@@ -1171,6 +1181,29 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                      'elk.resize.fixed': 'false', 
                   }
                 };
+                
+                // For branch nodes, add explicit ports with fixed order for True (left) and False (right)
+                if (n.data?.nodeType === 'BRANCH') {
+                  elkNode.ports = [
+                    { 
+                      id: `${n.id}_port_true`, 
+                      layoutOptions: { 
+                        'elk.port.side': 'SOUTH',
+                        'elk.port.index': '0'  // Left position
+                      } 
+                    },
+                    { 
+                      id: `${n.id}_port_false`, 
+                      layoutOptions: { 
+                        'elk.port.side': 'SOUTH',
+                        'elk.port.index': '1'  // Right position
+                      } 
+                    }
+                  ];
+                  elkNode.layoutOptions['elk.portConstraints'] = 'FIXED_ORDER';
+                }
+                
+                return elkNode;
             };
 
             const elkGraph = {
@@ -1219,11 +1252,20 @@ def generate_widget_html(graph_data: Dict[str, Any]) -> str:
                 'elk.layered.mergeEdges': 'false', // Keep edges separate for clarity
               },
               children: rootChildren.map(mapToElk),
-              edges: visibleEdges.map(e => ({
-                id: e.id,
-                sources: [e.source],
-                targets: [e.target],
-              })),
+              edges: visibleEdges.map(e => {
+                const elkEdge = {
+                  id: e.id,
+                  sources: [e.source],
+                  targets: [e.target],
+                };
+                // For branch edges, connect to specific ports: True=left port, False=right port
+                if (e.data?.label === 'True') {
+                  elkEdge.sources = [`${e.source}_port_true`];
+                } else if (e.data?.label === 'False') {
+                  elkEdge.sources = [`${e.source}_port_false`];
+                }
+                return elkEdge;
+              }),
             };
             
             return { elkGraph, visibleEdges };
