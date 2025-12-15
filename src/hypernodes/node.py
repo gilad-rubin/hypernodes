@@ -2,9 +2,21 @@
 
 import functools
 import inspect
-from typing import Any, Callable, Union
+from dataclasses import fields, is_dataclass
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from hypernodes.hypernode import HyperNode
+
+
+def _is_pydantic_model(obj: Any) -> bool:
+    """Check if an object is a Pydantic model instance."""
+    # Check for Pydantic v2 first, then v1
+    return hasattr(obj, "model_fields") or hasattr(obj, "__fields__")
+
+
+def _extract_field(obj: Any, field_name: str) -> Any:
+    """Extract a field from a Pydantic model or dataclass."""
+    return getattr(obj, field_name)
 
 
 class Node(HyperNode):
@@ -27,6 +39,7 @@ class Node(HyperNode):
         func: Callable,
         output_name: Union[str, tuple],
         cache: bool = True,
+        extract: Optional[Dict[str, List[str]]] = None,
     ):
         """Initialize a Node wrapper around a function.
 
@@ -34,14 +47,36 @@ class Node(HyperNode):
             func: The function to wrap
             output_name: Name for the output of this function
             cache: Whether to cache this node's output (default: True)
+            extract: Field extraction mapping. Maps source parameter names to lists
+                of field names to extract. Example: {"doc": ["file_path", "type"]}
+                allows calling node(doc=my_document) and it will extract doc.file_path
+                and doc.type, passing them as file_path and type to the function.
         """
         self.func = func
         self.name = func.__name__
         self._output_name = output_name
         self.cache = cache
+        self._extract = extract or {}
 
         sig = inspect.signature(func)
-        self._root_args = tuple(sig.parameters.keys())
+        func_params = tuple(sig.parameters.keys())
+
+        # Compute root_args: what the node expects from the pipeline
+        # If extraction is configured, the node expects the source objects, not the extracted fields
+        if self._extract:
+            # Root args = source params (from extract) + any non-extracted params
+            extracted_fields = set()
+            for field_list in self._extract.values():
+                extracted_fields.update(field_list)
+
+            # Keep params that aren't extracted fields, add source params
+            non_extracted_params = [p for p in func_params if p not in extracted_fields]
+            source_params = list(self._extract.keys())
+            self._root_args = tuple(source_params + non_extracted_params)
+            self._func_params = func_params  # Store original func params for __call__
+        else:
+            self._root_args = func_params
+            self._func_params = func_params
 
         # Pre-compute and cache code hash to avoid expensive recomputation
         # This is computed once at node creation and persists through pickling
@@ -108,6 +143,9 @@ class Node(HyperNode):
         This allows Node instances to be called directly like functions,
         which is useful in generated code and when wrapping nodes.
 
+        If extraction is configured, source objects will have their fields
+        extracted before calling the underlying function.
+
         Args:
             *args: Positional arguments to pass to the wrapped function
             **kwargs: Keyword arguments to pass to the wrapped function
@@ -115,11 +153,71 @@ class Node(HyperNode):
         Returns:
             The result of executing the wrapped function
         """
+        if self._extract and kwargs:
+            kwargs = self._apply_extraction(kwargs)
         return self.func(*args, **kwargs)
+
+    def _apply_extraction(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract fields from source objects in kwargs.
+
+        Args:
+            kwargs: Input keyword arguments
+
+        Returns:
+            Transformed kwargs with extracted fields
+        """
+        result = {}
+
+        for source_name, field_names in self._extract.items():
+            if source_name in kwargs:
+                source_obj = kwargs[source_name]
+                for field_name in field_names:
+                    result[field_name] = _extract_field(source_obj, field_name)
+            # Don't include source object in result - it's consumed by extraction
+
+        # Pass through any kwargs that aren't source objects
+        for key, value in kwargs.items():
+            if key not in self._extract:
+                result[key] = value
+
+        return result
+
+    def with_extraction(self, **extraction_spec) -> "Node":
+        """Create a new Node with field extraction configured.
+
+        This allows adapting existing portable nodes to work with rich objects
+        like Pydantic models or dataclasses.
+
+        Args:
+            **extraction_spec: Keyword arguments mapping source parameter names
+                to lists of field names to extract.
+                Example: with_extraction(doc=["file_path", "document_type"])
+
+        Returns:
+            A new Node with extraction configured
+
+        Example:
+            >>> @node(output_name="result")
+            ... def process(file_path: str, doc_type: str) -> dict:
+            ...     return {"path": file_path, "type": doc_type}
+            ...
+            >>> # Create adapted version for Document objects
+            >>> adapted = process.with_extraction(doc=["file_path", "doc_type"])
+            >>> adapted(doc=my_document)  # Extracts fields automatically
+        """
+        # Merge with any existing extraction
+        merged_extract = {**self._extract, **extraction_spec}
+        return Node(
+            func=self.func,
+            output_name=self._output_name,
+            cache=self.cache,
+            extract=merged_extract,
+        )
 
     def __repr__(self) -> str:
         """Return string representation of the Node."""
-        return f"Node({self.func.__name__}, output={self.output_name})"
+        extract_str = f", extract={self._extract}" if self._extract else ""
+        return f"Node({self.func.__name__}, output={self.output_name}{extract_str})"
 
     def __hash__(self) -> int:
         """Make Node hashable for use in networkx graphs."""
@@ -148,6 +246,7 @@ class Node(HyperNode):
 def node(
     output_name: Union[str, tuple, Callable, None] = None,
     cache: bool = True,
+    extract: Optional[Dict[str, List[str]]] = None,
 ) -> Union[Node, Callable[[Callable], Node]]:
     """Decorator to create Node instances from functions.
 
@@ -164,6 +263,10 @@ def node(
         output_name: Name for the output of this function. If None, uses the function's name.
                      When used as @node without parentheses, this receives the function itself.
         cache: Whether to cache this node's output (default: True)
+        extract: Field extraction mapping for working with Pydantic models or dataclasses.
+                 Maps source parameter names to lists of field names to extract.
+                 Example: {"doc": ["file_path", "document_type"]} allows calling the node
+                 with doc=my_document and it will extract the fields automatically.
 
     Returns:
         Either a Node (if used without parentheses) or a decorator function
@@ -184,17 +287,25 @@ def node(
         >>> pipeline = Pipeline(nodes=[double])
         >>> result = pipeline.run(inputs={"x": 5})
         >>> assert result == {"double": 10}
+
+        >>> # With field extraction from Pydantic/dataclass
+        >>> @node(output_name="parsed", extract={"doc": ["file_path", "doc_type"]})
+        ... def parse_file(file_path: str, doc_type: str) -> dict:
+        ...     return {"path": file_path, "type": doc_type}
+        ...
+        >>> # Now accepts a Document object, extracts fields automatically
+        >>> parse_file(doc=my_document)
     """
     # Handle @node (without parentheses) - output_name will be the function
     if callable(output_name):
         func = output_name
-        return Node(func, output_name=func.__name__, cache=cache)
+        return Node(func, output_name=func.__name__, cache=cache, extract=extract)
 
     # Handle @node() or @node(output_name="...") - return a decorator
     def decorator(func: Callable) -> Node:
         """Wrap the function in a Node."""
         # Use function name if output_name not provided
         final_output_name = output_name if output_name is not None else func.__name__
-        return Node(func, output_name=final_output_name, cache=cache)
+        return Node(func, output_name=final_output_name, cache=cache, extract=extract)
 
     return decorator
