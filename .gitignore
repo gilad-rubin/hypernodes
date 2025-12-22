@@ -91,3 +91,12 @@ guides/*
 build/tailwind/node_modules/
 build/tailwind/package-lock.json
 *.log
+
+# Auto Claude data directory
+.auto-claude/
+.agent/*
+.claude/*
+.cursor/*
+.github/*
+_bmad/*
+.claude_settings.json
