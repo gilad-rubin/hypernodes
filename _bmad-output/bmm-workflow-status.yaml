@@ -1,0 +1,112 @@
+# Workflow Status Template
+
+# This tracks progress through BMM methodology Analysis, Planning, and Solutioning phases.
+# Implementation phase is tracked separately in sprint-status.yaml
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2025-12-22"
+project: "hypernodes"
+project_type: "brownfield"
+selected_track: "bmad-method"
+field_type: "brownfield"
+workflow_path: "_bmad/bmm/workflows/workflow-status/paths/method-brownfield.yaml"
+
+workflow_status:
+  # PREREQUISITE: Documentation
+  - id: "document-project"
+    phase: "prerequisite"
+    status: "required"
+    agent: "analyst"
+    command: "/bmad:bmm:workflows:document-project"
+    output: "Comprehensive project documentation"
+    purpose: "Understand existing codebase before planning"
+    note: "STRONGLY RECOMMENDED: Run this first to create comprehensive codebase documentation"
+
+  # PHASE 0: Discovery (Optional)
+  - id: "brainstorm-project"
+    phase: 0
+    status: "optional"
+    agent: "analyst"
+    command: "/bmad:bmm:workflows:brainstorming"
+    note: "User selected during init"
+
+  - id: "research"
+    phase: 0
+    status: "skipped"
+    agent: "analyst"
+    command: "/bmad:bmm:workflows:research"
+    note: "User chose not to include"
+
+  # PHASE 1: Planning
+  - id: "prd"
+    phase: 1
+    status: "required"
+    agent: "pm"
+    command: "/bmad:bmm:workflows:create-prd"
+    output: "PRD focused on refactoring goals"
+    note: "Must consider existing system constraints"
+
+  - id: "create-ux-design"
+    phase: 1
+    status: "conditional"
+    agent: "ux-designer"
+    command: "/bmad:bmm:workflows:create-ux-design"
+    condition: "if_has_ui"
+    note: "Only required if refactoring includes UI changes"
+
+  # PHASE 2: Solutioning
+  - id: "create-architecture"
+    phase: 2
+    status: "recommended"
+    agent: "architect"
+    command: "/bmad:bmm:workflows:create-architecture"
+    output: "Solution architecture for refactoring"
+    note: "HIGHLY RECOMMENDED: Distills brownfield context into focused solution design"
+
+  - id: "create-epics-and-stories"
+    phase: 2
+    status: "required"
+    agent: "pm"
+    command: "/bmad:bmm:workflows:create-epics-and-stories"
+    note: "Break down PRD into implementable epics and stories"
+
+  - id: "test-design"
+    phase: 2
+    status: "recommended"
+    agent: "tea"
+    command: "/bmad:bmm:workflows:testarch-test-design"
+    output: "System-level testability review"
+    note: "Testability assessment before implementation"
+
+  - id: "validate-architecture"
+    phase: 2
+    status: "optional"
+    agent: "architect"
+    command: "/bmad:bmm:workflows:validate-architecture"
+
+  - id: "implementation-readiness"
+    phase: 2
+    status: "required"
+    agent: "architect"
+    command: "/bmad:bmm:workflows:check-implementation-readiness"
+    note: "Gate check: Validates PRD + Architecture + Epics completeness"
+
+  # PHASE 3: Implementation
+  - id: "sprint-planning"
+    phase: 3
+    status: "required"
+    agent: "sm"
+    command: "/bmad:bmm:workflows:sprint-planning"
+    note: "Creates sprint plan with stories - tracked in sprint-status.yaml"
+
