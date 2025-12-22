@@ -26,12 +26,13 @@ workflow_status:
   # PREREQUISITE: Documentation
   - id: "document-project"
     phase: "prerequisite"
-    status: "required"
+    status: "_bmad-output/index.md"
     agent: "analyst"
     command: "/bmad:bmm:workflows:document-project"
     output: "Comprehensive project documentation"
     purpose: "Understand existing codebase before planning"
-    note: "STRONGLY RECOMMENDED: Run this first to create comprehensive codebase documentation"
+    note: "COMPLETED: 5 documentation files generated (2,177 lines)"
+    completed_date: "2025-12-22"
 
   # PHASE 0: Discovery (Optional)
   - id: "brainstorm-project"
