@@ -36,8 +36,6 @@ date: '2025-12-22'
 
 HyperNodes is evolving from a DAG-only pipeline framework to a **graph-native execution system** that supports cycles, multi-turn interactions, and complex control flow - all while maintaining the framework's core philosophy of pure, portable functions.
 
-**This is a personal infrastructure project** built to solve real problems in my own work, documented thoroughly, and shared in case the approach resonates with others building similar systems.
-
 ### The Journey: From Hierarchical DAGs to Reactive Graphs
 
 **Where it started (v0.1-0.4):**
@@ -84,11 +82,11 @@ Building a multi-turn RAG system where:
 Step 4 is **impossible** in a DAG - can't loop back to retrieval. The entire architecture assumes single-pass execution.
 
 I looked at LangGraph and Pydantic-Graph as alternatives. Both solve cycles, but both require:
-- Explicit state objects that functions must read from and write to
+- Explicit state objects that functions must read from and write to (single responsibility principle violated)
 - Manual edge wiring
-- Framework-coupled functions that can't be tested standalone
+- Framework-coupled functions that are not portable
 - Reducer annotations for append semantics
-- Field names repeated in state class, reads, writes, and edges
+- Field names repeated in state class, reads, writes, and edges (not DRY)
 
 **The frustration:**
 
@@ -107,28 +105,52 @@ def add_response(state: AgentState) -> dict:
     return {"messages": messages + [response]}  # Write to state
 ```
 
-**The realization:**
+### The Solution: Dynamic Graphs with Build-Time Validation
 
-Reading graph theory papers and NetworkX documentation, I realized: **you don't need explicit state objects if you track versions and compute staleness**. The graph structure + versioned values + standard algorithms can handle cycles without framework coupling.
+HyperNodes 0.5 introduces **fully dynamic graph construction** with validation at build time (when `Graph()` is called), not compile time.
 
-### The Solution: NetworkX-Native Reactive Dataflow Graphs
+**Key differentiator from LangGraph/Pydantic-Graph:**
 
-V2 restructures the internals to be **graph-theory native** using NetworkX as the foundation:
+| Aspect | LangGraph / Pydantic-Graph | HyperNodes |
+|--------|---------------------------|------------|
+| **State definition** | Static `TypedDict` or Pydantic model required | No state class - just function signatures |
+| **Graph construction** | Edges defined at class definition time | Build graphs dynamically at runtime |
+| **Validation timing** | Compile time (static types) | Build time (`Graph()` construction) |
+| **Type hints** | Mandatory | Optional (opt-in for extra checks) |
 
-**Core architectural changes:**
-1. **`Graph` replaces `Pipeline`** - Pure definition wrapping `nx.DiGraph` with node/edge attributes
+```python
+# LangGraph - static, tied to schema
+class AgentState(TypedDict):
+    messages: list[str]  # Must know fields at definition time
+graph = StateGraph(AgentState)
+
+# HyperNodes - fully dynamic
+nodes = [create_tool_node(t) for t in available_tools]  # Built at runtime!
+graph = Graph(nodes=nodes)  # Validation happens here
+```
+
+**Why implicit edges by string are fine in the AI era:**
+
+**LLMs already work in a write-then-validate loop** - They write code, then get compiler/runtime feedback to fix issues. **Build-time validation = compiler feedback** - `Graph()` construction errors serve the same purpose as type errors for LLMs
+
+The workflow is very similar:
+```
+Traditional: Write code → Compiler error → Fix → Repeat
+HyperNodes:  Write code → Graph() error → Fix → Repeat
+```
+
+Both catch errors before runtime. The difference is *when* validation happens (compile time vs build time), not *whether* it happens.
+
+**Core architectural changes from 0.4:**
+1. **`Graph` replaces `Pipeline`** - Pure definition, constructed from list of nodes
 2. **`Runner` / `AsyncRunner`** - Execution separated from definition; runners own cache and callbacks
 3. **Reactive dataflow with versioning** - Values have versions, staleness drives execution
 4. **Unified execution algorithm** - Same code handles DAGs, branches, AND cycles
-5. **String-based routing** - `@route` decorator with Literal types, validated at build time
-6. **GraphState** - Tracks versioned values, execution history, gate state
-7. **Standard algorithms** - Leverage NetworkX for cycles, reachability, topological sort
 
 **Example - Multi-turn RAG becomes possible:**
 
 ```python
 from hypernodes import Graph, node, route, END
-from typing import Literal
 
 @node(output_name="docs")
 def retrieve(query: str, messages: list) -> list:
@@ -143,66 +165,46 @@ async def generate(docs: list, messages: list, llm) -> str:
 def add_response(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 
-RouteDecision = Literal["retrieve", END]
-
-@route  # Not @gate - validates "retrieve" exists at build time
-def should_continue(messages: list) -> RouteDecision:
+@route(targets=["retrieve", END])  # Explicit targets - validated at build time
+def should_continue(messages: list) -> str:
     if len(messages) > 10 or detect_done(messages[-1]):
         return END
     return "retrieve"  # Loops back! Creates cycle
 
 graph = Graph(nodes=[retrieve, generate, add_response, should_continue])
+# ↑ Build-time validation: "retrieve" exists, targets are valid
 
-# Runner pattern: Graph is pure definition, Runner handles execution
 runner = AsyncRunner(cache=DiskCache("./cache"))
-result = await runner.run(graph, inputs={"query": "What is RAG?", "messages": [], "llm": my_llm})
+result = await runner.run(graph, inputs={
+    "query": "What is RAG?",
+    "messages": [],
+    "llm": my_llm
+})
 ```
+
+**Build-time validation (always happens at `Graph()`):**
+- All `@route` targets exist as nodes (or are `END`)
+- All edges are valid (parameter names match output names)
+- Cycles can terminate (path to `END` or leaf node exists)
+- No deadlocks (cycles have valid starting inputs)
+
+**The "edge cancels default" rule:**
+- If a parameter has an incoming edge → **default is ignored**, value must come from edge OR input
+- If no edge AND has function default → use the default
+- If no edge AND no default → required input
+
+**Why this is elegant:**
+- The **input itself determines where cycles start**
+- Framework just runs whatever is ready
+- Explicit initialization = clear documentation of cycle state
+- No ambiguity, no special cases
 
 **What the framework handles automatically:**
 - ✅ Cycle execution (retrieve can run multiple times)
 - ✅ Staleness detection (knows when to re-run nodes)
 - ✅ Sole producer rule (prevents infinite loops in accumulators)
-- ✅ Gate validation (fails fast if "retrieve" doesn't exist)
+- ✅ Route validation (fails fast if "retrieve" doesn't exist)
 - ✅ Version tracking (each message update increments version)
-
-### Design Philosophy: Solving My Constraints
-
-This rewrite is driven by the specific constraints of building multi-turn RAG, informed by what frustrated me in existing frameworks.
-
-**What I need:**
-- ✅ **Cycles** - Multi-turn conversations that loop back
-- ✅ **Pure functions** - Easy to test in notebooks, reusable outside framework
-- ✅ **Hierarchical composition** - Keep the pipeline-as-node pattern that works
-- ✅ **Implicit edges** - Dependencies visible in signatures, not buried in code
-- ✅ **Standard algorithms** - Use NetworkX instead of reinventing graph theory
-- ✅ **Single execution model** - One algorithm handles DAGs, branches, AND cycles
-
-**What I explicitly don't need (yet):**
-- Maximum performance (correctness > speed for Phase 1)
-- Enterprise features (RBAC, audit logs, compliance)
-- Backward compatibility (no users to break, clean slate)
-- Market positioning (solving my problem first, seeing if others care second)
-
-**Comparison to state object frameworks (why I'm not using LangGraph):**
-
-| Aspect | State Object Frameworks | HyperNodes Graph (What I Want) |
-|--------|------------------------|--------------------------------|
-| **Function coupling** | Functions read/write explicit state object | Pure input → output, framework handles state |
-| **Dependencies** | Hidden in function bodies | Explicit in signatures |
-| **Edge wiring** | Manual edge definitions | Inferred from signatures |
-| **Portability** | Framework-coupled, can't test standalone | Use anywhere, test with plain function calls |
-| **Accumulators** | Need reducer annotations | Just return a list |
-| **DRY** | Field names repeated 4+ places | Names in signatures once |
-
-**The philosophy in one sentence:**
-
-> **Pure functions + implicit edges + reactive dataflow + NetworkX = powerful cyclic graphs without the complexity**
-
-**The approach:**
-
-Build it for myself, document it thoroughly, publish it as I go. If the design resonates with others building agentic systems, great. If not, I still have infrastructure that solves my problem cleanly.
-
-This is **infrastructure-as-learning** - understanding reactive dataflow, graph theory, and execution semantics deeply enough to build something elegant.
 
 ### Technical Architecture: NetworkX-Native Reactive Dataflow
 
@@ -222,16 +224,15 @@ This is **infrastructure-as-learning** - understanding reactive dataflow, graph 
    - Reactive: nodes execute when inputs are stale
    - Gate-driven: conditional routing via control edges
 
-4. **String-based routing with build-time validation**
-   - `@route` decorator with `Literal` types
-   - Targets validated at Graph initialization (fail fast)
-   - `END` sentinel for termination
+4. **Gate-based routing with build-time validation**
+   - `@route(targets=[...])` for multi-way routing
+   - `@branch(when_true=..., when_false=...)` for boolean routing (specialized gate)
+   - Targets validated at `Graph()` construction (fail fast)
+   - `END` sentinel for explicit termination (or reach leaf node)
 
-5. **Standard algorithms from NetworkX**
-   - Cycle detection: `nx.is_directed_acyclic_graph()`
-   - Reachability: `nx.has_path()`
-   - Ancestors/descendants: `nx.ancestors()`, `nx.descendants()`
-   - Topological sort: `nx.topological_sort()` (for DAG subgraphs)
+5. **Standard graph algorithms** (implementation detail)
+   - Cycle detection, reachability, topological sort
+   - Built on battle-tested algorithms
 
 6. **Runner pattern (separates definition from execution)**
    - `Graph` is pure structure - no `run()` method, no cache, no callbacks
@@ -276,74 +277,45 @@ approval = InterruptNode(
 graph = Graph(nodes=[create_prompt, approval, route_decision, finalize])
 ```
 
-**Entrypoint Requirement:**
+**No Entrypoint Needed - Inputs Determine Where Cycles Start:**
 
-Entrypoints provide validation context and enable better error messages:
+The "edge cancels default" rule eliminates the need for entrypoints:
 
-- **DAGs (no cycles):** Entrypoint is **optional** (execution order is unambiguous via topological sort)
-- **Cyclic Graphs:** Entrypoint is **mandatory** (forces clarity about "where does this start?")
+- If a parameter has an edge → **default is ignored** → requires edge value OR input
+- Cyclic parameters have edges (by definition of being in a cycle)
+- Therefore, cyclic parameters must be initialized via input
+- **The input you provide determines where the cycle starts!**
 
 ```python
-# ❌ Fails at build time
-graph = Graph(nodes=[retrieve, generate, route_back])
-# ConfigError: Cyclic graph detected (route_back → retrieve).
-#              Cycles require entrypoint: Graph(..., entrypoint="retrieve")
+@node(output_name="a")
+def node_a(b: int) -> int: ...  # b has edge from node_b
 
-# ✅ Clear and validated
-graph = Graph(
-    nodes=[retrieve, generate, add_response, route_back],
-    entrypoint="retrieve",  # Mandatory for cyclic graphs
-)
+@node(output_name="b")
+def node_b(a: int) -> int: ...  # a has edge from node_a
+
+graph = Graph(nodes=[node_a, node_b])
+
+# YOU choose where to start by which input you provide:
+runner.run(graph, inputs={"a": 5})  # Start from node_b (has a=5)
+runner.run(graph, inputs={"b": 5})  # Start from node_a (has b=5)
 ```
 
-**What entrypoint provides:**
+**Why this is better than entrypoints:**
 
-**Build-time:**
-- ✅ Path distance analysis (compute entrypoint → all nodes)
-- ✅ Sequential producer validation (different distances = sequential, same distance = parallel)
-- ✅ Reachability validation (all nodes reachable from entrypoint)
-- ✅ Termination validation (can reach END from any cycle)
-- ✅ Auto-suggests entrypoint in error (detects likely start nodes)
+| Aspect | Entrypoint approach | Input-as-entrypoint |
+|--------|--------------------|--------------------|
+| Declaration | Extra concept to learn | Just provide inputs |
+| Flexibility | Fixed at build time | Choose at runtime |
+| Clarity | Implicit state initialization | Explicit: you see the initial values |
+| Validation | Complex ambiguity detection | Simple: run what's ready |
 
-**Runtime:**
-- ✅ Enhanced error messages (explains normal flow from entrypoint)
-- ✅ Flow context in conflicts ("normal path is X→Y→Z, you skipped to Z")
-- ✅ NO enforcement (still executes whatever is ready based on inputs)
-- ✅ Silent operation (no warnings unless actual error)
+**Build-time validation (still happens):**
+- ✅ All `@route` targets exist
+- ✅ Cycles can terminate (path to `END` or leaf node exists)
+- ✅ No conflicting parallel producers
+- ✅ Deadlock detection (cycle with no possible starting input)
 
-**Checkpoints override entrypoint:**
-```python
-# Entrypoint ignored when resuming - checkpoint determines position
-runner.run(graph, checkpoint=saved_state, inputs={...})
-```
-
-**Example - Build-time validation:**
-```
-Graph analysis (from entrypoint 'add_user'):
-  add_user (distance 0) → generate (distance 1) → add_assistant (distance 2) → route (distance 3)
-  Cycle: route → retrieve (loops back)
-  
-✓ Sequential producers for 'messages': add_user, add_assistant
-  Different distances (0 vs 2) → deterministic execution order
-  
-✓ Termination possible: route can return END
-```
-
-**Example - Enhanced runtime error:**
-```
-ParallelProducersError: Value 'messages' has multiple producers ready:
-  - add_user (needs: messages, user_input)
-  - add_assistant (needs: messages, response)
-
-FLOW ANALYSIS (from entrypoint 'add_user'):
-  Normal path: add_user (0) → generate (1) → add_assistant (2)
-  Your inputs made both ready simultaneously.
-
-Options:
-  1. Provide only 'user_input' (start from entrypoint)
-  2. Resume from checkpoint with conversation state
-  3. Add dependency between producers
-```
+---
 
 **Validation Strategy: Fail Fast at Every Stage**
 
@@ -353,9 +325,9 @@ When you create a `Graph`, these errors are caught immediately:
 - ✅ All `@route` targets reference existing nodes
 - ✅ Mutually exclusive branches can share output names (validated transitively)
 - ✅ Gates that can activate together don't produce conflicting outputs
-- ✅ Cycles have valid termination paths (gates with `END`)
+- ✅ Cycles have valid termination paths (route to `END` or reach leaf node)
+- ✅ Deadlock detection (cycle with no possible input to start it)
 - ✅ No structural impossibilities (self-loops without gates, etc.)
-- ✅ **With entrypoint:** Sequential producers validated by path distance analysis
 
 **Runtime Validation (Before Execution Starts):**
 
@@ -370,25 +342,59 @@ After each node completes:
 - ✅ Check next ready set for conflicts before executing
 - ✅ Validate gate decisions reference valid targets
 
-**Error Message Pattern:**
+**Error Message Philosophy: Explain Like I'm New to This**
 
-All errors include:
-- What went wrong (clear error type)
-- Why it went wrong (which inputs/nodes caused it)
-- How to fix it (3 concrete options)
+Error messages should be helpful to someone who has never seen the framework before. Key principles:
 
-Example:
+1. **Use simple terms** - Avoid jargon like "producer", "consumer", "parallel execution"
+2. **Explain the crux** - What's actually wrong, in plain English
+3. **Show the conflict** - Make it obvious why this is a problem
+4. **Give concrete options** - Actionable fixes, not just "fix your code"
+
+**Example - Conflict error (human-friendly):**
 ```
-ParallelProducersError: Value 'messages' has multiple producers ready simultaneously:
-  - add_user (needs: messages, user_input)
-  - add_assistant (needs: messages, response)
+ConflictError: Two nodes create 'messages' at the same time
 
-This conflict was caused by providing both 'user_input' and 'response' as inputs.
+  → add_user creates messages (ready because you provided 'user_input')
+  → add_assistant creates messages (ready because you provided 'response')
 
-Options to fix:
-  1. Remove 'response' from inputs (run normal user→assistant flow)
-  2. Remove 'user_input' from inputs (resume from assistant response)
-  3. Add dependency: make add_assistant depend on add_user output
+The problem: If add_user sets messages=[A] and add_assistant sets messages=[B],
+which one should we use? The framework can't decide for you.
+
+How to fix (pick ONE):
+
+  Option A: Remove 'response' from inputs
+            → add_user runs first, then add_assistant follows naturally
+
+  Option B: Remove 'user_input' from inputs  
+            → start from add_assistant instead
+
+  Option C: Make add_assistant depend on add_user
+            → forces add_user to always run first
+```
+
+**Example - Missing input (human-friendly):**
+```
+MissingInputError: 'messages' needs a starting value
+
+  → add_response wants to read 'messages', but nothing has created it yet
+  → This is a cycle - add_response creates 'messages' for the NEXT iteration,
+    but what about the FIRST iteration?
+
+How to fix:
+  Provide an initial value in your inputs:
+  
+    runner.run(graph, inputs={..., "messages": []})
+```
+
+**Example - Invalid route target:**
+```
+InvalidRouteError: Route returned 'retreive' but that node doesn't exist
+
+  → should_continue() returned "retreive"
+  → Valid targets are: "retrieve", "generate", END
+  
+Hint: Did you mean "retrieve"? (looks like a typo)
 ```
 
 **Cache + Versioning Interaction:**
@@ -400,15 +406,15 @@ Options to fix:
 
 **Streaming Support:**
 
-Phase 1 includes **generator handling** (internal accumulation):
+**Generator handling** (internal accumulation):
 - ✅ Detect if node returns generator (via `inspect.isgenerator()`)
 - ✅ Accumulate chunks automatically
 - ✅ Store final value in state
-- ❌ NO streaming events to user (`.iter()` API is Phase 2)
+- ✅ Streaming events to user via `.iter()` API (AsyncRunner only)
 
-Why: Modern LLM APIs return generators. Framework must handle them, but doesn't expose token-by-token streaming until Phase 2.
+Why: Modern LLM APIs return generators. Framework handles them with automatic accumulation for `run()` and optional streaming via `iter()`.
 
-**Three-Layer Architecture (Phase 2+):**
+**Three-Layer Architecture:**
 
 The framework separates three distinct concerns that can be layered independently:
 
@@ -418,32 +424,6 @@ The framework separates three distinct concerns that can be layered independentl
 | **Observability** | Logging, tracing, analytics | Langfuse, Logfire integration | Events → Callback |
 | **Durability** | Checkpoint persistence | Redis, PostgreSQL, SQLite | Checkpointer interface |
 
-```
-┌─────────────────────────────────────────┐
-│              User Frontend              │
-│         (AG-UI / Custom / CLI)          │
-└───────────────────┬─────────────────────┘
-                    │ Streaming Events
-┌───────────────────▼─────────────────────┐
-│           UI Protocol Layer             │
-│     (transforms events → AG-UI SSE)     │
-└───────────────────┬─────────────────────┘
-                    │
-┌───────────────────▼─────────────────────┐
-│         Observability Layer             │
-│   (Langfuse spans, Logfire traces)      │
-└───────────────────┬─────────────────────┘
-                    │
-┌───────────────────▼─────────────────────┐
-│           Core Execution                │
-│      (Runner + Graph + State)           │
-└───────────────────┬─────────────────────┘
-                    │
-┌───────────────────▼─────────────────────┐
-│          Durability Layer               │
-│   (Checkpointer: Redis/SQL/Memory)      │
-└─────────────────────────────────────────┘
-```
 
 **Key principle:** Layers consume a unified event stream. The core produces events; layers subscribe to what they need.
 
@@ -467,57 +447,24 @@ result = await runner.run(graph, inputs={...}, session_id="conversation-123")
 # result.run_id → "run-abc-456" (auto)
 ```
 
-### Success Criteria
-
-**Personal Success (Primary):**
-
-This rewrite succeeds if:
-- ✅ My multi-turn RAG code is cleaner than my LangGraph prototype
-- ✅ I can test nodes in Jupyter without framework boilerplate
-- ✅ The caching actually speeds up iteration (not fighting invalidation)
-- ✅ I understand the execution model well enough to debug it
-- ✅ Adding new features feels natural, not hacky
-- ✅ I learned graph theory and reactive dataflow deeply
-
-**Community Validation (Bonus):**
-
-Signs that the approach resonates:
-- 🎁 Someone stars the repo because the philosophy clicks
-- 🎁 Someone opens an issue with a real use case
-- 🎁 Someone contributes a PR improving something
-- 🎁 Discussion on HN/Reddit validates "pure functions > state objects"
-
-**Even if community validation never happens, success = solves my problem cleanly.**
 
 ### What This Enables
 
-**Immediate (Phase 1 MVP):**
-- ✅ Multi-turn conversational RAG (my use case)
+**Core capabilities:**
+- ✅ Multi-turn conversational RAG
 - ✅ Agentic workflows with loops
 - ✅ Retry patterns
 - ✅ Iterative refinement
 - ✅ Message accumulators that don't infinite loop
-
-**Near-term (Phase 2 - Polish):**
 - ✅ Human-in-the-loop with pause/resume (`InterruptNode`)
 - ✅ Token-by-token streaming (`.iter()` API)
 - ✅ Event streaming for observability
-- ✅ Basic checkpointing
-
-**Future (Phase 3 - Community-Driven):**
-- 🤔 Distributed execution (DaftEngine for Graph) - if needed
-- 🤔 Durable workflows - if use case emerges
-- 🤔 Whatever the community asks for - if there is one
+- ✅ Checkpointing and resume
+- ✅ Distributed batch processing (DaftRunner for DAG-only graphs)
 
 ## Success Criteria
 
-This section defines measurable, phase-specific criteria for determining when each milestone is complete and successful.
-
-### Phase 1: Core Graph Architecture (MVP)
-
-**Goal:** Validate the reactive dataflow model with a real multi-turn RAG implementation.
-
-#### Must-Have Acceptance Criteria
+### Acceptance Criteria
 
 | Criterion | Definition of Done | Validation Method |
 |-----------|-------------------|-------------------|
@@ -529,8 +476,11 @@ This section defines measurable, phase-specific criteria for determining when ea
 | **Route targets validated** | `@route` with invalid target fails fast | Build-time error tests |
 | **Generator handling works** | Async generators accumulate correctly | Streaming node tests |
 | **Cache signatures stable** | Same inputs → same key across iterations | Signature determinism tests |
+| **`.iter()` streaming works** | Token-by-token streaming with event types | Integration test with SSE/websocket |
+| **`InterruptNode` pauses** | Execution pauses, state persists, resumes correctly | Human-in-loop test |
+| **Checkpointing works** | Save state, kill process, resume from checkpoint | Persistence test |
 
-#### Quality Criteria
+### Quality Criteria
 
 | Criterion | Target | Measurement |
 |-----------|--------|-------------|
@@ -538,57 +488,15 @@ This section defines measurable, phase-specific criteria for determining when ea
 | **All tests pass** | Zero failures | CI/local test run |
 | **No regressions in DAG mode** | Existing patterns still work | Compatibility tests |
 | **Error messages actionable** | All errors include "what", "why", "how to fix" | Manual review |
+| **Streaming latency** | First token < 100ms after LLM starts | Timing tests |
+| **Checkpoint size** | < 10MB for typical conversation state | Size measurement |
 
-#### Personal Validation
+### Personal Validation
 
-- [ ] Multi-turn RAG is cleaner than my LangGraph prototype
+- [ ] Multi-turn RAG is cleaner than a LangGraph prototype
 - [ ] I can test nodes in Jupyter without any framework boilerplate
 - [ ] Debugging feels natural (I understand what's happening)
 - [ ] Adding a new feature doesn't require touching 5+ files
-
-### Phase 2: Polish & Developer Experience
-
-**Goal:** Production-ready quality-of-life features for real-world usage.
-
-#### Must-Have Acceptance Criteria
-
-| Criterion | Definition of Done | Validation Method |
-|-----------|-------------------|-------------------|
-| **`.iter()` streaming works** | Token-by-token streaming with event types | Integration test with SSE/websocket |
-| **`InterruptNode` pauses** | Execution pauses, state persists, resumes correctly | Human-in-loop test |
-| **Checkpointing works** | Save state, kill process, resume from checkpoint | Persistence test |
-| **Event streaming works** | All lifecycle events emitted with timing | Callback inspection |
-| **Visualization updated** | Graph viz shows cycles, gates, active node | Manual + snapshot tests |
-
-#### Quality Criteria
-
-| Criterion | Target | Measurement |
-|-----------|--------|-------------|
-| **Streaming latency** | First token < 100ms after LLM starts | Timing tests |
-| **Checkpoint size** | < 10MB for typical conversation state | Size measurement |
-| **Resume correctness** | 100% identical results after resume | Determinism tests |
-
-### Phase 3: Community-Driven (Future)
-
-**Goal:** Features driven by actual user needs (if community forms).
-
-#### Potential Features (Not Committed)
-
-These are tracked as "might do" based on community interest:
-
-| Feature | Trigger Condition |
-|---------|-------------------|
-| **Distributed execution** | 3+ users request parallel execution for large batches |
-| **Durable workflows** | Real use case with multi-day execution needs |
-| **Web UI for debugging** | Demand for visual debugging beyond Jupyter |
-| **Multi-backend cache** | Need for Redis/S3 cache adapters |
-
-#### Success Signal
-
-- GitHub stars > 100 (indicates resonance)
-- 3+ real issues from different users
-- 1+ external PR merged
-- Discussion thread validates "pure functions > state objects"
 
 ### Non-Goals & Anti-Patterns
 
@@ -610,7 +518,7 @@ These are tracked as "might do" based on community interest:
 | Hidden dependencies | Can't reason about execution order | Explicit in signatures |
 | Implicit reducers | Append semantics unclear | Return complete list |
 | Silent failures | Errors discovered too late | Fail fast at build time |
-
+s
 ### Measuring Success Over Time
 
 **Weekly Check-in Questions:**
@@ -627,10 +535,10 @@ These are tracked as "might do" based on community interest:
 - Time to implement a new feature (should decrease)
 - Time spent debugging vs building (should shift toward building)
 
-**Definition of Done for V2:**
+**Definition of Done:**
 
 The v0.5.0 release is "done" when:
-1. All Phase 1 acceptance criteria pass
+1. All acceptance criteria pass
 2. Multi-turn RAG example runs end-to-end
 3. Migration guide written (Pipeline → Graph patterns)
 4. Architecture decision records exist for all major choices
@@ -646,11 +554,10 @@ The v0.5.0 release is "done" when:
 
 ### Classification Details
 
-**Project Type:** Personal Developer Tool → Open Source (Maybe)
+**Project Type:** Personal Developer Tool
 - Personal infrastructure solving a real problem (multi-turn RAG)
 - Zero-dependency core with optional integrations
 - Published incrementally as development progresses
-- Community engagement is a bonus, not a requirement
 
 **Project Nature:**
 - **Infrastructure-as-learning:** Deep dive into graph theory, reactive dataflow, execution semantics
@@ -665,11 +572,11 @@ The v0.5.0 release is "done" when:
   - Portability (pure functions, testability, no framework coupling)
   - Caching correctness (signature computation with cycles)
 
-**Primary User (Phase 1):**
+**Primary User:**
 - Me (building multi-turn RAG)
 - Future me (debugging, iterating, extending)
 
-**Potential Secondary Users (Phase 2+):**
+**Potential Secondary Users:**
 - Developers frustrated with state object frameworks
 - Researchers building agentic systems
 - ML engineers who value function purity
@@ -698,17 +605,10 @@ The v0.5.0 release is "done" when:
 - Simpler mental model (one execution system, not two)
 - Learning opportunity (understand the model deeply, not just bolt-on features)
 
-**Why Phased Implementation?**
-- **Phase 1:** Validates core model with real use case (multi-turn RAG)
-- **Phase 2:** Adds quality-of-life (streaming, human-in-loop)
-- **Phase 3:** Community-driven (see what others actually need)
-- Each phase ships working software, enables learning
-
 **Why Document Everything?**
 - Future me will forget design decisions
-- Potential contributors need context
 - Writing clarifies thinking
-- Publishable artifact even if no community forms
+- Publishable artifact for reference
 
 ## User Stories & Use Cases
 
@@ -735,16 +635,33 @@ System: [retrieves 2023 papers too] → [generates comparison]
 
 **Graph solution:**
 ```python
-@route
-def should_continue(messages: list) -> Literal["retrieve", END]:
+@node(output_name="messages")
+def add_user_message(messages: list, user_input: str) -> list:
+    return messages + [{"role": "user", "content": user_input}]
+
+@node(output_name="docs")
+def retrieve(query: str, messages: list) -> list:
+    return vector_db.search(query, context=messages)
+
+@node(output_name="messages")  # Accumulator
+def add_assistant(messages: list, response: str) -> list:
+    return messages + [{"role": "assistant", "content": response}]
+
+@route(targets=["retrieve", END])
+def should_continue(messages: list) -> str:
     if user_says_done(messages[-1]) or len(messages) > 20:
         return END
     return "retrieve"  # Loops back
 
-graph = Graph(
-    nodes=[add_user_message, retrieve, generate, add_assistant, should_continue],
-    entrypoint="add_user_message"
-)
+graph = Graph(nodes=[add_user_message, retrieve, generate, add_assistant, should_continue])
+
+runner = AsyncRunner()
+# The input initializes the cycle - no entrypoint needed!
+result = await runner.run(graph, inputs={
+    "query": "...",
+    "user_input": "What is RAG?",
+    "messages": []  # ← Explicit initialization
+})
 ```
 
 #### Acceptance Criteria
@@ -752,6 +669,7 @@ graph = Graph(
 - [ ] Each turn correctly uses full conversation history for retrieval
 - [ ] State persists between turns (messages accumulate)
 - [ ] Clear termination (END when user is done)
+- [ ] `messages` explicitly initialized - clear documentation of starting state
 
 ---
 
@@ -775,10 +693,8 @@ Agent: [refines] → self-review → decide: "done"
 
 **Graph solution:**
 ```python
-ToolChoice = Literal["read_file", "search", "generate", "refine", END]
-
-@route
-def decide_action(analysis: str, tools_used: list) -> ToolChoice:
+@route(targets=["read_file", "search", "generate", "refine", END])
+def decide_action(analysis: str, tools_used: list) -> str:
     return llm.decide(analysis, tools_used)  # LLM picks next action
 
 @node(output_name="tools_used")  # Accumulator
@@ -818,8 +734,8 @@ def generate(prompt: str, feedback: str | None) -> str:
 def evaluate(draft: str) -> tuple[float, str]:
     return critic.evaluate(draft)
 
-@route
-def quality_gate(score: float) -> Literal["generate", END]:
+@route(targets=["generate", END])
+def quality_gate(score: float) -> str:
     return END if score > 0.9 else "generate"
 ```
 
@@ -831,11 +747,13 @@ def quality_gate(score: float) -> Literal["generate", END]:
 
 ---
 
-### Use Case: Human-in-the-Loop Approval (Phase 2)
+### Use Case: Human-in-the-Loop Approval
 
 **As a** developer building a workflow requiring human approval,  
 **I want** execution to pause, wait for human input, then resume,  
 **So that** I can build supervised AI systems.
+
+**Note:** Requires `AsyncRunner` (see Runner Compatibility Matrix).
 
 #### Scenario: Content Moderation Pipeline
 
@@ -845,18 +763,24 @@ Human approves → Continue to publish
 Human rejects → Loop back to regenerate with feedback
 ```
 
-**Graph solution (Phase 2):**
+**Graph solution:**
 ```python
-@interrupt  # New decorator for Phase 2
-def human_review(content: str) -> Literal["publish", "regenerate"]:
-    # Execution pauses here, state saved
-    # Resumes when human provides decision
-    pass
+# InterruptNode pauses execution, waits for human input
+approval = InterruptNode(
+    name="human_review",
+    input_param="content",           # What to show human
+    response_param="decision",       # Where to write response
+)
+
+@route(targets=["publish", "regenerate"])
+def route_decision(decision: str) -> str:
+    return decision  # Routes based on human input
 
 # Usage
-result = graph.run(inputs={...})  # Returns checkpoint
-# ... human reviews ...
-result = graph.run(checkpoint=saved, inputs={"decision": "publish"})
+runner = AsyncRunner()
+result = await runner.run(graph, inputs={...})  # Returns at interrupt
+# ... human reviews content, provides decision ...
+result = await runner.run(graph, checkpoint=saved, inputs={"decision": "publish"})
 ```
 
 #### Acceptance Criteria
@@ -951,23 +875,22 @@ These scenarios are explicitly out of scope:
 | Scenario | Why Not | Alternative |
 |----------|---------|-------------|
 | **Distributed job queue** | Not a task queue, it's a graph executor | Use Celery/RQ + call graph.run() in worker |
-| **Real-time event streaming** | Phase 1 doesn't expose token streaming | Wait for Phase 2 `.iter()` API |
 | **Multi-tenant isolation** | No RBAC, single-user focus | Add at application layer if needed |
-| **Sub-millisecond latency** | Correctness > performance for Phase 1 | Profile and optimize specific bottlenecks later |
-| **Distributed graph execution** | Nodes run in single process | Future: explore Daft integration |
+| **Sub-millisecond latency** | Correctness > performance initially | Profile and optimize specific bottlenecks later |
+| **Distributed cyclic execution** | DaftRunner doesn't support cycles | Use Runner/AsyncRunner for cycles |
 
 ---
 
 ### User Story Priority Matrix
 
-| Story | Phase | Priority | Complexity | Dependencies |
-|-------|-------|----------|------------|--------------|
-| Multi-turn RAG | 1 | **Critical** | High | Core architecture |
-| Agentic tool loop | 1 | High | Medium | Route decorator |
-| Iterative refinement | 1 | High | Medium | Route decorator |
-| Parallel branch merge | 1 | Medium | Low | Already works with DAG |
-| Conditional skip | 1 | Medium | Low | Existing @branch |
-| Human-in-the-loop | 2 | High | High | Checkpoint system |
+| Story | Priority | Complexity | Dependencies |
+|-------|----------|------------|--------------|
+| Multi-turn RAG | **Critical** | High | Core architecture |
+| Agentic tool loop | High | Medium | Route decorator |
+| Iterative refinement | High | Medium | Route decorator |
+| Parallel branch merge | Medium | Low | Already works with DAG |
+| Conditional skip | Medium | Low | Existing @branch |
+| Human-in-the-loop | High | High | Checkpoint system, AsyncRunner |
 
 ## Functional Requirements
 
@@ -977,35 +900,35 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR1.1: Node Registration
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR1.1.1 | `Graph` accepts a list of nodes (functions decorated with `@node`, `@route`, `@branch`) | Must | 1 |
-| FR1.1.2 | Edges are inferred from function signatures (parameter names match output names) | Must | 1 |
-| FR1.1.3 | Duplicate output names are rejected unless from mutually exclusive branches | Must | 1 |
-| FR1.1.4 | Unknown parameter names (not produced by any node or provided as input) raise clear error | Must | 1 |
-| FR1.1.5 | Self-referencing nodes (output_name in own parameters) detected and rejected | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR1.1.1 | `Graph` accepts a list of nodes (functions decorated with `@node`, `@route`, `@branch`) | Must |
+| FR1.1.2 | Edges are inferred from function signatures (parameter names match output names) | Must |
+| FR1.1.3 | Duplicate output names are rejected unless from mutually exclusive branches | Must |
+| FR1.1.4 | Unknown parameter names (not produced by any node or provided as input) raise clear error | Must |
+| FR1.1.5 | Self-referencing nodes (output_name in own parameters) detected and rejected | Must |
 
 #### FR1.2: Graph Validation (Build-Time)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR1.2.1 | Cycle detection: `Graph` identifies if graph contains cycles | Must | 1 |
-| FR1.2.2 | Entrypoint required for cyclic graphs, optional for DAGs | Must | 1 |
-| FR1.2.3 | All `@route` targets must reference existing node names or `END` | Must | 1 |
-| FR1.2.4 | Route target validation uses `Literal` type hints for static checking | Should | 1 |
-| FR1.2.5 | Termination path validation: cycles must have path to `END` | Must | 1 |
-| FR1.2.6 | Sequential producer validation: nodes producing same output must have different distances from entrypoint | Must | 1 |
-| FR1.2.7 | Invalid graphs fail with actionable error messages (what, why, how to fix) | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR1.2.1 | Cycle detection: `Graph` identifies if graph contains cycles | Must |
+| FR1.2.2 | All `@route` targets must reference existing node names or `END` | Must |
+| FR1.2.3 | Route targets validated via `@route(targets=[...])` - explicit declaration required | Must |
+| FR1.2.4 | Termination path validation: cycles must have path to `END` or leaf node | Must |
+| FR1.2.5 | Deadlock detection: error if cycle has no possible starting input | Must |
+| FR1.2.6 | "Edge cancels default" validation: warn if cyclic param has unused default | Should |
+| FR1.2.7 | Invalid graphs fail with actionable error messages (what, why, how to fix) | Must |
 
 #### FR1.3: NetworkX Integration
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR1.3.1 | `Graph` wraps `nx.DiGraph` internally | Must | 1 |
-| FR1.3.2 | Node attributes store: hypernode object, is_gate flag, metadata | Must | 1 |
-| FR1.3.3 | Edge attributes store: edge_type (data/control), value names, gate decisions | Must | 1 |
-| FR1.3.4 | Standard NetworkX algorithms used for: cycle detection, reachability, ancestors, topological sort | Must | 1 |
-| FR1.3.5 | Graph structure accessible for visualization (`graph.nx_graph` property) | Should | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR1.3.1 | `Graph` wraps `nx.DiGraph` internally | Must |
+| FR1.3.2 | Node attributes store: hypernode object, is_gate flag, metadata | Must |
+| FR1.3.3 | Edge attributes store: edge_type (data/control), value names, gate decisions | Must |
+| FR1.3.4 | Standard NetworkX algorithms used for: cycle detection, reachability, ancestors, topological sort | Must |
+| FR1.3.5 | Graph structure accessible for visualization (`graph.nx_graph` property) | Should |
 
 ---
 
@@ -1013,32 +936,38 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR2.1: Reactive Dataflow
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR2.1.1 | Nodes execute when all required inputs are available | Must | 1 |
-| FR2.1.2 | Staleness detection: node re-executes if any input version changed since last run | Must | 1 |
-| FR2.1.3 | Sole producer rule: accumulator nodes don't re-trigger from own output | Must | 1 |
-| FR2.1.4 | Version tracking: each value has monotonically increasing version number | Must | 1 |
-| FR2.1.5 | Ready set computation: determine which nodes can execute given current state | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR2.1.1 | Nodes execute when all required inputs are available | Must |
+| FR2.1.2 | Staleness detection: node re-executes if any input version changed since last run | Must |
+| FR2.1.3 | Sole producer rule: accumulator nodes don't re-trigger from own output | Must |
+| FR2.1.4 | Version tracking: each value has monotonically increasing version number | Must |
+| FR2.1.5 | Ready set computation: determine which nodes can execute given current state | Must |
 
 #### FR2.2: Control Flow
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR2.2.1 | `@route` decorator returns target node name as string | Must | 1 |
-| FR2.2.2 | Route can return `END` sentinel to terminate execution | Must | 1 |
-| FR2.2.3 | Route decision creates control edge to target node | Must | 1 |
-| FR2.2.4 | `@branch` decorator (existing) continues to work for mutually exclusive paths | Must | 1 |
-| FR2.2.5 | Gates block downstream nodes until decision is made | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR2.2.1 | `@route` decorator returns target node name as string | Must |
+| FR2.2.2 | Route can return `END` sentinel to explicitly terminate cycles | Must |
+| FR2.2.3 | Route decision creates control edge to target node | Must |
+| FR2.2.4 | `@branch` is a gate for boolean decisions (specialized `@route` with 2 targets) | Must |
+| FR2.2.5 | Gates block downstream nodes until decision is made | Must |
 
-#### FR2.3: Execution Loop
+#### FR2.3: Execution Loop & Termination
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR2.3.1 | Single unified algorithm handles DAGs, branches, AND cycles | Must | 1 |
-| FR2.3.2 | Loop terminates when: no nodes ready AND (END reached OR all outputs produced) | Must | 1 |
-| FR2.3.3 | Infinite loop detection: configurable max iterations with clear error | Must | 1 |
-| FR2.3.4 | Execution order within ready set is deterministic (alphabetical or registration order) | Should | 1 |
+**Execution terminates when:**
+1. **Leaf node reached** - A node with no outgoing edges completes (natural DAG termination)
+2. **`END` returned** - A route/branch explicitly returns `END` sentinel (explicit cycle termination)
+3. **All outputs produced** - Requested outputs are available and no nodes are stale
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR2.3.1 | Single unified algorithm handles DAGs, branches, AND cycles | Must |
+| FR2.3.2 | Execution terminates at leaf nodes (no outgoing edges) | Must |
+| FR2.3.3 | `END` sentinel explicitly terminates cycles from routes | Must |
+| FR2.3.4 | Infinite loop detection: configurable max iterations with clear error | Must |
+| FR2.3.5 | Execution order within ready set is deterministic (alphabetical or registration order) | Should |
 
 ---
 
@@ -1046,21 +975,21 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR3.1: GraphState
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR3.1.1 | `GraphState` tracks all value names, their current values, and versions | Must | 1 |
-| FR3.1.2 | Input values initialized with version 0 | Must | 1 |
-| FR3.1.3 | Each node execution increments version of its outputs | Must | 1 |
-| FR3.1.4 | State tracks which nodes have executed and their last input versions | Must | 1 |
-| FR3.1.5 | State is serializable for checkpointing (Phase 2) | Should | 2 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR3.1.1 | `GraphState` tracks all value names, their current values, and versions | Must |
+| FR3.1.2 | Input values initialized with version 0 | Must |
+| FR3.1.3 | Each node execution increments version of its outputs | Must |
+| FR3.1.4 | State tracks which nodes have executed and their last input versions | Must |
+| FR3.1.5 | State is serializable for checkpointing | Should |
 
 #### FR3.2: Conflict Detection
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR3.2.1 | Parallel producer conflict detected before execution starts | Must | 1 |
-| FR3.2.2 | Conflict error includes: which nodes, which value, why conflict occurred | Must | 1 |
-| FR3.2.3 | Error suggests resolution options (remove input, add dependency, use checkpoint) | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR3.2.1 | Parallel producer conflict detected before execution starts | Must |
+| FR3.2.2 | Conflict error includes: which nodes, which value, why conflict occurred | Must |
+| FR3.2.3 | Error suggests resolution options (remove input, add dependency, use checkpoint) | Must |
 
 ---
 
@@ -1068,21 +997,21 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR4.1: Signature Computation
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR4.1.1 | Cache signature = hash(code_hash + env_hash + input_values_hash) | Must | 1 |
-| FR4.1.2 | Signature uses actual VALUES, not version numbers | Must | 1 |
-| FR4.1.3 | Same inputs produce same signature regardless of iteration count | Must | 1 |
-| FR4.1.4 | Different conversation turns (different messages) produce different signatures | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR4.1.1 | Cache signature = hash(code_hash + env_hash + input_values_hash) | Must |
+| FR4.1.2 | Signature uses actual VALUES, not version numbers | Must |
+| FR4.1.3 | Same inputs produce same signature regardless of iteration count | Must |
+| FR4.1.4 | Different conversation turns (different messages) produce different signatures | Must |
 
 #### FR4.2: Cache Integration
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR4.2.1 | Existing `DiskCache` works with `Graph` (same as Pipeline) | Must | 1 |
-| FR4.2.2 | Cache check happens before node execution | Must | 1 |
-| FR4.2.3 | Cache hit skips execution, uses cached value, updates state | Must | 1 |
-| FR4.2.4 | Node-level `cache=False` disables caching for that node | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR4.2.1 | Existing `DiskCache` works with `Graph` (same as Pipeline) | Must |
+| FR4.2.2 | Cache check happens before node execution | Must |
+| FR4.2.3 | Cache hit skips execution, uses cached value, updates state | Must |
+| FR4.2.4 | Node-level `cache=False` disables caching for that node | Must |
 
 ---
 
@@ -1090,43 +1019,91 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR5.1: @node Decorator
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR5.1.1 | `@node(output_name="x")` wraps function as pipeline node | Must | 1 |
-| FR5.1.2 | Multiple outputs: `@node(output_name=("x", "y"))` with tuple return | Must | 1 |
-| FR5.1.3 | `cache` parameter controls cacheability (default True) | Must | 1 |
-| FR5.1.4 | Function remains callable without framework (`node.func(args)`) | Must | 1 |
-| FR5.1.5 | Async functions supported (`async def`) | Must | 1 |
-| FR5.1.6 | Generator functions accumulated automatically | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR5.1.1 | `@node(output_name="x")` wraps function as graph node | Must |
+| FR5.1.2 | Multiple outputs: `@node(output_name=("x", "y"))` with tuple return | Must |
+| FR5.1.3 | `cache` parameter controls cacheability (default True) | Must |
+| FR5.1.4 | Function remains callable without framework (`node.func(args)`) | Must |
+| FR5.1.5 | Async functions supported (`async def`) | Must |
+| FR5.1.6 | Generator functions accumulated automatically | Must |
+| FR5.1.7 | Function defaults apply only when parameter has NO edge (edge cancels default) | Must |
 
 #### FR5.2: @route Decorator (New)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR5.2.1 | `@route` marks function as routing decision node | Must | 1 |
-| FR5.2.2 | Return type must be `Literal[...]` with valid node names or `END` | Must | 1 |
-| FR5.2.3 | Return value determines next node to activate | Must | 1 |
-| FR5.2.4 | Route nodes are never cached (decisions must be re-evaluated) | Must | 1 |
-| FR5.2.5 | Invalid return value (not in Literal) raises runtime error | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR5.2.1 | `@route(targets=[...])` marks function as routing decision node | Must |
+| FR5.2.2 | `targets` parameter is required - lists valid node names and/or `END` | Must |
+| FR5.2.3 | Targets validated at `Graph()` construction (fail fast if target doesn't exist) | Must |
+| FR5.2.4 | Return value must be a string matching a target or `END` | Must |
+| FR5.2.5 | Invalid return value (not in targets) raises runtime error | Must |
+| FR5.2.6 | Route nodes are never cached (decisions must be re-evaluated) | Must |
+| FR5.2.7 | Type hints on return are optional (can be `str`, `Literal[...]`, or omitted) | Should |
 
-#### FR5.3: @branch Decorator (Existing)
+#### FR5.3: @branch Decorator (Gate for Boolean Decisions)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR5.3.1 | `@branch(when_true="node_a", when_false="node_b")` routes based on bool (string targets) | Must | 1 |
-| FR5.3.2 | Branch targets validated at Graph init (fail fast if target doesn't exist) | Must | 1 |
-| FR5.3.3 | Branch targets can produce same output name (mutually exclusive) | Must | 1 |
-| FR5.3.4 | Gate signals track which path was taken | Must | 1 |
+**`@branch` is a specialized gate** - same concept as `@route`, but optimized for binary (true/false) decisions. Both are "gates" that control execution flow.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR5.3.1 | `@branch(when_true="node_a", when_false="node_b")` routes based on bool (string targets) | Must |
+| FR5.3.2 | Branch targets validated at Graph init (fail fast if target doesn't exist) | Must |
+| FR5.3.3 | Branch targets can produce same output name (mutually exclusive) | Must |
+| FR5.3.4 | Gate signals track which path was taken | Must |
+| FR5.3.5 | `@branch` is conceptually a `@route` with exactly 2 targets (true/false) | Info |
 
 #### FR5.4: InterruptNode (New)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR5.4.1 | `InterruptNode(name="x", input_param="prompt", response_param="response")` declares pause point | Must | 2 |
-| FR5.4.2 | `input_param` specifies which value to surface to user | Must | 2 |
-| FR5.4.3 | `response_param` specifies where to write user's response | Must | 2 |
-| FR5.4.4 | Optional `response_type` for validation | Should | 2 |
-| FR5.4.5 | Framework provides plumbing, user defines prompt/response types | Must | 2 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR5.4.1 | `InterruptNode(name="x", input_param="prompt", response_param="response")` declares pause point | Must |
+| FR5.4.2 | `input_param` specifies which value to surface to user | Must |
+| FR5.4.3 | `response_param` specifies where to write user's response | Must |
+| FR5.4.4 | Optional `response_type` for validation | Should |
+| FR5.4.5 | Framework provides plumbing, user defines prompt/response types | Must |
+
+#### FR5.5: Type Hints (Optional, Opt-In Validation)
+
+**Core principle:** Type hints are optional for user functions. Validation happens at build time regardless.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR5.5.1 | Functions work without type hints - edges inferred from parameter names | Must |
+| FR5.5.2 | Type hints on parameters and returns are optional | Must |
+| FR5.5.3 | If type hints present, they can enable static analysis (mypy/pyright) | Should |
+| FR5.5.4 | Opt-in type congruence check: `Graph(nodes=[...], validate_types=True)` | Should |
+| FR5.5.5 | Type congruence validates: output type of producer matches input type of consumer | Should |
+| FR5.5.6 | Opt-in Pydantic validation: `@node(validate=True)` uses Pydantic for runtime type checking | Could |
+| FR5.5.7 | `validate=True` validates BOTH inputs AND outputs (matches Pydantic's `validate_call` behavior) | Could |
+
+**Validation levels:**
+
+| Level | When | What | Required? |
+|-------|------|------|-----------|
+| **Build-time** | `Graph()` construction | Edges exist, routes valid, no deadlocks | Always |
+| **Static** | mypy/pyright | Type correctness | Opt-in (use type hints) |
+| **Type congruence** | `Graph(validate_types=True)` | Output types match input types | Opt-in |
+| **Pydantic runtime** | `@node(validate=True)` | Inputs validated before execution, outputs validated after | Opt-in |
+
+```python
+# No type hints - works fine, validated at build time
+@node(output_name="docs")
+def retrieve(query, messages):
+    return search(query)
+
+# With type hints - enables static analysis
+@node(output_name="docs")
+def retrieve(query: str, messages: list[dict]) -> list[Document]:
+    return search(query)
+
+# With Pydantic validation - runtime type checking of BOTH inputs and outputs
+@node(output_name="docs", validate=True)
+def retrieve(query: str, messages: list[dict]) -> list[Document]:
+    # Before execution: Pydantic validates query is str, messages is list[dict]
+    # After execution: Pydantic validates return is list[Document]
+    return search(query)
+```
 
 ---
 
@@ -1134,48 +1111,157 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR6.1: Graph Class (Pure Definition)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR6.1.1 | `Graph(nodes=[...], entrypoint="name")` constructor | Must | 1 |
-| FR6.1.2 | Graph has NO `run()` method - use Runner instead | Must | 1 |
-| FR6.1.3 | `graph.visualize()` generates visual representation | Should | 1 |
-| FR6.1.4 | `graph.bind(**kwargs)` sets default input values | Should | 1 |
-| FR6.1.5 | `graph.as_node()` wraps graph for nesting | Must | 1 |
-| FR6.1.6 | `.as_node().rename(inputs={old: new}, outputs={old: new})` renames interfaces | Must | 1 |
-| FR6.1.7 | `.as_node().map_over(names, mode="zip")` enables internal batch processing | Should | 1 |
-| FR6.1.8 | `graph.root_args` returns required inputs | Must | 1 |
-| FR6.1.9 | `graph.unfulfilled_args` returns inputs not yet bound | Should | 1 |
-| FR6.1.10 | `graph.bound_inputs` returns dict of bound values | Should | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR6.1.1 | `Graph(nodes=[...])` constructor - no entrypoint needed | Must |
+| FR6.1.2 | Graph has NO `run()` method - use Runner instead | Must |
+| FR6.1.3 | `graph.visualize()` generates visual representation | Should |
+| FR6.1.4 | `graph.bind(**kwargs)` sets default input values | Should |
+| FR6.1.5 | `graph.as_node()` wraps graph for nesting | Must |
+| FR6.1.6 | `.as_node().rename(inputs={old: new}, outputs={old: new})` renames interfaces | Must |
+| FR6.1.7 | `.as_node().map_over(names, mode="zip")` enables internal batch processing | Should |
+| FR6.1.8 | `graph.root_args` returns required inputs | Must |
+| FR6.1.9 | `graph.unfulfilled_args` returns inputs not yet bound | Should |
+| FR6.1.10 | `graph.bound_inputs` returns dict of bound values | Should |
 
-**Input Value Priority (highest to lowest):**
-1. **Edge connections** - Values from upstream nodes (exclusive - cancels optionality)
-2. **Runtime inputs** - Values provided to `runner.run(graph, inputs={...})`
-3. **Bound values** - Values set via `graph.bind(param=value)`
-4. **Function defaults** - Parameter defaults in function signature
+**The "Edge Cancels Default" Rule:**
 
-**Critical rule:** If an upstream node produces a value for a parameter, that parameter becomes REQUIRED and any defaults/bindings are ignored. This prevents ambiguity.
+Simple and deterministic:
+
+1. **If parameter has an edge → default is IGNORED** (must get value from edge OR input)
+2. **If no edge AND has default → use the default**
+3. **If no edge AND no default → required input**
+
+**Why "edge cancels default"?**
+- Eliminates ambiguity in cycles (no two nodes can both be "ready" with defaults)
+- The input you provide determines where cycles start
+- No entrypoint concept needed
+- Explicit is better than implicit
+
+**For cyclic parameters:**
+- Cyclic parameters have edges (by definition)
+- Therefore, defaults are ignored
+- Must provide initial value via input
+
+```python
+@node(output_name="messages")
+def add_response(messages: list, response: str) -> list:
+    # messages has edge from itself (accumulator) → no default applies
+    return messages + [...]
+
+# Must initialize the cycle:
+runner.run(graph, inputs={..., "messages": []})
+
+# Or start from existing conversation:
+runner.run(graph, inputs={..., "messages": [{"role": "user", "content": "..."}]})
+```
+
+**Input resolution order (when multiple sources exist):**
+1. Edge value (if available) - always wins
+2. Runtime input - for initialization or override
+3. Bound value (`graph.bind()`) - only if no edge
+4. Function default - only if no edge
 
 #### FR6.2: Runner Classes (Execution)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR6.2.1 | `Runner(cache=..., callbacks=...)` for sync execution | Must | 1 |
-| FR6.2.2 | `AsyncRunner(cache=..., callbacks=...)` for async execution | Must | 1 |
-| FR6.2.3 | `runner.run(graph, inputs={...})` executes once | Must | 1 |
-| FR6.2.4 | `runner.run(graph, inputs={...}, select=["pattern"])` filters outputs | Should | 1 |
-| FR6.2.5 | `runner.map(graph, inputs={...}, map_over="x")` batch execution | Should | 1 |
-| FR6.2.6 | `async_runner.iter(graph, inputs={...})` returns event stream | Must | 2 |
-| FR6.2.7 | Runner owns cache and callbacks (execution-specific config) | Must | 1 |
-| FR6.2.8 | Same graph can be used with different runners | Must | 1 |
-| FR6.2.9 | `Runner` raises error if graph has async nodes | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR6.2.1 | `Runner(cache=..., callbacks=...)` for sync execution | Must |
+| FR6.2.2 | `AsyncRunner(cache=..., callbacks=...)` for async execution | Must |
+| FR6.2.3 | `runner.run(graph, inputs={...})` executes once | Must |
+| FR6.2.4 | `runner.run(graph, inputs={...}, select=["pattern"])` filters outputs | Should |
+| FR6.2.5 | `runner.map(graph, inputs={...}, map_over="x")` batch execution | Should |
+| FR6.2.6 | `async_runner.iter(graph, inputs={...})` returns event stream | Must |
+| FR6.2.7 | Runner owns cache and callbacks (execution-specific config) | Must |
+| FR6.2.8 | Same graph can be used with different runners | Must |
+| FR6.2.9 | `Runner` raises error if graph has async nodes | Must |
 
 #### FR6.3: Specialized Runners
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR6.3.1 | `DaftRunner` for distributed DataFrame execution | Could | 3 |
-| FR6.3.2 | `DaskRunner` for parallel batch processing | Could | 3 |
-| FR6.3.3 | Runners can be nested via `.as_node(runner=...)` | Should | 2 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR6.3.1 | `DaftRunner` for distributed DataFrame execution (DAG-only graphs) | Should |
+| FR6.3.2 | Runners can be nested via `.as_node(runner=...)` | Should |
+
+#### FR6.4: Runner Compatibility Matrix
+
+**Not all runners support all features.** The framework validates compatibility at runtime and fails fast with clear errors when an incompatible combination is attempted.
+
+**Runner Summary:**
+- **`Runner`** - Sync execution, full feature support
+- **`AsyncRunner`** - Async execution, full feature support + streaming + interrupts  
+- **`DaftRunner`** - Distributed execution for DAG-only graphs (no cycles/gates/interrupts)
+
+**Feature Support by Runner:**
+
+| Feature | `Runner` | `AsyncRunner` | `DaftRunner` |
+|---------|----------|---------------|--------------|
+| DAG execution | ✅ | ✅ | ✅ |
+| Cycles | ✅ | ✅ | ❌ |
+| `@branch` gates | ✅ | ✅ | ❌ |
+| `@route` gates | ✅ | ✅ | ❌ |
+| `InterruptNode` | ❌ | ✅ | ❌ |
+| `.iter()` streaming | ❌ | ✅ | ❌ |
+| `.map()` batch | ✅ | ✅ | ✅ |
+| Async nodes | ❌ | ✅ | ✅ |
+| Distributed execution | ❌ | ❌ | ✅ |
+
+**DaftRunner use case:** High-throughput batch processing of pure DAG pipelines (e.g., embedding generation, data transformation). Not for interactive/cyclic workflows.
+
+**Callback Compatibility:**
+
+| Callback | `Runner` | `AsyncRunner` | `DaftRunner` |
+|----------|----------|---------------|--------------|
+| `ProgressCallback` | ✅ | ✅ | ⚠️ partial |
+| `TelemetryCallback` | ✅ | ✅ | ⚠️ partial |
+| `on_iteration_start` | ✅ | ✅ | ❌ |
+| `on_route_decision` | ✅ | ✅ | ❌ |
+
+**Cache Compatibility:**
+
+| Cache | `Runner` | `AsyncRunner` | `DaftRunner` |
+|-------|----------|---------------|--------------|
+| `DiskCache` | ✅ | ✅ | ✅ |
+| `MemoryCache` | ✅ | ✅ | ⚠️ per-worker |
+
+**Implementation approach:**
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR6.4.1 | Each runner declares its capabilities via class attributes or protocol | Must |
+| FR6.4.2 | `Graph` validates runner capabilities at `runner.run()` call | Must |
+| FR6.4.3 | Clear error: "DaftRunner doesn't support cycles. Use Runner or AsyncRunner instead." | Must |
+| FR6.4.4 | Callbacks declare which runners they support via `supported_runners` attribute | Should |
+| FR6.4.5 | Cache backends declare distributed compatibility | Should |
+
+**Example error messages:**
+
+```
+IncompatibleRunnerError: This graph has cycles, but DaftRunner doesn't support cycles.
+
+The problem: DaftRunner uses Daft DataFrames for distributed execution, which requires
+a DAG structure. Your graph has a cycle: add_user → add_response → add_user
+
+How to fix (pick ONE):
+
+  Option A: Use Runner or AsyncRunner instead
+            → runner = AsyncRunner(cache=...) 
+
+  Option B: Restructure as a DAG
+            → Remove the cycle by breaking the loop externally
+```
+
+```
+IncompatibleCallbackError: TelemetryCallback's on_iteration_start event isn't supported by DaftRunner.
+
+The problem: DaftRunner executes nodes in a distributed DataFrame, so per-iteration
+callbacks don't make sense.
+
+How to fix:
+
+  Option A: Remove TelemetryCallback when using DaftRunner
+  Option B: Use Runner or AsyncRunner if you need iteration tracing
+```
 
 ---
 
@@ -1183,22 +1269,22 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR7.1: Lifecycle Events
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR7.1.1 | `on_graph_start(inputs)` fired when execution begins | Must | 1 |
-| FR7.1.2 | `on_graph_end(outputs)` fired when execution completes | Must | 1 |
-| FR7.1.3 | `on_node_start(node_name, inputs)` fired before each node | Must | 1 |
-| FR7.1.4 | `on_node_end(node_name, outputs, duration)` fired after each node | Must | 1 |
-| FR7.1.5 | `on_node_cached(node_name)` fired on cache hit | Must | 1 |
-| FR7.1.6 | `on_route_decision(node_name, target)` fired when route decides | Must | 1 |
-| FR7.1.7 | `on_iteration_start(iteration_number)` fired each cycle iteration | Should | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR7.1.1 | `on_graph_start(inputs)` fired when execution begins | Must |
+| FR7.1.2 | `on_graph_end(outputs)` fired when execution completes | Must |
+| FR7.1.3 | `on_node_start(node_name, inputs)` fired before each node | Must |
+| FR7.1.4 | `on_node_end(node_name, outputs, duration)` fired after each node | Must |
+| FR7.1.5 | `on_node_cached(node_name)` fired on cache hit | Must |
+| FR7.1.6 | `on_route_decision(node_name, target)` fired when route decides | Must |
+| FR7.1.7 | `on_iteration_start(iteration_number)` fired each cycle iteration | Should |
 
 #### FR7.2: Existing Callbacks
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR7.2.1 | `ProgressCallback` works with Graph (shows progress) | Should | 1 |
-| FR7.2.2 | `TelemetryCallback` works with Graph (Logfire tracing) | Should | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR7.2.1 | `ProgressCallback` works with Graph (shows progress) | Should |
+| FR7.2.2 | `TelemetryCallback` works with Graph (Logfire tracing) | Should |
 
 ---
 
@@ -1206,66 +1292,72 @@ This section specifies the capabilities the Graph system must provide, organized
 
 #### FR8.1: Error Message Format
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR8.1.1 | All errors include: error type, what went wrong | Must | 1 |
-| FR8.1.2 | All errors include: why it went wrong (context) | Must | 1 |
-| FR8.1.3 | All errors include: how to fix (2-3 options) | Must | 1 |
-| FR8.1.4 | Flow analysis included when entrypoint set (shows normal path) | Should | 1 |
+**Philosophy:** Errors should be helpful to someone who has never seen the framework before.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR8.1.1 | Use simple terms - avoid jargon ("producer", "consumer", "parallel") | Must |
+| FR8.1.2 | Explain the crux - what's actually wrong, in plain English | Must |
+| FR8.1.3 | Show the conflict - make it obvious WHY this is a problem | Must |
+| FR8.1.4 | Give concrete options - 2-3 actionable fixes | Must |
+| FR8.1.5 | Suggest typo fixes when applicable (e.g., "Did you mean 'retrieve'?") | Should |
 
 #### FR8.2: Error Types
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR8.2.1 | `GraphConfigError` for build-time validation failures | Must | 1 |
-| FR8.2.2 | `ParallelProducersError` for runtime conflicts | Must | 1 |
-| FR8.2.3 | `RouteTargetError` for invalid route return values | Must | 1 |
-| FR8.2.4 | `MaxIterationsError` for infinite loop detection | Must | 1 |
-| FR8.2.5 | `MissingInputError` for unfulfilled required inputs | Must | 1 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR8.2.1 | `GraphConfigError` for build-time validation failures | Must |
+| FR8.2.2 | `ConflictError` for "two nodes want to create the same output" | Must |
+| FR8.2.3 | `InvalidRouteError` for "route returned a node that doesn't exist" | Must |
+| FR8.2.4 | `InfiniteLoopError` for "cycle ran too many times without ending" | Must |
+| FR8.2.5 | `MissingInputError` for "this value needs a starting value" | Must |
+| FR8.2.6 | `DeadlockError` for "cycle can't start - no node is ready" | Must |
 
 ---
 
-### FR9: Phase 2 Features (Deferred)
+### FR9: Human-in-the-Loop & Streaming
 
-These are tracked but not implemented in Phase 1:
-
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR9.1 | `InterruptNode` for declarative human-in-the-loop pause points | Must | 2 |
-| FR9.2 | `runner.run(graph, checkpoint=saved)` for resume from state | Must | 2 |
-| FR9.3 | `async_runner.iter(graph, inputs={...})` for event streaming | Must | 2 |
-| FR9.4 | Token-by-token streaming via `StreamingChunkEvent` | Must | 2 |
-| FR9.5 | Checkpoint serialization/deserialization with `Checkpointer` protocol | Must | 2 |
-| FR9.6 | Visualization shows cycles, active node, gate state | Should | 2 |
-| FR9.7 | Three-layer architecture (UI Protocol, Observability, Durability) | Should | 2 |
-| FR9.8 | `session_id` / `run_id` identity model for correlation | Must | 2 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR9.1 | `InterruptNode` for declarative human-in-the-loop pause points | Must |
+| FR9.2 | `runner.run(graph, checkpoint=saved)` for resume from state | Must |
+| FR9.3 | `async_runner.iter(graph, inputs={...})` for event streaming | Must |
+| FR9.4 | Token-by-token streaming via `StreamingChunkEvent` | Must |
+| FR9.5 | Checkpoint serialization/deserialization with `Checkpointer` protocol | Must |
+| FR9.6 | Visualization shows cycles, active node, gate state | Should |
+| FR9.7 | Three-layer architecture (UI Protocol, Observability, Durability) | Should |
+| FR9.8 | `session_id` / `run_id` identity model for correlation | Must |
 
 ---
 
-### FR10: Input Resolution & Initialization
+### FR10: Input Resolution (Edge Cancels Default)
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR10.1 | Input resolution priority: edge values (if available) > runtime inputs > bound values > function defaults | Must | 1 |
-| FR10.2 | For cyclic edges, user-provided inputs serve as **initial values** on first iteration | Must | 1 |
-| FR10.3 | Subsequent iterations use edge-produced values, ignoring the initial input | Must | 1 |
-| FR10.4 | Parameters with cyclic edges must be provided at runtime as initial values (fail if missing) | Must | 1 |
-| FR10.5 | `graph.root_args` includes parameters that need initialization (even if edge-connected in cycles) | Must | 1 |
-| FR10.6 | `MissingInitialValueError` raised when cyclic parameter not provided, with clear explanation | Must | 1 |
-| FR10.7 | `graph.bound_inputs` returns dict of values set via `.bind()` | Should | 1 |
-| FR10.8 | `graph.unfulfilled_args` returns parameters needing initialization but not yet bound | Should | 1 |
+**Core principle:** If a parameter has an incoming edge, the function default is ignored.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR10.1 | If parameter has edge → default is IGNORED, must get value from edge or input | Must |
+| FR10.2 | If no edge AND has function default → use the default | Must |
+| FR10.3 | If no edge AND no default → required input | Must |
+| FR10.4 | Input resolution order: edge value > runtime input > bound value > function default | Must |
+| FR10.5 | Cyclic parameters have edges → must be initialized via input (starts the cycle) | Must |
+| FR10.6 | `MissingInputError` raised when edge has no value AND no input provided | Must |
+| FR10.7 | `graph.root_args` returns parameters that can be provided as inputs | Should |
+| FR10.8 | `graph.bound_inputs` returns dict of values set via `.bind()` | Should |
+
+**No entrypoint needed.** The input you provide determines where cycles start. Framework runs whatever is ready.
 
 ---
 
 ### FR11: Nested Graph Composition
 
-| ID | Requirement | Priority | Phase |
-|----|-------------|----------|-------|
-| FR11.1 | `graph.as_node()` wraps cyclic graphs as opaque execution units | Must | 1 |
-| FR11.2 | Nested cyclic graphs execute their internal loops independently until they reach END | Must | 1 |
-| FR11.3 | Outer graph waits for nested graph to complete before continuing | Must | 1 |
-| FR11.4 | `.as_node().rename(inputs={...}, outputs={...})` works for cyclic graphs | Should | 1 |
-| FR11.5 | `.as_node().map_over(names, mode="zip")` works for cyclic graphs | Could | 2 |
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR11.1 | `graph.as_node()` wraps cyclic graphs as opaque execution units | Must |
+| FR11.2 | Nested cyclic graphs execute their internal loops independently until they reach END | Must |
+| FR11.3 | Outer graph waits for nested graph to complete before continuing | Must |
+| FR11.4 | `.as_node().rename(inputs={...}, outputs={...})` works for cyclic graphs | Should |
+| FR11.5 | `.as_node().map_over(names, mode="zip")` works for cyclic graphs | Could |
 
 ---
 
@@ -1273,13 +1365,13 @@ These are tracked but not implemented in Phase 1:
 
 | User Story | Required FRs |
 |------------|--------------|
-| Multi-turn RAG | FR1.2.1-2, FR2.1.1-5, FR2.2.1-3, FR2.3.1-3, FR4.1.3-4, FR10.1-6 |
-| Agentic tool loop | FR2.2.1-3, FR5.2.1-5, FR2.3.3 |
-| Iterative refinement | FR2.2.1-3, FR5.2.1-5, FR4.1.3-4 |
+| Multi-turn RAG | FR1.2.1-5, FR2.1.1-5, FR2.2.1-3, FR2.3.1-3, FR4.1.3-4, FR5.1.7, FR10.1-5 |
+| Agentic tool loop | FR2.2.1-3, FR5.2.1-5, FR2.3.3, FR10.5 |
+| Iterative refinement | FR2.2.1-3, FR5.2.1-5, FR4.1.3-4, FR10.5 |
 | Parallel branch merge | FR1.1.2, FR2.1.1, FR6.1.2 |
 | Conditional skip | FR5.3.1-4, FR2.2.4-5 |
-| Human-in-the-loop | FR9.1-5 (Phase 2) |
-| Nested cyclic pipelines | FR11.1-4 |
+| Human-in-the-loop | FR9.1-5 |
+| Nested cyclic graphs | FR11.1-4 |
 
 ## Technical Constraints & Non-Functional Requirements
 
@@ -1290,7 +1382,8 @@ This section defines the technical boundaries, dependencies, and quality attribu
 | Constraint | Specification | Rationale |
 |------------|---------------|-----------|
 | **Python version** | ≥3.10 | Match patterns, `Literal` types, union syntax (`X \| Y`) |
-| **Type hints** | Required on all public APIs | IDE support, documentation, static analysis |
+| **Type hints (framework)** | Required on all public APIs | IDE support, documentation, static analysis |
+| **Type hints (user code)** | Optional | Opt-in for extra validation, not required for basic usage |
 | **Async support** | Native `async/await` | Modern LLM APIs are async-first |
 | **No global state** | All state in explicit objects | Testability, thread safety |
 
@@ -1309,7 +1402,7 @@ This section defines the technical boundaries, dependencies, and quality attribu
 | `graphviz` | `[viz]` | Static SVG visualization |
 | `ipywidgets` | `[viz]` | Interactive Jupyter visualization |
 | `logfire` | `[telemetry]` | Distributed tracing |
-| `daft` | `[daft]` | Distributed execution (Phase 3) |
+| `daft` | `[daft]` | Distributed execution (DaftRunner) |
 
 #### Dependency Philosophy
 
@@ -1330,7 +1423,7 @@ This section defines the technical boundaries, dependencies, and quality attribu
 | `Pipeline` class | Deprecated | Marked legacy, not removed |
 | Existing callbacks | Partial | May need Graph-specific events |
 | `SeqEngine` | N/A | Graph uses `GraphEngine` |
-| `DaftEngine` | Future | Phase 3 if needed |
+| `DaftRunner` | Partial | DAG-only (see Runner Compatibility) |
 
 #### With External Tools
 
@@ -1380,7 +1473,7 @@ This section defines the technical boundaries, dependencies, and quality attribu
 
 ### NFR1: Performance
 
-#### Phase 1 Targets (Not Optimized)
+#### Performance Targets
 
 | Metric | Target | Notes |
 |--------|--------|-------|
@@ -1389,9 +1482,9 @@ This section defines the technical boundaries, dependencies, and quality attribu
 | **Memory per value** | <1KB metadata | Version, timestamps, etc. |
 | **Cache lookup** | <10ms | Disk cache signature check |
 
-**Philosophy:** Phase 1 optimizes for correctness. Performance profiling happens after MVP validates the model.
+**Philosophy:** Optimize for correctness first. Performance profiling happens after validation of the model.
 
-#### Phase 2+ Optimization Opportunities
+#### Future Optimization Opportunities
 
 | Opportunity | When to Consider |
 |-------------|------------------|
@@ -1434,14 +1527,15 @@ def test_retrieve():
 
 # Integration test a graph
 def test_multi_turn():
-    graph = Graph(nodes=[...], entrypoint="start")
-    result = graph.run(inputs={"query": "test", "messages": []})
+    graph = Graph(nodes=[...])
+    runner = Runner()
+    result = runner.run(graph, inputs={"query": "test", "messages": []})
     assert "response" in result
 
 # Test with mocked LLM
 def test_with_mock():
     mock_llm = Mock(return_value="mocked response")
-    result = graph.run(inputs={"llm": mock_llm, ...})
+    result = runner.run(graph, inputs={"llm": mock_llm, "messages": [], ...})
     mock_llm.assert_called_once()
 ```
 
@@ -1568,16 +1662,16 @@ docs/
 
 | Requirement | Specification |
 |-------------|---------------|
-| **Phase 1 (v0.5.x)** | Breaking changes allowed; no backward compatibility guarantees |
-| **Phase 2+ (v0.6+)** | Deprecation warnings before breaking changes |
+| **v0.5.x** | Breaking changes allowed; no backward compatibility guarantees |
+| **v0.6+** | Deprecation warnings before breaking changes |
 | **v1.0+** | Semantic versioning; breaking changes only in major versions |
 
 ---
 
 ### Technical Debt Tolerance
 
-| Area | Tolerance | Phase 1 Approach |
-|------|-----------|------------------|
+| Area | Tolerance | Approach |
+|------|-----------|----------|
 | **Performance** | High | Correctness first, profile later |
 | **Edge cases** | Low | Handle all known edge cases |
 | **Test coverage** | Low | ≥80% from start |
@@ -1597,14 +1691,14 @@ This section identifies potential risks and mitigation strategies.
 | **Staleness detection bugs** | Medium | High | Comprehensive unit tests for versioning; property-based testing for edge cases |
 | **Sole producer rule failures** | Low | High | Static analysis at build time; clear error messages when rule is violated |
 | **Runner pattern confusion** | Medium | Medium | Clear documentation; error messages explain "use Runner to execute" |
-| **InterruptNode state management** | Medium | Medium | Defer to Phase 2; prototype with simple cases first |
+| **InterruptNode state management** | Medium | Medium | Prototype with simple cases first |
 
 ### Design Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
 | **Over-engineering** | Medium | Medium | Validate each feature against real multi-turn RAG use case |
-| **API churn** | Low | Medium | No users yet; can iterate freely in Phase 1 |
+| **API churn** | Low | Medium | No users yet; can iterate freely |
 | **Wrong abstraction level** | Medium | High | Build the concrete use case first; abstract patterns after they emerge |
 | **Runner vs Engine confusion** | Medium | Low | Consistent naming: Runner = user-facing, Engine = internal |
 | **Literal type validation gaps** | Low | Medium | Test with mypy strict mode; validate at runtime too |
@@ -1623,7 +1717,7 @@ This section identifies potential risks and mitigation strategies.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| **Scope creep** | Medium | Medium | Strict phase boundaries; defer nice-to-haves to Phase 2+ |
+| **Scope creep** | Medium | Medium | Strict boundaries; defer nice-to-haves |
 | **Perfectionism** | High | Medium | Ship working MVP; iterate based on actual usage |
 | **Research rabbit holes** | Medium | Low | Time-box research; document findings even if not implemented |
 | **Testing time underestimated** | Medium | Medium | Write tests alongside code, not after |
@@ -1657,30 +1751,32 @@ This section identifies potential risks and mitigation strategies.
 **Focus Areas:**
 1. **Staleness detection** - Core to correctness; invest in testing
 2. **Reactive dataflow complexity** - Validate with real use case early
-3. **Scope creep** - Maintain strict phase boundaries
+3. **Scope creep** - Maintain strict boundaries
 
-## Project Scoping & Phased Development
+## Project Scoping
 
 ### MVP Strategy & Philosophy
 
 **MVP Approach:** Problem-Solving MVP
 - Solve the core problem (multi-turn RAG) with minimal features
-- Validate through personal usage before community release
+- Validate through personal usage
 - "Infrastructure-as-learning" - deep understanding over feature breadth
 
-**Resource Requirements (Phase 1):**
+**Resource Requirements:**
 - Team: Solo developer
 - Skills: Python, graph theory, async programming
 - Timeline: Weeks to months (personal project pace)
 
-### MVP Feature Set (Phase 1)
+### Feature Set
 
 **Core User Journeys Supported:**
 1. Multi-turn Conversational RAG (primary)
 2. Agentic Tool Loop
 3. Iterative Refinement
-4. Conditional Skip (existing @branch)
+4. Conditional Skip (existing @branch gate)
 5. Parallel Branch Merge (DAG subset)
+6. Human-in-the-Loop (AsyncRunner)
+7. Distributed Batch Processing (DaftRunner for DAG-only)
 
 **Must-Have Capabilities:**
 
@@ -1688,49 +1784,26 @@ This section identifies potential risks and mitigation strategies.
 |------------|-----------|
 | Cyclic execution | Core differentiator, enables multi-turn |
 | Reactive dataflow with versioning | Prevents infinite loops, enables staleness detection |
-| `@route` decorator | String-based routing with build-time validation |
+| `@route` and `@branch` gates | Control flow with build-time validation |
 | `Runner`/`AsyncRunner` separation | Clean architecture, pure Graph definition |
+| `DaftRunner` for DAG graphs | Distributed batch processing |
 | Build-time validation | Fail-fast philosophy |
 | Generator accumulation | Modern LLM APIs return generators |
+| `.iter()` streaming API | Token-by-token streaming (AsyncRunner) |
+| `InterruptNode` | Human-in-the-loop pause/resume |
+| Checkpointing | Persist and resume execution state |
 | Existing `DiskCache` integration | Don't reinvent working infrastructure |
+| Runner compatibility validation | Fail fast on incompatible runner/graph combinations |
 
-**Explicitly Deferred from MVP:**
-- Token-by-token streaming to users (generators accumulated internally)
-- Human-in-the-loop (`InterruptNode`)
-- Checkpointing/resume
-- Distributed execution
-- Visualization updates for cycles
+### Future Features
 
-### Post-MVP Features
+**Potential future additions:**
 
-**Phase 2 (Polish) - Triggered by:**
-- Phase 1 validated with real multi-turn RAG usage
-- Pattern clarity (know what abstractions are needed)
-- Personal need for streaming or human-in-loop
-
-**Phase 2 Planned Features:**
-
-| Feature | Priority | Complexity |
-|---------|----------|------------|
-| `InterruptNode` | High | High |
-| `.iter()` streaming API | High | Medium |
-| Checkpointing | High | High |
-| Event streaming | Medium | Medium |
-| Visualization updates | Medium | Medium |
-
-**Phase 3 (Expansion) - Triggered by:**
-- Community interest (stars, issues, PRs)
-- Specific user requests
-- Personal use case requiring scale
-
-**Phase 3 Potential Features:**
-
-| Feature | Trigger Condition |
-|---------|-------------------|
-| Distributed execution (DaftRunner) | 3+ users request parallel batch |
+| Feature | When to Consider |
+|---------|------------------|
 | Durable workflows | Multi-day execution needs emerge |
-| Web debugging UI | Demand beyond Jupyter |
-| Multi-backend cache | Redis/S3 adapter requests |
+| Web debugging UI | Need beyond Jupyter |
+| Multi-backend cache | Redis/S3 adapter needs |
 
 ### Risk Mitigation Strategy
 
@@ -1742,18 +1815,11 @@ This section identifies potential risks and mitigation strategies.
 | Staleness detection bugs | Property-based testing; comprehensive unit tests |
 | Cycle detection edge cases | Use NetworkX battle-tested algorithms |
 
-**Market Risks:**
-
-| Risk | Mitigation |
-|------|------------|
-| No community adoption | Personal success is primary; community is bonus |
-| LangGraph dominance | Different philosophy (pure functions); niche appeal acceptable |
-
 **Resource Risks:**
 
 | Risk | Mitigation |
 |------|------------|
-| Scope creep | Strict phase boundaries; defer nice-to-haves |
+| Scope creep | Strict boundaries; defer nice-to-haves |
 | Perfectionism | Ship working MVP; iterate based on usage |
 
 ### Scope Reduction Contingencies
