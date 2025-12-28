@@ -12,7 +12,7 @@ When implementing Hypernodes, follow these principles to make good judgment call
 
 ```python
 # ✅ GOOD - pure function, testable
-@node(output_name="result")
+@node(outputs="result")
 def process(query: str, config: Config) -> str:
     return transform(query, config)
 
@@ -35,12 +35,12 @@ def process(state: GraphState) -> dict:
 
 ```python
 # ✅ GOOD - dependencies explicit
-@node(output_name="response")
+@node(outputs="response")
 def generate(messages: list, model: str, temperature: float) -> str:
     return llm.chat(messages, model=model, temperature=temperature)
 
 # ❌ BAD - hidden dependency
-@node(output_name="response")
+@node(outputs="response")
 def generate(messages: list) -> str:
     return llm.chat(messages, model=CONFIG.model)  # Where does CONFIG come from?
 ```

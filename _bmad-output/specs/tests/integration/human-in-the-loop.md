@@ -20,7 +20,7 @@ Generate content → [PAUSE: Show to human] → Human approves → Publish
 ```python
 from hypernodes import Graph, node, route, END, InterruptNode, AsyncRunner
 
-@node(output_name="content")
+@node(outputs="content")
 def generate_content(prompt: str, revision_notes: str | None = None) -> str:
     """Generate or revise content."""
     if revision_notes:
@@ -44,12 +44,12 @@ def handle_review(review: dict) -> str:
     else:
         return "generate_content"  # Revise
 
-@node(output_name="revision_notes")
+@node(outputs="revision_notes")
 def extract_notes(review: dict) -> str:
     """Extract revision notes from rejection."""
     return review.get("feedback", "Please improve")
 
-@node(output_name="published")
+@node(outputs="published")
 def publish(content: str) -> dict:
     """Publish approved content."""
     return {"status": "published", "content": content}
@@ -270,8 +270,8 @@ async def test_iter_checkpoint_in_event():
 
 ```python
 def test_sync_runner_rejects_interrupt():
-    """Sync Runner can't handle InterruptNode."""
-    runner = Runner()  # Sync!
+    """SyncRunner can't handle InterruptNode."""
+    runner = SyncRunner()  # Sync!
     
     with pytest.raises(IncompatibleRunnerError) as exc:
         runner.run(approval_graph, inputs={"prompt": "test"})
@@ -326,7 +326,7 @@ async def test_corrupted_checkpoint():
 - [ ] Can go through multiple review cycles
 - [ ] Can abandon workflow at any point
 - [ ] iter() yields InterruptEvent with checkpoint
-- [ ] Sync Runner gives clear error about incompatibility
+- [ ] SyncRunner gives clear error about incompatibility
 
 ---
 

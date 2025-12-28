@@ -26,7 +26,7 @@ from hypernodes import Graph, node, route, END
 # Available tools
 TOOLS = ["read_file", "search", "generate", "refine"]
 
-@node(output_name="analysis")
+@node(outputs="analysis")
 def analyze(task: str, tool_results: list, messages: list) -> str:
     """Analyze current state and tool results."""
     # Mock: return analysis based on history
@@ -47,32 +47,32 @@ def decide_action(analysis: str, tool_results: list) -> str:
     else:
         return END
 
-@node(output_name="tool_result")
+@node(outputs="tool_result")
 def read_file(task: str) -> dict:
     """Read file tool."""
     return {"tool": "read_file", "result": "file contents"}
 
-@node(output_name="tool_result")
+@node(outputs="tool_result")
 def search(task: str, analysis: str) -> dict:
     """Search codebase tool."""
     return {"tool": "search", "result": "search results"}
 
-@node(output_name="tool_result")
+@node(outputs="tool_result")
 def generate(task: str, analysis: str, tool_results: list) -> dict:
     """Generate code tool."""
     return {"tool": "generate", "result": "generated code"}
 
-@node(output_name="tool_result")
+@node(outputs="tool_result")
 def refine(task: str, tool_result: dict) -> dict:
     """Refine output tool."""
     return {"tool": "refine", "result": "refined code"}
 
-@node(output_name="tool_results")
+@node(outputs="tool_results")
 def track_tools(tool_results: list, tool_result: dict) -> list:
     """Accumulator: track tool usage history."""
     return tool_results + [tool_result]
 
-@node(output_name="messages")
+@node(outputs="messages")
 def update_messages(messages: list, analysis: str, tool_result: dict) -> list:
     """Accumulator: update conversation with tool results."""
     return messages + [
@@ -96,13 +96,13 @@ agent_graph = Graph(nodes=[
 ```python
 def test_agent_runs_variable_iterations():
     """Agent runs correct number of iterations based on task."""
-    runner = Runner()
     execution_log = []
-    
-    class LogCallback:
-        def on_route_decision(self, gate_name, target):
-            execution_log.append(target)
-    
+
+    class LogProcessor(TypedEventProcessor):
+        def on_route_decision(self, event: RouteDecisionEvent):
+            execution_log.append(event.decision)
+
+    runner = SyncRunner(event_processors=[LogProcessor()])
     result = runner.run(
         agent_graph,
         inputs={
@@ -110,12 +110,11 @@ def test_agent_runs_variable_iterations():
             "tool_results": [],
             "messages": [],
         },
-        callbacks=[LogCallback()],
     )
-    
+
     # Should have made multiple decisions
     assert len(execution_log) >= 4
-    
+
     # Last decision should be END
     assert execution_log[-1] == "END" or execution_log[-1] == END
 ```
@@ -125,7 +124,7 @@ def test_agent_runs_variable_iterations():
 ```python
 def test_tool_history_tracked():
     """Tool usage is correctly tracked in accumulator."""
-    runner = Runner()
+    runner = SyncRunner()
     
     result = runner.run(
         agent_graph,
@@ -152,19 +151,19 @@ def test_mutually_exclusive_tools():
     """Only one tool runs per iteration (they're exclusive branches)."""
     tool_calls = []
     
-    @node(output_name="tool_result")
+    @node(outputs="tool_result")
     def tracked_read_file(task: str) -> dict:
         tool_calls.append("read_file")
         return {"tool": "read_file", "result": "contents"}
     
-    @node(output_name="tool_result")
+    @node(outputs="tool_result")
     def tracked_search(task: str, analysis: str) -> dict:
         tool_calls.append("search")
         return {"tool": "search", "result": "results"}
     
     # ... rebuild graph with tracked versions ...
     
-    runner = Runner()
+    runner = SyncRunner()
     result = runner.run(
         test_graph,
         inputs={"task": "test", "tool_results": [], "messages": []},
@@ -186,7 +185,7 @@ def test_llm_decides_termination():
         return END
     
     quick_graph = Graph(nodes=[analyze, quick_decide, generate, track_tools])
-    runner = Runner()
+    runner = SyncRunner()
     
     result = runner.run(
         quick_graph,

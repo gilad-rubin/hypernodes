@@ -54,7 +54,7 @@ def is_stale(node, state):
 **Critical for accumulators**: A node does NOT re-trigger from its own output.
 
 ```python
-@node(output_name="messages")
+@node(outputs="messages")
 def add_response(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 ```
@@ -178,7 +178,7 @@ def execute_node(node, state):
             set_cached(node, inputs, outputs)
     
     # 6. Update state with outputs
-    state = state.set(node.output_name, outputs)
+    state = state.set(node.outputs, outputs)
     
     # 7. Record execution history
     state = state.record_execution(node.name, current_input_versions)
@@ -202,7 +202,7 @@ def reached_termination(graph, state):
     
     # Check if we've reached leaf nodes
     for node in graph.leaf_nodes:
-        if node.output_name in state.values:
+        if node.outputs in state.values:
             return True
     
     return False
@@ -225,12 +225,12 @@ Two nodes **conflict** if:
 ```python
 # Build-time check
 def validate_no_static_conflicts(graph):
-    for output_name in graph.all_outputs:
-        producers = graph.producers_of(output_name)
+    for output in graph.all_outputs:
+        producers = graph.producers_of(output)
         if len(producers) > 1:
             if not mutually_exclusive(producers, graph):
                 raise GraphConfigError(
-                    f"Multiple nodes produce '{output_name}': {producers}\n"
+                    f"Multiple nodes produce '{output}': {producers}\n"
                     "Use @branch to make them mutually exclusive."
                 )
 
@@ -239,15 +239,15 @@ def validate_no_dynamic_conflicts(graph, inputs):
     ready = compute_ready_set(graph, GraphState(inputs))
     outputs_produced = {}
     for node in ready:
-        if node.output_name in outputs_produced:
-            other = outputs_produced[node.output_name]
+        if node.outputs in outputs_produced:
+            other = outputs_produced[node.outputs]
             raise ConflictError(
-                f"Two nodes create '{node.output_name}' at the same time\n\n"
-                f"  → {other} creates {node.output_name}\n"
-                f"  → {node.name} creates {node.output_name}\n\n"
+                f"Two nodes create '{node.outputs}' at the same time\n\n"
+                f"  → {other} creates {node.outputs}\n"
+                f"  → {node.name} creates {node.outputs}\n\n"
                 "How to fix: Remove one from inputs or add dependency"
             )
-        outputs_produced[node.output_name] = node.name
+        outputs_produced[node.outputs] = node.name
 ```
 
 ## Generator Handling
@@ -319,7 +319,7 @@ Cache keys use **actual values**, not version numbers:
 ```python
 def compute_signature(node, inputs):
     """
-    Signature = hash(code_hash + env_hash + input_values_hash)
+    Signature = hash(definition_hash + env_hash + input_values_hash)
     
     Key insight: Same inputs → same signature, regardless of iteration.
     This means multi-turn loops correctly recompute when messages change.
@@ -347,7 +347,7 @@ Using actual values:
 
 ## Async vs Sync Execution
 
-### Runner (Sync)
+### SyncRunner (Sync)
 
 - Executes nodes sequentially
 - Raises error if any node is `async def`
@@ -364,11 +364,11 @@ Using actual values:
 
 ```python
 def validate_runner_compatibility(graph, runner):
-    if isinstance(runner, Runner):
+    if isinstance(runner, SyncRunner):
         async_nodes = [n for n in graph.nodes if is_async(n.func)]
         if async_nodes:
             raise IncompatibleRunnerError(
-                f"Graph has async nodes but Runner is sync.\n"
+                f"Graph has async nodes but SyncRunner is sync.\n"
                 f"Async nodes: {async_nodes}\n"
                 f"Use AsyncRunner instead."
             )

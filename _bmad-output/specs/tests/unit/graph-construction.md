@@ -13,11 +13,11 @@ These tests verify that `Graph()` construction correctly validates structure and
 ```python
 def test_graph_accepts_node_list():
     """Graph can be constructed from list of nodes."""
-    @node(output_name="b")
+    @node(outputs="b")
     def node_a(a: int) -> int:
         return a + 1
     
-    @node(output_name="c")
+    @node(outputs="c")
     def node_b(b: int) -> int:
         return b * 2
     
@@ -33,11 +33,11 @@ def test_graph_accepts_node_list():
 ```python
 def test_edges_inferred_from_signatures():
     """Edges are created when parameter name matches output name."""
-    @node(output_name="intermediate")
+    @node(outputs="intermediate")
     def producer(x: int) -> int:
         return x + 1
     
-    @node(output_name="result")
+    @node(outputs="result")
     def consumer(intermediate: int) -> int:
         return intermediate * 2
     
@@ -52,11 +52,11 @@ def test_edges_inferred_from_signatures():
 ```python
 def test_multiple_outputs():
     """Nodes can produce multiple outputs via tuple."""
-    @node(output_name=("docs", "scores"))
+    @node(outputs=("docs", "scores"))
     def retrieve(query: str) -> tuple[list, list]:
         return ["doc1"], [0.9]
     
-    @node(output_name="result")
+    @node(outputs="result")
     def process(docs: list, scores: list) -> str:
         return f"{len(docs)} docs"
     
@@ -76,7 +76,7 @@ def test_multiple_outputs():
 ```python
 def test_valid_route_targets():
     """Route with valid targets passes validation."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -94,7 +94,7 @@ def test_valid_route_targets():
 ```python
 def test_invalid_route_target_raises():
     """Route with non-existent target raises GraphConfigError."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -114,7 +114,7 @@ def test_invalid_route_target_raises():
 ```python
 def test_route_target_typo_suggestion():
     """Error message suggests fix for typos."""
-    @node(output_name="retrieve")
+    @node(outputs="retrieve")
     def retrieve(x: int) -> int:
         return x
     
@@ -133,7 +133,7 @@ def test_route_target_typo_suggestion():
 ```python
 def test_branch_targets_validated():
     """Branch targets are validated same as route."""
-    @node(output_name="result")
+    @node(outputs="result")
     def path_a(x: int) -> int:
         return x
     
@@ -160,11 +160,11 @@ def test_same_output_different_branches_ok():
     def gate(x: int) -> bool:
         return x > 0
     
-    @node(output_name="label")
+    @node(outputs="label")
     def positive(x: int) -> str:
         return "positive"
     
-    @node(output_name="label")  # Same output name
+    @node(outputs="label")  # Same output name
     def negative(x: int) -> str:
         return "negative"
     
@@ -178,11 +178,11 @@ def test_same_output_different_branches_ok():
 ```python
 def test_same_output_parallel_raises():
     """Same output name without gate raises error."""
-    @node(output_name="result")
+    @node(outputs="result")
     def producer_a(x: int) -> int:
         return x + 1
     
-    @node(output_name="result")  # Conflict!
+    @node(outputs="result")  # Conflict!
     def producer_b(x: int) -> int:
         return x - 1
     
@@ -203,7 +203,7 @@ def test_same_output_parallel_raises():
 ```python
 def test_cycle_with_end_route_ok():
     """Cycle with END route passes validation."""
-    @node(output_name="count")
+    @node(outputs="count")
     def increment(count: int) -> int:
         return count + 1
     
@@ -222,11 +222,11 @@ def test_cycle_with_end_route_ok():
 ```python
 def test_cycle_without_termination_raises():
     """Cycle without termination path raises error."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(b: int) -> int:
         return b + 1
     
-    @node(output_name="b")
+    @node(outputs="b")
     def node_b(a: int) -> int:
         return a + 1
     
@@ -242,11 +242,11 @@ def test_cycle_without_termination_raises():
 ```python
 def test_cycle_detection():
     """Graph correctly identifies cycles."""
-    @node(output_name="b")
+    @node(outputs="b")
     def node_a(a: int) -> int:
         return a + 1
     
-    @node(output_name="a")
+    @node(outputs="a")
     def node_b(b: int) -> int:
         return b + 1
     
@@ -270,11 +270,11 @@ def test_cycle_detection():
 def test_deadlock_detected():
     """Cycle where no node can start raises DeadlockError."""
     # Both nodes need each other, no external input possible
-    @node(output_name="b")
+    @node(outputs="b")
     def node_a(a: int, c: int) -> int:  # needs a (from node_b) AND c (external)
         return a + c
     
-    @node(output_name="a")
+    @node(outputs="a")
     def node_b(b: int) -> int:  # needs b (from node_a)
         return b + 1
     
@@ -284,11 +284,11 @@ def test_deadlock_detected():
     
     # Note: This specific case might actually be startable via c
     # A true deadlock would be:
-    @node(output_name="b")
+    @node(outputs="b")
     def node_a_v2(a: int) -> int:
         return a + 1
     
-    @node(output_name="a")
+    @node(outputs="a")
     def node_b_v2(b: int) -> int:
         return b + 1
     
@@ -301,42 +301,63 @@ def test_deadlock_detected():
 ```python
 def test_cycle_startable_via_input():
     """Cycle can start if one input can be provided externally."""
-    @node(output_name="b")
+    @node(outputs="b")
     def node_a(a: int) -> int:
         return a + 1
-    
-    @node(output_name="a")
+
+    @node(outputs="a")
     def node_b(b: int) -> int:
         return b + 1
-    
+
     @route(targets=["node_a", END])
     def gate(a: int) -> str:
         return END
-    
+
     graph = Graph(nodes=[node_a, node_b, gate])
-    
-    # Can start by providing either 'a' or 'b' as input
-    assert "a" in graph.root_args or "b" in graph.root_args
+
+    # Cycle params are in seeds (need initial value to start)
+    assert "a" in graph.seeds or "b" in graph.seeds
 ```
 
 ---
 
 ## Test Category: Input/Output Properties
 
-### test_required_inputs
+### test_required_and_optional
 
 ```python
-def test_required_inputs():
-    """required_inputs contains params with no edge and no default."""
-    @node(output_name="result")
+def test_required_and_optional():
+    """required/optional correctly classify inputs."""
+    @node(outputs="result")
     def process(required: str, optional: int = 10) -> str:
         return f"{required}-{optional}"
-    
+
     graph = Graph(nodes=[process])
-    
-    assert "required" in graph.required_inputs
-    assert "optional" not in graph.required_inputs
-    assert "optional" in graph.optional_inputs
+
+    assert "required" in graph.required
+    assert "optional" not in graph.required
+    assert "optional" in graph.optional
+```
+
+### test_seeds_for_cycles
+
+```python
+def test_seeds_for_cycles():
+    """seeds contains cycle params that need initial values."""
+    @node(outputs="messages")
+    def accumulate(messages: list, item: str) -> list:
+        return messages + [item]
+
+    @route(targets=["accumulate", END])
+    def gate(messages: list) -> str:
+        return END if len(messages) > 3 else "accumulate"
+
+    graph = Graph(nodes=[accumulate, gate])
+
+    # messages has self-edge, needs seed
+    assert "messages" in graph.seeds
+    # item has no edge, is required
+    assert "item" in graph.required
 ```
 
 ### test_leaf_outputs
@@ -344,11 +365,11 @@ def test_required_inputs():
 ```python
 def test_leaf_outputs():
     """leaf_outputs contains outputs from nodes with no downstream."""
-    @node(output_name="intermediate")
+    @node(outputs="intermediate")
     def step1(x: int) -> int:
         return x + 1
     
-    @node(output_name="final")
+    @node(outputs="final")
     def step2(intermediate: int) -> int:
         return intermediate * 2
     
@@ -367,16 +388,35 @@ def test_leaf_outputs():
 ```python
 def test_bind_returns_new_graph():
     """bind() returns new graph, original unchanged."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int, multiplier: int = 1) -> int:
         return x * multiplier
-    
+
     graph1 = Graph(nodes=[process])
     graph2 = graph1.bind(multiplier=5)
-    
+
     assert graph1 is not graph2
-    assert graph2._bound_values.get("multiplier") == 5
-    assert "multiplier" not in graph1._bound_values
+    assert graph2.bound.get("multiplier") == 5
+    assert "multiplier" not in graph1.bound
+```
+
+### test_bind_changes_required_optional
+
+```python
+def test_bind_changes_required_optional():
+    """Binding a required param moves it to optional."""
+    @node(outputs="result")
+    def process(a: int, b: int) -> int:
+        return a + b
+
+    graph = Graph(nodes=[process])
+    assert "a" in graph.required
+    assert "b" in graph.required
+
+    bound = graph.bind(a=10)
+    assert "a" not in bound.required
+    assert "a" in bound.optional
+    assert "b" in bound.required
 ```
 
 ---
@@ -388,7 +428,7 @@ def test_bind_returns_new_graph():
 ```python
 def test_interrupt_node_registered():
     """InterruptNode appears in graph.interrupt_nodes."""
-    @node(output_name="content")
+    @node(outputs="content")
     def generate(prompt: str) -> str:
         return "generated content"
     
@@ -398,7 +438,7 @@ def test_interrupt_node_registered():
         response_param="decision",
     )
     
-    @node(output_name="result")
+    @node(outputs="result")
     def finalize(decision: str) -> str:
         return f"Decision: {decision}"
     

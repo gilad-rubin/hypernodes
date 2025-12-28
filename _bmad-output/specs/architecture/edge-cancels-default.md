@@ -11,11 +11,11 @@ This simple rule eliminates ambiguity in cycles and removes the need for explici
 ### Case 1: Parameter Has Edge → Default Ignored
 
 ```python
-@node(output_name="b")
+@node(outputs="b")
 def node_a(x: int) -> int:
     return x + 1
 
-@node(output_name="result")
+@node(outputs="result")
 def node_b(b: int, multiplier: int = 2) -> int:  # ← default exists
     return b * multiplier
 
@@ -31,7 +31,7 @@ runner.run(graph, inputs={"x": 5})
 ### Case 2: No Edge + Has Default → Use Default
 
 ```python
-@node(output_name="result")
+@node(outputs="result")
 def format_output(value: int, prefix: str = "Result: ") -> str:
     return f"{prefix}{value}"
 
@@ -41,7 +41,7 @@ def format_output(value: int, prefix: str = "Result: ") -> str:
 ### Case 3: No Edge + No Default → Required Input
 
 ```python
-@node(output_name="result")
+@node(outputs="result")
 def process(query: str) -> str:  # query has no default
     return llm.process(query)
 
@@ -55,7 +55,7 @@ runner.run(graph, inputs={})  # ✗ MissingInputError
 Consider a simple accumulator:
 
 ```python
-@node(output_name="messages")
+@node(outputs="messages")
 def add_response(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 ```
@@ -77,11 +77,11 @@ In a cycle, `messages` has an edge from itself (the output feeds back as input).
 This rule eliminates the need for explicit "entrypoint" declarations:
 
 ```python
-@node(output_name="a")
+@node(outputs="a")
 def node_a(b: int) -> int:
     return b + 1
 
-@node(output_name="b") 
+@node(outputs="b") 
 def node_b(a: int) -> int:
     return a * 2
 
@@ -99,6 +99,24 @@ runner.run(graph, inputs={"b": 5})  # Start from node_a (has b=5)
 # ...continues...
 ```
 
+## Graph Input Categories
+
+The "edge cancels default" rule creates three distinct categories of inputs:
+
+| Category | Definition | Graph Property |
+|----------|------------|----------------|
+| **required** | No edge, no default, not bound | `graph.required` |
+| **optional** | No edge, has default OR bound | `graph.optional` |
+| **seeds** | Has edge (cycle), needs initial value | `graph.seeds` |
+
+**At runtime:**
+- Fresh run: must provide `required ∪ seeds`
+- Resume: must provide only `required` (seeds come from state)
+
+**Error types:**
+- Missing `required` → `MissingInputError`
+- Missing `seeds` on fresh run → `MissingSeedError`
+
 ## Input Resolution Order
 
 When multiple sources could provide a value, this is the precedence:
@@ -109,7 +127,7 @@ When multiple sources could provide a value, this is the precedence:
 4. **Function default** - Only if no edge
 
 ```python
-@node(output_name="result")
+@node(outputs="result")
 def process(x: int, y: int = 10) -> int:
     return x + y
 
@@ -140,10 +158,10 @@ runner.run(graph, inputs={})
 def has_incoming_edge(param_name: str, node: HyperNode, graph: Graph) -> bool:
     """Check if parameter receives value from another node's output."""
     for other_node in graph.nodes:
-        if other_node.output_name == param_name:
+        if other_node.outputs == param_name:
             return True
-        if isinstance(other_node.output_name, tuple):
-            if param_name in other_node.output_name:
+        if isinstance(other_node.outputs, tuple):
+            if param_name in other_node.outputs:
                 return True
     return False
 ```
@@ -238,15 +256,15 @@ def warn_ignored_defaults(graph: Graph):
 ### Multi-Turn RAG
 
 ```python
-@node(output_name="messages")
+@node(outputs="messages")
 def add_user(messages: list, user_input: str) -> list:
     return messages + [{"role": "user", "content": user_input}]
 
-@node(output_name="response")
+@node(outputs="response")
 def generate(messages: list) -> str:
     return llm.chat(messages)
 
-@node(output_name="messages")
+@node(outputs="messages")
 def add_assistant(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 
@@ -261,7 +279,7 @@ runner.run(graph, inputs={
 ### Iteration Counter
 
 ```python
-@node(output_name="count")
+@node(outputs="count")
 def increment(count: int) -> int:
     return count + 1
 

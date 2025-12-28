@@ -1,72 +1,127 @@
 # Graph API Specification
 
+**Pure structure definition of a computation graph.** No execution logic, just nodes and their relationships.
+
+---
+
 ## Overview
 
 `Graph` is a pure structure definition. It has no execution logic, no state, no cache - just structure and validation.
+
+**See also:**
+- [Node Types](node-types.md) - All node types including GraphNode
+- [Execution Types](execution-types.md) - Runtime state and results
+- [Runners API](runners.md) - Execution guide
+
+---
 
 ## Constructor
 
 ```python
 class Graph:
+    """Graph structure definition."""
+
     def __init__(
         self,
-        nodes: list[HyperNode | RouteNode | BranchNode | InterruptNode],
+        nodes: list[HyperNode],
         *,
-        validate_types: bool = False,
-    ) -> None:
+        name: str | None = None,
+        strict_types: bool = False,
+    ):
         """
-        Construct a graph from nodes.
-        
+        Create a graph from nodes.
+
         Args:
-            nodes: List of node objects (decorated functions or InterruptNode).
-            validate_types: If True, check type hint congruence between
-                           connected nodes (output type matches input type).
-        
-        Raises:
-            GraphConfigError: Build-time validation failures.
-        
-        Build-time validations performed:
-            1. All @route/@branch targets exist (or are END)
-            2. No conflicting parallel producers (unless mutually exclusive)
-            3. Cycles have termination paths (route to END or reach leaf)
-            4. No deadlocks (cycles have valid starting inputs)
-            5. No self-loops without gates
-            6. If validate_types=True: type congruence checks
-        
+            nodes: List of HyperNode objects
+            name: Optional graph name. Used as default for as_node() when
+                  nesting this graph. If not set here, must be provided
+                  when calling as_node(name='...')
+            strict_types: Validate type annotations between connected nodes (default: False)
+
         Example:
-            graph = Graph(nodes=[embed, retrieve, generate, route_decision])
+            # Basic graph (no name needed)
+            graph = Graph(nodes=[embed, retrieve, generate])
+
+            # Named graph for nesting
+            rag = Graph(nodes=[embed, retrieve, generate], name="rag_pipeline")
+            outer = Graph(nodes=[preprocess, rag.as_node(), postprocess])
         """
+        self._nodes = {n.name: n for n in nodes}
+        self.name = name
+        self._nx_graph = self._build_graph(nodes)
+        self._bound = {}
+        self._validate()  # Build-time validation
 ```
 
+---
+
 ## Properties
+
+**Ordering:** All tuple/frozenset properties maintain deterministic order based on node list order (the order nodes were passed to the constructor). This ensures consistent behavior across runs.
 
 ### Structure Properties
 
 ```python
 @property
-def nodes(self) -> dict[str, HyperNode | RouteNode | BranchNode | InterruptNode]:
-    """Map of node name → node object."""
+def nodes(self) -> dict[str, HyperNode]:
+    """Map of node name → node object. Use .keys() for node names."""
 
 @property
-def node_names(self) -> set[str]:
-    """Set of all node names."""
+def nx_graph(self) -> nx.DiGraph:
+    """Underlying NetworkX graph for visualization/analysis.
 
+    Node attributes:
+        - 'hypernode': The HyperNode/RouteNode/BranchNode object
+        - 'is_gate': True for route/branch nodes
+        - 'node_type': 'node' | 'route' | 'branch' | 'interrupt'
+
+    Edge attributes:
+        - 'edge_type': 'data' | 'control'
+        - 'value_name': For data edges, the value being passed
+        - 'condition': For control edges, the gate condition
+    """
+```
+
+### Graph Feature Checks
+
+These use short-circuit evaluation - no list building needed. Used by runners for compatibility validation.
+
+```python
 @property
 def has_cycles(self) -> bool:
-    """True if graph contains any cycles."""
+    """True if this graph level contains cycles.
+
+    Note: Only checks current level, not nested GraphNodes.
+    Implementation: not nx.is_directed_acyclic_graph(self._nx_graph)
+    """
 
 @property
-def cycles(self) -> list[list[str]]:
-    """List of cycles (each cycle is list of node names)."""
+def has_gates(self) -> bool:
+    """True if graph contains routing gates (RouteNode, BranchNode, TypeRouteNode).
+
+    Implementation: any(isinstance(n, GateNode) for n in self._nodes.values())
+    """
 
 @property
-def leaf_nodes(self) -> list[str]:
-    """Nodes with no outgoing edges."""
+def has_interrupts(self) -> bool:
+    """True if graph contains InterruptNodes.
+
+    Implementation: any(isinstance(n, InterruptNode) for n in self._nodes.values())
+    """
 
 @property
-def gates(self) -> list[RouteNode | BranchNode]:
-    """All gate nodes (@route and @branch)."""
+def has_async_nodes(self) -> bool:
+    """True if any FunctionNode is async.
 
+    Implementation: any(isinstance(n, FunctionNode) and n.is_async for n in self._nodes.values())
+    """
+```
+
+### Detailed Node Lists
+
+When you need the actual nodes (not just boolean checks):
+
+```python
 @property
 def interrupt_nodes(self) -> list[InterruptNode]:
     """All interrupt nodes."""
@@ -76,88 +131,159 @@ def interrupt_nodes(self) -> list[InterruptNode]:
 
 ```python
 @property
-def root_args(self) -> set[str]:
-    """
-    Parameter names that can be provided as inputs.
-    
-    Includes:
-    - Parameters with no incoming edge and no default
-    - Parameters with incoming edge (for cycle initialization)
-    """
+def inputs(self) -> InputSpec:
+    """Input parameter specification. See InputSpec below for details."""
 
 @property
-def required_inputs(self) -> set[str]:
-    """
-    Parameters that MUST be provided.
-    
-    Parameters with no edge AND no default.
-    """
+def outputs(self) -> tuple[str, ...]:
+    """All output names produced by nodes, in node order."""
 
 @property
-def optional_inputs(self) -> set[str]:
-    """
-    Parameters that CAN be provided but have defaults.
-    
-    Parameters with no edge BUT have default.
-    """
-
-@property
-def outputs(self) -> set[str]:
-    """All output names produced by nodes."""
-
-@property
-def leaf_outputs(self) -> set[str]:
-    """Output names from leaf nodes (default return values)."""
+def leaf_outputs(self) -> tuple[str, ...]:
+    """Outputs from leaf nodes (nodes with no downstream consumers)."""
 ```
 
-### NetworkX Access
-
-```python
-@property
-def nx_graph(self) -> nx.DiGraph:
-    """
-    Underlying NetworkX graph for visualization/analysis.
-    
-    Node attributes:
-        - 'hypernode': The HyperNode/RouteNode/BranchNode object
-        - 'is_gate': True for route/branch nodes
-        - 'node_type': 'node' | 'route' | 'branch' | 'interrupt'
-    
-    Edge attributes:
-        - 'edge_type': 'data' | 'control'
-        - 'value_name': For data edges, the value being passed
-        - 'condition': For control edges, the gate condition
-    """
-```
+---
 
 ## Methods
 
 ### bind()
 
+**Purpose**: Set default values for graph inputs, similar to `functools.partial`.
+
 ```python
 def bind(self, **values: Any) -> Graph:
     """
-    Return new Graph with values pre-bound.
-    
+    Bind default values for graph inputs.
+
     Bound values are used when:
     - Parameter has no incoming edge, AND
     - No runtime input provided
-    
+
     Args:
         **values: Parameter name → value mappings
-    
+
     Returns:
         New Graph instance with bound values.
-        Original graph is not modified.
-    
+        Original graph is not modified (immutable operation).
+
+    Raises:
+        ValueError: If attempting to bind a value produced by an edge
+
     Example:
         graph = Graph(nodes=[process])
         bound = graph.bind(temperature=0.7, max_tokens=1000)
-        
+
         # These are equivalent:
         runner.run(bound, inputs={"query": "hello"})
         runner.run(graph, inputs={"query": "hello", "temperature": 0.7, "max_tokens": 1000})
     """
+```
+
+#### Value Resolution Order
+
+When determining what value to use for a parameter:
+
+```
+1. Edge value (if available)      - always wins, cannot be overridden
+2. Runtime input                   - explicit value in runner.run(inputs={...})
+3. Bound value (via .bind())       - default set on graph
+4. Function default                - default in function signature
+```
+
+#### Binding Examples
+
+**Basic binding:**
+
+```python
+@node(outputs="result")
+def process(query: str, model: str, temperature: float) -> str:
+    return llm.invoke(query, model=model, temperature=temperature)
+
+graph = Graph(nodes=[process])
+
+# Bind common defaults
+bound = graph.bind(model="gpt-4", temperature=0.7)
+
+# Now only query is required
+result = runner.run(bound, inputs={"query": "hello"})
+
+# Can still override at runtime
+result = runner.run(bound, inputs={
+    "query": "hello",
+    "temperature": 0.9  # Overrides bound value
+})
+```
+
+**Method chaining:**
+
+```python
+# .bind() returns self for chaining
+graph = (
+    Graph(nodes=[embed, retrieve, generate])
+    .bind(model="text-embedding-ada-002")
+    .bind(top_k=10, temperature=0.7)  # Multiple calls merge
+)
+
+# Equivalent to:
+graph.bind(model="text-embedding-ada-002", top_k=10, temperature=0.7)
+```
+
+**Error: binding edge-connected values:**
+
+```python
+@node(outputs="config")
+def load_config() -> dict:
+    return {"threshold": 0.7}
+
+@node(outputs="result")
+def process(data: str, config: dict) -> str:
+    return transform(data, config)
+
+graph = Graph(nodes=[load_config, process])
+
+# ❌ Error: config is produced by an edge
+graph.bind(config={"threshold": 0.5})
+# → ValueError: Cannot bind 'config': it is produced by node 'load_config'
+```
+
+**Why?** Edge connections define the graph structure. Binding edge-connected values would silently override the graph's dataflow.
+
+#### Properties After Binding
+
+```python
+# Example: how properties change after binding
+graph = Graph(nodes=[process])
+
+# Before binding
+graph.inputs.all       # frozenset({"query", "model", "temperature"})
+graph.inputs.required  # frozenset({"query", "model", "temperature"})  (assuming no defaults)
+graph.inputs.optional  # frozenset()
+graph.inputs.bound     # {}
+
+# After binding
+bound = graph.bind(model="gpt-4", temperature=0.7)
+
+bound.inputs.all       # frozenset({"query", "model", "temperature"})  (unchanged)
+bound.inputs.required  # frozenset({"query"})  (model & temperature now have fallbacks)
+bound.inputs.optional  # frozenset({"model", "temperature"})  (have bound values)
+bound.inputs.bound     # {"model": "gpt-4", "temperature": 0.7}
+```
+
+### unbind()
+
+```python
+def unbind(self, *keys: str) -> Graph:
+    """Remove specific bindings."""
+```
+
+**Example:**
+
+```python
+bound = graph.bind(a=1, b=2, c=3)
+bound.unbind("b")        # Removes b, keeps a and c
+bound.unbind("a", "c")   # Removes a and c, keeps b
+bound.unbind()           # Removes all bindings
 ```
 
 ### as_node()
@@ -166,59 +292,155 @@ def bind(self, **values: Any) -> Graph:
 def as_node(
     self,
     *,
-    output_name: str | tuple[str, ...] | None = None,
-    runner: Runner | AsyncRunner | None = None,
-) -> HyperNode:
+    name: str | None = None,
+    runner: BaseRunner | None = None,
+) -> GraphNode:
     """
     Wrap graph as a node for composition.
-    
+
+    Returns a NEW GraphNode instance. Does NOT modify this Graph.
+
+    Name Resolution (in GraphNode):
+        1. Use `name` parameter if provided
+        2. Otherwise use `graph.name` (from Graph constructor)
+        3. If neither exists, raise ValueError
+
     Args:
-        output_name: Override output name(s). Default: leaf outputs.
-        runner: Runner for nested execution. Default: inherit from parent.
-    
+        name: Override node name (default: use graph.name)
+        runner: Runner for nested execution (default: inherit from parent)
+
     Returns:
-        HyperNode that executes this graph when called.
-    
-    Behavior:
-        - Cyclic graphs execute until END, then return outputs
-        - DAG graphs execute once
-        - Nested graphs are opaque to parent (cache as single unit)
-    
-    Example:
-        rag_graph = Graph(nodes=[retrieve, generate, refine, check_done])
-        
-        outer = Graph(nodes=[
-            preprocess,
-            rag_graph.as_node(output_name="rag_result"),
-            postprocess,
-        ])
-    """
-```
+        GraphNode with graph's leaf_outputs as default outputs.
+        Use .with_outputs() to override output names.
+        Use .map_over() to configure iteration.
 
-### Renaming for Composition
+    Raises:
+        ValueError: If name not provided and graph has no name.
 
-```python
-def as_node(self).rename(
-    inputs: dict[str, str] | None = None,
-    outputs: dict[str, str] | None = None,
-) -> HyperNode:
-    """
-    Rename inputs/outputs for composition.
-    
-    Args:
-        inputs: Map old input name → new input name
-        outputs: Map old output name → new output name
-    
     Example:
-        # Inner graph expects "query", outer has "user_question"
-        nested = inner_graph.as_node().rename(
-            inputs={"query": "user_question"},
-            outputs={"response": "inner_response"},
+        # Simple wrapping (uses graph.name if set)
+        node = graph.as_node()
+
+        # Override name
+        node = graph.as_node(name="custom")
+
+        # Configure outputs and iteration via chaining
+        node = (
+            graph.as_node()
+            .with_outputs(docs="retrieved_docs")
+            .map_over("query")
         )
     """
+    return GraphNode(self, name=name, runner=runner)
 ```
 
-## Build-Time Validation Details
+**Name resolution examples:**
+
+```python
+# Option 1: Name from Graph constructor
+named_graph = Graph(nodes=[double, add_ten], name="math_ops")
+node1 = named_graph.as_node()  # Uses graph.name
+assert node1.name == "math_ops"
+
+# Option 2: Override with as_node(name=...)
+node2 = named_graph.as_node(name="custom_name")  # Overrides graph.name
+assert node2.name == "custom_name"
+
+# Option 3: Provide name on as_node when Graph has no name
+anonymous_graph = Graph(nodes=[double, add_ten])  # No name
+node3 = anonymous_graph.as_node(name="required_name")  # Must provide
+assert node3.name == "required_name"
+
+# Error case: Neither Graph nor as_node has a name
+try:
+    anonymous_graph.as_node()  # No name anywhere → raises
+except ValueError as e:
+    assert "GraphNode requires a name" in str(e)
+```
+
+### visualize()
+
+```python
+def visualize(self, **kwargs):
+    """Generate visual representation of graph."""
+```
+
+---
+
+## InputSpec
+
+### Purpose
+
+**Structured specification of graph inputs.** Returned by `Graph.inputs`, provides all information about what inputs a graph accepts.
+
+### Class Definition
+
+```python
+@dataclass(frozen=True)
+class InputSpec:
+    """Specification of graph input parameters."""
+
+    required: frozenset[str]
+    """Must provide: no incoming edge, not bound, no default value."""
+
+    optional: frozenset[str]
+    """Has fallback: bound (highest priority) OR has default value."""
+
+    seeds: frozenset[str]
+    """Cycle initialization: params with self/cycle edge that need initial values."""
+
+    bound: dict[str, Any]
+    """Currently bound values from .bind(). Takes priority over defaults."""
+
+    @property
+    def all(self) -> frozenset[str]:
+        """All input names (required + optional)."""
+        return self.required | self.optional
+```
+
+### Priority Rules
+
+When determining if an input is required or optional:
+
+1. **Bound values** (highest priority): If `name in bound`, it's optional
+2. **Default values**: If function parameter has a default, it's optional
+3. **Otherwise**: It's required
+
+### Example
+
+```python
+@node(output_name="result")
+def process(x: int, config: dict = None) -> int:
+    return x * 2
+
+graph = Graph(nodes=[process])
+
+# Before binding
+assert graph.inputs.required == frozenset({"x"})
+assert graph.inputs.optional == frozenset({"config"})  # Has default
+assert graph.inputs.all == frozenset({"x", "config"})
+assert graph.inputs.bound == {}
+
+# After binding
+bound_graph = graph.bind(x=5)
+assert bound_graph.inputs.required == frozenset()      # x is now bound
+assert bound_graph.inputs.optional == frozenset({"x", "config"})
+assert bound_graph.inputs.bound == {"x": 5}
+
+# With cycles
+@node(output_name="count")
+def counter(count: int) -> int:
+    return count + 1
+
+cyclic = Graph(nodes=[counter])  # count feeds back to itself
+assert cyclic.inputs.seeds == frozenset({"count"})  # Needs initial value
+```
+
+---
+
+## Build-Time Validation
+
+Validation happens at graph construction time (`Graph.__init__`). The graph validates itself before any execution.
 
 ### 1. Route Target Validation
 
@@ -271,14 +493,14 @@ def _validate_cycle_termination(self):
     """Every cycle must have a path to termination."""
     for cycle in self.cycles:
         can_terminate = False
-        
+
         # Check for route with END
         for node_name in cycle:
             node = self.nodes[node_name]
             if isinstance(node, RouteNode) and END in node.targets:
                 can_terminate = True
                 break
-        
+
         # Check for path to leaf
         if not can_terminate:
             for node_name in cycle:
@@ -286,7 +508,7 @@ def _validate_cycle_termination(self):
                     if nx.has_path(self.nx_graph, node_name, leaf):
                         can_terminate = True
                         break
-        
+
         if not can_terminate:
             raise GraphConfigError(
                 f"Cycle has no termination path\n\n"
@@ -305,7 +527,7 @@ def _validate_no_deadlock(self):
     """Cycles must have valid starting inputs."""
     for cycle in self.cycles:
         can_start = False
-        
+
         for node_name in cycle:
             node = self.nodes[node_name]
             # Can this node start from external inputs?
@@ -313,12 +535,12 @@ def _validate_no_deadlock(self):
                 p for p in node.parameters
                 if not self._is_produced_in_cycle(p, cycle)
             ]
-            
+
             # If all external deps can be satisfied, cycle can start
             if all(self._can_satisfy(d) for d in external_deps):
                 can_start = True
                 break
-        
+
         if not can_start:
             raise GraphConfigError(
                 f"Cycle cannot start - deadlock detected\n\n"
@@ -330,16 +552,60 @@ def _validate_no_deadlock(self):
             )
 ```
 
+### 5. GraphNode Map + Interrupts Validation
+
+```python
+def _validate_graphnode_map_over(self):
+    """GraphNodes with map_over cannot wrap graphs containing interrupts."""
+    for node in self._nodes.values():
+        if isinstance(node, GraphNode) and node._map_over:
+            # Use shared validation function from runners module
+            validate_map_compatible(
+                node.graph,
+                context=f"GraphNode '{node.name}' has map_over={node._map_over}"
+            )
+```
+
+This validation uses the shared `validate_map_compatible()` function (see [runners.md](runners.md#validate_map_compatible)) to ensure GraphNodes configured with `.map_over()` don't wrap graphs containing interrupts.
+
+**Example error:**
+
+```python
+# Inner graph with interrupt
+inner = Graph(nodes=[
+    process_node,
+    InterruptNode("approval", "draft", "decision"),
+    finalize_node,
+], name="workflow")
+
+# ❌ Error at Graph() construction time
+outer = Graph(nodes=[
+    inner.as_node().map_over("data"),  # Can't map over graph with interrupts
+])
+# → GraphConfigError: GraphNode 'workflow' has map_over=['data'],
+#                     but the graph contains interrupts.
+#
+#   The problem: map runs the graph multiple times in batch,
+#   but interrupts pause for human input - these don't mix.
+#
+#   Interrupts found: ['approval']
+#
+#   How to fix:
+#     Use runner.run() in a loop instead of map
+```
+
+---
+
 ## Usage Examples
 
 ### Basic Graph
 
 ```python
-@node(output_name="embedded")
+@node(outputs="embedded")
 def embed(text: str) -> list[float]:
     return model.encode(text)
 
-@node(output_name="result")
+@node(outputs="result")
 def classify(embedded: list[float]) -> str:
     return classifier.predict(embedded)
 
@@ -350,11 +616,11 @@ graph = Graph(nodes=[embed, classify])
 ### Cyclic Graph
 
 ```python
-@node(output_name="response")
+@node(outputs="response")
 def generate(messages: list) -> str:
     return llm.chat(messages)
 
-@node(output_name="messages")
+@node(outputs="messages")
 def accumulate(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 
@@ -369,10 +635,252 @@ graph = Graph(nodes=[generate, accumulate, check_done])
 ### Nested Graphs
 
 ```python
-inner = Graph(nodes=[step1, step2, step3])
+inner = Graph(nodes=[step1, step2, step3], name="inner")
 outer = Graph(nodes=[
     preprocess,
-    inner.as_node(output_name="inner_result"),
+    inner.as_node(),
     postprocess,
 ])
+```
+
+---
+
+## Nested Graph Results
+
+### Graph Names Are Mandatory for Nesting
+
+When nesting graphs, the nested graph **must** have a name to be addressable in results. You can provide the name either:
+
+1. **When constructing the Graph** (recommended):
+```python
+rag = Graph(nodes=[...], name="rag_pipeline")
+outer = Graph(nodes=[preprocess, rag.as_node(), postprocess])
+```
+
+2. **When calling .as_node()**:
+```python
+rag = Graph(nodes=[...])
+outer = Graph(nodes=[preprocess, rag.as_node(name="rag_pipeline"), postprocess])
+```
+
+**If you provide both, `.as_node(name=...)` overrides `Graph(..., name=...)`.**
+
+### Result Structure
+
+Results from nested graphs are returned as nested `GraphResult` objects:
+
+```python
+result = pipeline.run(inputs={...})
+
+# Direct outputs (from outputs)
+result["answer"]                      # value
+result["cleaned"]                     # value
+
+# Nested graphs (by name) → GraphResult objects
+result["rag_pipeline"]                # GraphResult
+result["rag_pipeline"]["embedding"]   # value inside nested result
+result["rag_pipeline"]["inner"]       # another nested GraphResult
+```
+
+Both `outputs` values and nested graph names share the same namespace:
+
+```python
+result.outputs = {
+    "answer": "...",                  # from outputs
+    "rag_pipeline": GraphResult(...), # nested graph by name
+}
+```
+
+### Filtering with select Parameter
+
+Use the `select` parameter in `.run()` to filter what's included in the result:
+
+```python
+# Default: everything accessible
+result = runner.run(graph, inputs={...})
+result.keys()  # ["answer", "cleaned", "rag_pipeline", "other_graph"]
+
+# Filtered: specific outputs only
+result = runner.run(graph, inputs={...}, select=["answer"])
+result.keys()  # ["answer"]
+
+# With patterns
+result = runner.run(
+    graph,
+    inputs={...},
+    select=["answer", "rag_pipeline/*"]
+)
+```
+
+### Pattern Syntax
+
+| Pattern | Meaning |
+|---------|---------|
+| `"answer"` | Specific output |
+| `"rag_pipeline"` | Nested graph as GraphResult |
+| `"rag_pipeline/*"` | All direct outputs from rag_pipeline |
+| `"rag_pipeline/**"` | All outputs recursively |
+| `"**/embedding"` | Any "embedding" at any depth |
+| `"*/docs"` | "docs" from any direct child graph |
+
+### Examples
+
+**Full access (default):**
+
+```python
+result = runner.run(graph, inputs={...})
+result["rag_pipeline"]["embedding"]  # accessible
+```
+
+**Only top-level values:**
+
+```python
+result = runner.run(graph, inputs={...}, select=["answer", "cleaned"])
+result["rag_pipeline"]  # KeyError - not selected
+```
+
+**Specific nested outputs:**
+
+```python
+result = runner.run(
+    graph,
+    inputs={...},
+    select=["answer", "rag_pipeline/embedding"]
+)
+result["rag_pipeline"]["embedding"]  # accessible
+result["rag_pipeline"]["docs"]       # KeyError - not selected
+```
+
+**Everything from a nested graph:**
+
+```python
+result = runner.run(graph, inputs={...}, select=["rag_pipeline/**"])
+# All outputs from rag_pipeline and its nested graphs
+```
+
+### GraphResult Structure
+
+```python
+from dataclasses import dataclass
+from typing import Any, Literal
+
+@dataclass
+class GraphResult:
+    """Result from graph execution."""
+
+    outputs: dict[str, Any | "GraphResult"]
+    status: Literal["complete", "interrupted", "error"]
+    history: list[NodeExecution] | None = None
+
+    # Dict-like access
+    def __getitem__(self, key: str) -> Any | "GraphResult":
+        return self.outputs[key]
+
+    def keys(self):
+        return self.outputs.keys()
+
+    def items(self):
+        return self.outputs.items()
+
+    def __contains__(self, key: str):
+        return key in self.outputs
+```
+
+### Nested Graph Example
+
+```python
+# Inner RAG pipeline
+@node(outputs="embedding")
+def embed(query: str) -> list[float]:
+    return model.embed(query)
+
+@node(outputs="docs")
+def retrieve(embedding: list[float]) -> list[str]:
+    return vector_db.search(embedding)
+
+@node(outputs="response")
+def generate(docs: list[str]) -> str:
+    return llm.generate(docs)
+
+rag_pipeline = Graph(
+    nodes=[embed, retrieve, generate],
+    name="rag_pipeline"  # Name required for nesting
+)
+
+# Outer pipeline
+@node(outputs="cleaned")
+def clean(query: str) -> str:
+    return query.strip().lower()
+
+outer = Graph(nodes=[
+    clean,
+    rag_pipeline.as_node(name="rag"),  # Nested
+])
+
+# Execute
+result = runner.run(outer, inputs={"query": "  What is RAG?  "})
+
+# Access results
+result["cleaned"]                  # "what is rag?"
+result["response"]                 # Final answer
+result["rag"]                      # GraphResult from nested pipeline
+result["rag"]["embedding"]         # Embedding from nested
+result["rag"]["docs"]              # Retrieved docs from nested
+result["rag"]["response"]          # Same as result["response"]
+
+# Filtered execution
+result = runner.run(
+    outer,
+    inputs={"query": "  What is RAG?  "},
+    select=["response", "rag/embedding"]  # Only these
+)
+result["response"]          # Available
+result["rag"]["embedding"]  # Available
+result["rag"]["docs"]       # KeyError - not selected
+```
+
+---
+
+## Type Hierarchy
+
+```
+HyperNode (ABC)
+├── FunctionNode (regular function wrapper, @node decorator)
+├── GateNode (ABC) - base for routing gates
+│   ├── RouteNode (multi-way gate, func returns str)
+│   ├── BranchNode (binary gate, func returns bool)
+│   └── TypeRouteNode (declarative type-based routing)
+├── InterruptNode (pause point)
+└── GraphNode (nested graph as node)
+    └── Created by Graph.as_node()
+
+Graph (structure definition)
+├── InputSpec (input parameter specification, returned by .inputs)
+└── GraphState (runtime values)
+    └── GraphResult (execution results)
+        └── RunResult (async execution with interrupts)
+```
+
+**Composition pattern:**
+
+GraphNode enables nested composition - it's just another HyperNode:
+
+```python
+# Inner graph
+inner = Graph(nodes=[embed_node, retrieve_node], name="rag")
+
+# Wrap as node
+rag_node = inner.as_node()  # Returns GraphNode
+
+# Use in outer graph
+outer = Graph(nodes=[preprocess, rag_node, postprocess])
+
+# GraphNode supports all HyperNode methods:
+adapted = (
+    inner.as_node()
+    .with_name("custom_rag")
+    .with_inputs(query="user_question")
+    .with_outputs(docs="retrieved_docs")
+    .map_over("user_question")
+)
 ```

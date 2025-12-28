@@ -1,8 +1,67 @@
-# Hypernodes v0.5 - Specification Overview
+# Hypernodes v0.5 - Overview
 
-## Purpose
+**A graph-native execution system that supports cycles, multi-turn interactions, and complex control flow while maintaining pure, portable functions.**
 
-This document provides context for implementing Hypernodes v0.5 - a graph-native execution system that supports cycles, multi-turn interactions, and complex control flow while maintaining pure, portable functions.
+---
+
+## Quick Example: Multi-Turn RAG
+
+Here's what using Hypernodes looks like:
+
+```python
+from hypernodes import Graph, node, route, END, AsyncRunner, SyncRunner, DiskCache
+
+# Define nodes as pure functions
+@node(outputs="docs")
+def retrieve(query: str, messages: list) -> list:
+    """Retrieve documents from vector DB."""
+    return vector_db.search(query, context=messages)
+
+@node(outputs="response")
+async def generate(docs: list, messages: list, llm) -> str:
+    """Generate response using LLM."""
+    async for chunk in llm.stream(docs, messages):
+        yield chunk  # Framework handles streaming automatically
+
+@node(outputs="messages")
+def add_response(messages: list, response: str) -> list:
+    """Accumulator: append assistant response to conversation."""
+    return messages + [{"role": "assistant", "content": response}]
+
+# Control flow with routing
+@route(targets=["retrieve", END])  # Explicit targets, validated at build time
+def should_continue(messages: list) -> str:
+    """Decide whether to continue or end."""
+    if len(messages) > 10 or detect_done(messages[-1]):
+        return END
+    return "retrieve"  # Loops back! Creates cycle
+
+# Build graph - edges inferred from function signatures
+graph = Graph(nodes=[retrieve, generate, add_response, should_continue])
+
+# Execute with runner
+runner = AsyncRunner(cache=DiskCache("./cache"))
+result = await runner.run(
+    graph,
+    inputs={
+        "query": "What is RAG?",
+        "messages": [],  # Initialize the cycle
+        "llm": my_llm
+    }
+)
+
+print(result["messages"])  # Full conversation history
+```
+
+**Key features in this example:**
+- ✅ Pure functions - testable without framework
+- ✅ Cycles - `should_continue` loops back to `retrieve`
+- ✅ No state objects - just function signatures
+- ✅ Build-time validation - targets checked when `Graph()` is called
+- ✅ Streaming - `async for` chunks handled automatically
+- ✅ No infinite loops - staleness detection + explicit termination
+
+---
 
 ## The Journey: From Hierarchical DAGs to Reactive Graphs
 
@@ -60,7 +119,7 @@ Both solve cycles, but both require:
 
 **The frustration - we want to write this:**
 ```python
-@node(output_name="messages")
+@node(outputs="messages")
 def add_response(messages: list, response: str) -> list:
     return messages + [response]
 ```
@@ -109,10 +168,124 @@ HyperNodes:  Write code → Graph() error → Fix → Repeat
 
 Both catch errors before runtime. The difference is *when* validation happens (compile time vs build time), not *whether* it happens.
 
+## API Surface at a Glance
+
+### Defining Nodes
+
+```python
+from hypernodes import node, route, branch, InterruptNode, END
+
+# Regular node
+@node(outputs="result")
+def process(x: int) -> int:
+    return x * 2
+
+# Multiple outputs
+@node(outputs=("mean", "std"))
+def statistics(data: list) -> tuple[float, float]:
+    return (compute_mean(data), compute_std(data))
+
+# Multi-way routing (gate)
+@route(targets=["option_a", "option_b", END])  # Validated at build time
+def decide(state: dict) -> str:
+    if state["ready"]:
+        return END
+    return "option_a"
+
+# Boolean routing (specialized gate)
+@branch(when_true="valid_path", when_false="error_path")
+def check(data: dict) -> bool:
+    return data.get("valid", False)
+
+# Human-in-the-loop pause point
+approval = InterruptNode(
+    name="approval",
+    input_param="prompt",      # Value to surface to user
+    response_param="decision"  # Where to write user's response
+)
+```
+
+### Building Graphs
+
+```python
+from hypernodes import Graph
+
+# Build graph - edges inferred from parameter names matching output names
+graph = Graph(nodes=[retrieve, generate, decide, process])
+
+# Bind default values (like functools.partial)
+graph.bind(model="gpt-4", temperature=0.7)
+
+# Nest graphs - name in Graph constructor (recommended)
+inner = Graph(nodes=[clean, tokenize], name="preprocessing")
+outer = Graph(nodes=[
+    fetch,
+    inner.as_node(),  # name already set
+    analyze
+])
+
+# Or provide name in as_node()
+inner_unnamed = Graph(nodes=[clean, tokenize])
+outer = Graph(nodes=[
+    fetch,
+    inner_unnamed.as_node(name="preprocessing"),  # name required
+    analyze
+])
+
+# Rename interfaces when nesting
+rag = Graph(nodes=[retrieve, generate], name="rag")
+adapted = (
+    rag.as_node()  # name from Graph()
+    .rename(inputs={"doc": "documents"}, outputs={"resp": "answer"})
+)
+```
+
+### Executing Graphs
+
+```python
+from hypernodes import SyncRunner, AsyncRunner, DiskCache
+
+# Synchronous execution
+runner = SyncRunner(cache=DiskCache("./cache"))
+result = runner.run(graph, inputs={"query": "hello"})
+
+# Async execution (required for streaming and InterruptNode)
+async_runner = AsyncRunner(cache=DiskCache("./cache"))
+result = await async_runner.run(graph, inputs={"query": "hello"})
+
+# Event streaming
+async with async_runner.iter(graph, inputs={...}) as run:
+    async for event in run:
+        match event:
+            case NodeEndEvent(node_name=name, outputs=outputs):
+                print(f"{name} → {outputs}")
+            case StreamingChunkEvent(chunk=chunk):
+                print(chunk, end="")
+
+# Batch execution
+results = runner.map(
+    graph,
+    inputs={"query": ["Q1", "Q2", "Q3"]},
+    map_over="query"
+)
+```
+
+### Filtering Results
+
+```python
+# Get specific outputs only
+result = runner.run(graph, inputs={...}, select=["answer"])
+
+# Get nested graph outputs
+result = runner.run(graph, inputs={...}, select=["rag_pipeline/*"])
+```
+
+---
+
 ## Core Architectural Changes from v0.4
 
 1. **`Graph` replaces `Pipeline`** - Pure definition, constructed from list of nodes
-2. **`Runner` / `AsyncRunner`** - Execution separated from definition; runners own cache and callbacks
+2. **`SyncRunner` / `AsyncRunner`** - Execution separated from definition; runners own cache and callbacks
 3. **Reactive dataflow with versioning** - Values have versions, staleness drives execution
 4. **Unified execution algorithm** - Same code handles DAGs, branches, AND cycles
 
@@ -129,11 +302,9 @@ Both catch errors before runtime. The difference is *when* validation happens (c
 - ✅ Checkpointing and resume
 - ✅ Distributed batch processing (DaftRunner for DAG-only graphs)
 
-## Implementation Priority
+## Next Steps
 
-1. **Core Graph + Runner** - Must work first
-2. **@route decorator** - Enables cycles
-3. **Staleness detection** - Prevents infinite loops
-4. **AsyncRunner + streaming** - Modern LLM APIs need this
-5. **InterruptNode** - Human-in-the-loop
-6. **DaftRunner** - Distributed (DAG-only)
+- **[Design Principles](design-principles.md)** - Philosophy for making good decisions
+- **[API Reference](api/)** - Detailed API specifications
+- **[Architecture](architecture/)** - How the system works internally
+- **[Tests](tests/)** - Test specifications and examples

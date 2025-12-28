@@ -82,11 +82,11 @@ def should_continue(messages: list, max_turns: int = 10) -> str:
 ### How Routes Create Cycles
 
 ```python
-@node(output_name="response")
+@node(outputs="response")
 def generate(messages: list) -> str:
     return llm.generate(messages)
 
-@node(output_name="messages")
+@node(outputs="messages")
 def add_response(messages: list, response: str) -> list:
     return messages + [{"role": "assistant", "content": response}]
 
@@ -153,11 +153,11 @@ def branch(
 def check_cache(query: str, cache: dict) -> bool:
     return query in cache
 
-@node(output_name="result")
+@node(outputs="result")
 def use_cache(query: str, cache: dict) -> str:
     return cache[query]
 
-@node(output_name="result")  # Same output name OK - mutually exclusive
+@node(outputs="result")  # Same output name OK - mutually exclusive
 def compute_fresh(query: str) -> str:
     return expensive_computation(query)
 ```
@@ -187,11 +187,11 @@ Nodes on different branches of the same gate can produce the same output name.
 def gate(x: int) -> bool:
     return x > 0
 
-@node(output_name="result")  # Same name
+@node(outputs="result")  # Same name
 def path_a(x: int) -> str:
     return "positive"
 
-@node(output_name="result")  # Same name - OK because mutually exclusive
+@node(outputs="result")  # Same name - OK because mutually exclusive
 def path_b(x: int) -> str:
     return "non-positive"
 ```

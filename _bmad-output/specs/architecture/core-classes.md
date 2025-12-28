@@ -13,7 +13,7 @@ GraphState            # Runtime value storage
 ├── versions: dict    # name → version number
 └── node_history      # Which nodes ran, when
 
-Runner                # Sync execution
+SyncRunner            # Sync execution
 ├── cache             # Optional cache backend
 ├── callbacks         # Optional callbacks
 └── run(graph, inputs) → outputs
@@ -32,40 +32,47 @@ DaftRunner            # Distributed execution (DAG-only)
 ## Graph Class
 
 ### Purpose
+
 Pure graph structure definition. No execution logic, no state, no cache. Just structure + validation.
 
 ### Constructor
+
 ```python
 class Graph:
     def __init__(
         self,
-        nodes: list[HyperNode | RouteNode | BranchNode | InterruptNode],
+        nodes: list[HyperNode],
         *,
-        validate_types: bool = False,  # Opt-in type congruence checking
+        strict_types: bool = False,  # Opt-in type congruence checking
     ) -> None:
-        """
-        Construct a graph from a list of nodes.
-        
-        Validation happens HERE (build-time):
-        - All @route targets exist or are END
-        - No conflicting parallel producers (unless mutually exclusive)
-        - Cycles have termination paths
-        - No deadlocks (cycles have valid starting inputs)
-        
-        Raises:
-            GraphConfigError: If validation fails
-        """
 ```
 
 ### Key Properties
+
 ```python
 @property
 def has_cycles(self) -> bool:
     """True if graph contains any cycles."""
 
 @property
-def root_args(self) -> set[str]:
-    """Parameter names that can be provided as inputs."""
+def inputs(self) -> set[str]:
+    """All params that can accept external values."""
+
+@property
+def required(self) -> set[str]:
+    """Must provide: no edge, no default, not bound."""
+
+@property
+def optional(self) -> set[str]:
+    """Has fallback: no edge, has default OR bound."""
+
+@property
+def seeds(self) -> set[str]:
+    """Cycle initialization: params with self/cycle edge."""
+
+@property
+def bound(self) -> dict[str, Any]:
+    """Currently bound values."""
 
 @property
 def nx_graph(self) -> nx.DiGraph:
@@ -77,12 +84,18 @@ def nodes(self) -> dict[str, HyperNode]:
 ```
 
 ### Key Methods
+
 ```python
 def bind(self, **values) -> Graph:
     """
     Return new Graph with values pre-bound.
-    Bound values apply when parameter has NO edge.
-    
+
+    Bound values are used when:
+    - Parameter has no incoming edge, AND
+    - No runtime input provided
+
+    Attempting to bind a value that has an edge raises ValueError.
+
     Returns:
         New Graph instance with bound values
     """
@@ -90,26 +103,31 @@ def bind(self, **values) -> Graph:
 def as_node(
     self,
     *,
-    runner: Runner | AsyncRunner | None = None,
-) -> HyperNode:
+    name: str | None = None,
+    runner: SyncRunner | AsyncRunner | None = None,
+) -> GraphNode:
     """
     Wrap graph as a node for composition.
-    Cyclic graphs execute their internal loops until END.
-    
+
+    IMPORTANT: Returns a NEW GraphNode. Does NOT modify this Graph.
+
     Args:
-        runner: Runner to use for nested execution (optional)
-    
+        name: Node name (required if not set in Graph constructor)
+        runner: SyncRunner or AsyncRunner for nested execution
+
     Returns:
-        HyperNode that executes this graph
+        GraphNode that wraps this graph
     """
 ```
 
 ## GraphState Class
 
 ### Purpose
-Tracks all values, their versions, and execution history during a run.
+
+Tracks all values, their versions, and execution history during a run. Used internally by runners.
 
 ### Constructor
+
 ```python
 class GraphState:
     def __init__(self, initial_values: dict[str, Any] | None = None) -> None:
@@ -120,6 +138,7 @@ class GraphState:
 ```
 
 ### Key Properties
+
 ```python
 @property
 def values(self) -> dict[str, Any]:
@@ -131,6 +150,7 @@ def versions(self) -> dict[str, int]:
 ```
 
 ### Key Methods
+
 ```python
 def get(self, name: str) -> Any:
     """Get value by name. Raises KeyError if not present."""
@@ -159,14 +179,58 @@ def from_checkpoint(cls, data: bytes) -> GraphState:
     """Restore state from checkpoint."""
 ```
 
-## Runner Class
+## Runner Classes
 
-### Purpose
-Synchronous execution of graphs. Owns cache and callbacks.
+### Architecture
+
+All runners inherit from `BaseRunner` and implement capability protocols:
+
+```python
+from abc import ABC, abstractmethod
+
+class BaseRunner(ABC):
+    """Abstract base runner - minimal shared interface."""
+    
+    def __init__(
+        self,
+        cache: Cache | None = None,
+        callbacks: list[Callback] | None = None,
+    ):
+        self.cache = cache
+        self.callbacks = callbacks or []
+    
+    @abstractmethod
+    def run(self, graph: Graph, inputs: dict[str, Any], **kwargs):
+        """All runners must support single execution."""
+        pass
+    
+    @property
+    @abstractmethod
+    def capabilities(self) -> RunnerCapabilities:
+        """Declare what this runner supports."""
+        pass
+```
+
+**See [Core Types - Runner Class Hierarchy](../api/types.md#runner-class-hierarchy) for complete architecture.**
+
+### SyncRunner
+
+```python
+class SyncRunner(BaseRunner, SupportsBatch):
+    """Synchronous execution runner."""
+    
+    capabilities = RunnerCapabilities(
+        supports_cycles=True,
+        supports_gates=True,
+        supports_interrupts=False,
+        supports_async_nodes=False,
+        supports_streaming=False,
+    )
+```
 
 ### Constructor
+
 ```python
-class Runner:
     def __init__(
         self,
         *,
@@ -174,15 +238,17 @@ class Runner:
         callbacks: list[Callback] | None = None,
     ) -> None:
         """
-        Create a runner with optional cache and callbacks.
-        
+        Create a synchronous runner.
+      
         Args:
             cache: Cache backend (e.g., DiskCache)
             callbacks: List of callbacks for observability
         """
+        super().__init__(cache, callbacks)
 ```
 
 ### Key Methods
+
 ```python
 def run(
     self,
@@ -192,20 +258,20 @@ def run(
     select: list[str] | None = None,
     session_id: str | None = None,
     max_iterations: int = 1000,
-) -> dict[str, Any]:
+) -> dict[str, Any]: #@should return GraphResult object. see graph_design_docs/ md files.
     """
     Execute graph synchronously.
-    
+  
     Args:
         graph: Graph to execute
         inputs: Input values (determines where cycles start)
         select: Optional list of output names to return (default: all leaf outputs)
         session_id: Optional session ID for grouping related runs
         max_iterations: Maximum loop iterations before InfiniteLoopError
-    
+  
     Returns:
         Dict of output name → value
-    
+  
     Raises:
         GraphConfigError: If graph is invalid
         ConflictError: If parallel producers conflict
@@ -223,35 +289,47 @@ def map(
 ) -> list[dict[str, Any]]:
     """
     Execute graph for each item in map_over parameter(s).
-    
+  
     Args:
         graph: Graph to execute
         inputs: Input values (map_over params should be lists)
         map_over: Parameter name(s) to iterate over
-    
+  
     Returns:
         List of output dicts, one per input item
     """
 ```
 
-## AsyncRunner Class
+### AsyncRunner
 
-### Purpose
-Asynchronous execution with streaming support. Required for async nodes and InterruptNode.
+```python
+class AsyncRunner(BaseRunner, SupportsBatch, SupportsStreaming, SupportsAsync):
+    """Asynchronous runner with full feature support."""
+    
+    capabilities = RunnerCapabilities(
+        supports_cycles=True,
+        supports_gates=True,
+        supports_interrupts=True,
+        supports_async_nodes=True,
+        supports_streaming=True,
+    )
+```
 
 ### Constructor
+
 ```python
-class AsyncRunner:
     def __init__(
         self,
         *,
         cache: Cache | None = None,
         callbacks: list[Callback] | None = None,
     ) -> None:
-        """Same as Runner, but for async execution."""
+        """Create an asynchronous runner."""
+        super().__init__(cache, callbacks)
 ```
 
 ### Key Methods
+
 ```python
 async def run(
     self,
@@ -265,10 +343,10 @@ async def run(
 ) -> dict[str, Any]:
     """
     Execute graph asynchronously.
-    
-    Additional args vs Runner:
+  
+    Additional args vs SyncRunner:
         checkpoint: Resume execution from saved state
-    
+  
     Returns:
         Dict of output name → value
         If interrupted, returns partial outputs + checkpoint
@@ -283,10 +361,10 @@ async def iter(
 ) -> AsyncIterator[Event]:
     """
     Execute graph and yield events as they occur.
-    
+  
     Yields:
         Event objects (see Events specification)
-    
+  
     Use for:
         - Token-by-token streaming
         - Real-time progress updates
@@ -294,14 +372,24 @@ async def iter(
     """
 ```
 
-## DaftRunner Class
+### DaftRunner
 
-### Purpose
-Distributed execution using Daft DataFrames. **DAG-only** - no cycles, gates, or interrupts.
+```python
+class DaftRunner(BaseRunner, SupportsBatch):
+    """Distributed execution runner (DAG-only)."""
+    
+    capabilities = RunnerCapabilities(
+        supports_cycles=False,
+        supports_gates=False,
+        supports_interrupts=False,
+        supports_async_nodes=True,
+        supports_distributed=True,
+    )
+```
 
 ### Constructor
+
 ```python
-class DaftRunner:
     def __init__(
         self,
         *,
@@ -311,9 +399,11 @@ class DaftRunner:
         Create distributed runner.
         Note: callbacks have limited support (no iteration events).
         """
+        super().__init__(cache, callbacks=[])
 ```
 
 ### Key Methods
+
 ```python
 def map(
     self,
@@ -324,21 +414,22 @@ def map(
 ) -> "daft.DataFrame":
     """
     Execute graph in distributed fashion using Daft.
-    
+  
     Args:
         graph: Must be a DAG (no cycles)
         inputs: Input values
         map_over: Parameter(s) to distribute over
-    
+  
     Returns:
         Daft DataFrame with results
-    
+  
     Raises:
         IncompatibleRunnerError: If graph has cycles, gates, or interrupts
     """
 ```
 
 ### Validation
+
 ```python
 # DaftRunner must validate at run time:
 if graph.has_cycles:
@@ -347,7 +438,7 @@ if graph.has_cycles:
         "The problem: DaftRunner uses Daft DataFrames for distributed execution, "
         "which requires a DAG structure.\n\n"
         "How to fix:\n"
-        "  Option A: Use Runner or AsyncRunner instead\n"
+        "  Option A: Use SyncRunner or AsyncRunner instead\n"
         "  Option B: Restructure as a DAG"
     )
 ```

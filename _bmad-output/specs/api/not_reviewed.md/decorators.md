@@ -10,7 +10,7 @@ Wraps a function as a graph node with named output(s).
 
 ```python
 def node(
-    output_name: str | tuple[str, ...],
+    outputs: str | tuple[str, ...],
     *,
     cache: bool = True,
 ) -> Callable[[F], HyperNode[F]]:
@@ -18,7 +18,7 @@ def node(
     Decorate a function as a graph node.
     
     Args:
-        output_name: Name(s) for the output value(s).
+        outputs: Name(s) for the output value(s).
                      Single string for one output.
                      Tuple of strings for multiple outputs (function must return tuple).
         cache: Whether to cache results (default True).
@@ -27,11 +27,11 @@ def node(
         HyperNode wrapping the function.
     
     Example:
-        @node(output_name="embedding")
+        @node(outputs="embedding")
         def embed(text: str) -> list[float]:
             return model.encode(text)
         
-        @node(output_name=("score", "explanation"))
+        @node(outputs=("score", "explanation"))
         def evaluate(text: str) -> tuple[float, str]:
             return (0.95, "Good quality")
     """
@@ -45,7 +45,7 @@ The decorated function becomes a `HyperNode` object:
 class HyperNode(Generic[F]):
     name: str              # Function name (used as node identifier)
     func: F                # Original function (still callable)
-    output_name: str | tuple[str, ...]
+    outputs: str | tuple[str, ...]
     parameters: list[str]  # Parameter names from signature
     cache: bool
     
@@ -58,23 +58,23 @@ class HyperNode(Generic[F]):
 
 - **Portability**: `node.func(x)` works without framework
 - **Testability**: `assert embed.func("hello") == expected`
-- **Introspection**: `node.parameters`, `node.output_name` available
+- **Introspection**: `node.parameters`, `node.outputs` available
 
 ### Async Support
 
 ```python
-@node(output_name="response")
+@node(outputs="response")
 async def generate(messages: list) -> str:
     return await llm.chat(messages)
 
 # Works with AsyncRunner
-# Raises IncompatibleRunnerError with sync Runner
+# Raises IncompatibleRunnerError with SyncRunner
 ```
 
 ### Generator Support
 
 ```python
-@node(output_name="response")
+@node(outputs="response")
 async def stream_generate(messages: list):
     async for chunk in llm.stream(messages):
         yield chunk
@@ -87,7 +87,7 @@ async def stream_generate(messages: list):
 ### Multiple Outputs
 
 ```python
-@node(output_name=("docs", "scores"))
+@node(outputs=("docs", "scores"))
 def retrieve(query: str) -> tuple[list[str], list[float]]:
     results = search(query)
     return [r.text for r in results], [r.score for r in results]
@@ -149,7 +149,7 @@ class RouteNode(Generic[F]):
     parameters: list[str]
     cache: bool
     
-    # Routes don't have output_name - they control flow, not data
+    # Routes produce a routing decision output (internal)
 ```
 
 ### Validation
@@ -246,11 +246,11 @@ class BranchNode(Generic[F]):
 Targets can be strings or node objects:
 
 ```python
-@node(output_name="result")
+@node(outputs="result")
 def path_a(x: int) -> int:
     return x + 1
 
-@node(output_name="result")
+@node(outputs="result")
 def path_b(x: int) -> int:
     return x - 1
 
@@ -271,11 +271,11 @@ Branch targets can produce the same output name:
 def check_sign(x: int) -> bool:
     return x > 0
 
-@node(output_name="label")  # Same output name
+@node(outputs="label")  # Same output name
 def positive(x: int) -> str:
     return "positive"
 
-@node(output_name="label")  # Same output name - OK!
+@node(outputs="label")  # Same output name - OK!
 def negative(x: int) -> str:
     return "negative"
 
@@ -288,7 +288,11 @@ def negative(x: int) -> str:
 
 ### Purpose
 
-Declarative pause point for human-in-the-loop workflows.
+**Declarative pause point for human-in-the-loop workflows.**
+
+An `InterruptNode` declares where the graph should pause, what value to surface to the user, and where to write the user's response.
+
+**Key principle:** The framework provides **plumbing**, the user provides **semantics**. The framework never dictates what prompts or responses look like - that's entirely up to your application.
 
 ### Constructor
 
@@ -306,9 +310,9 @@ class InterruptNode:
         Create an interrupt node.
         
         Args:
-            name: Unique identifier for this interrupt.
-            input_param: Parameter name containing value to show user.
-            response_param: Parameter name where user's response goes.
+            name: Unique identifier for this interrupt (stable across refactors).
+            input_param: Parameter name containing value to show user (the "prompt").
+            response_param: Parameter name where user's response will be written.
             response_type: Optional type for validating response.
         
         Example:
@@ -325,36 +329,174 @@ class InterruptNode:
         self.response_type = response_type
 ```
 
-### Usage in Graph
+### Why Separate name, input_param, and response_param?
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `name` | **Identifies the interrupt point** (for handlers, events) | `"approval"`, `"human_review"` |
+| `input_param` | **Which state value to show user** | `"approval_prompt"` (the prompt object) |
+| `response_param` | **Where to write user's response** | `"user_decision"` (feeds downstream nodes) |
+
+The interrupt `name` is stable across refactors - you can rename parameters without breaking handler registration or checkpoint compatibility.
 
 ```python
-# Create interrupt
-review = InterruptNode(
-    name="content_review",
-    input_param="generated_content",
-    response_param="user_feedback",
+# Handler registered by name, not parameter
+async def handle_approval(prompt: ApprovalPrompt) -> ApprovalResponse:
+    return await external_service.check(prompt)
+
+# Even if you rename input_param="approval_prompt" → "prompt_data"
+# The name="approval" stays the same, handlers still work
+```
+
+### Defining Prompt and Response Types
+
+**The framework doesn't care about the structure of prompts or responses.** You define them however makes sense for your application.
+
+```python
+from dataclasses import dataclass
+from pydantic import BaseModel
+
+# Option 1: Simple dataclasses
+@dataclass
+class ApprovalPrompt:
+    """Prompt for approve/edit/reject workflow"""
+    message: str
+    draft: str
+    options: list[str] = None
+    
+    def __post_init__(self):
+        if self.options is None:
+            self.options = ["approve", "edit", "reject"]
+
+@dataclass 
+class ApprovalResponse:
+    """User's response to an approval prompt"""
+    choice: str  # "approve", "edit", or "reject"
+    feedback: str | None = None
+    edited_content: str | None = None
+
+
+# Option 2: Pydantic models (for validation)
+class TopicPrompt(BaseModel):
+    """Prompt for selecting a topic"""
+    message: str
+    options: list[str]
+    allow_custom: bool = False
+
+class TopicResponse(BaseModel):
+    """User's topic selection"""
+    selected: str
+    is_custom: bool = False
+
+
+# Option 3: Simple strings (for basic cases)
+# prompt: str = "What would you like to do next?"
+# response: str = "Continue with option A"
+```
+
+### Complete Example
+
+```python
+from hypernodes import Graph, node, route, InterruptNode, END, AsyncRunner
+
+# Step 1: Create node that produces the prompt
+@node(outputs="approval_prompt")
+def create_approval_prompt(draft: str) -> ApprovalPrompt:
+    """Regular node that creates a prompt object."""
+    return ApprovalPrompt(
+        message="Please review this draft. How would you like to proceed?",
+        draft=draft,
+    )
+
+# Step 2: Declare the interrupt point
+approval_interrupt = InterruptNode(
+    name="approval",
+    input_param="approval_prompt",     # Read the prompt from this parameter
+    response_param="user_decision",    # Write response to this parameter
+    response_type=ApprovalResponse,    # Optional: validate response
 )
 
-# Use in graph
-graph = Graph(nodes=[
-    generate_content,
-    review,           # ← Pause here
-    route_feedback,
-    finalize,
-])
+# Step 3: Use a routing node to handle the response
+@route(targets=["finalize", "apply_edit", END])
+def route_decision(user_decision: ApprovalResponse) -> str:
+    """Route based on user's choice."""
+    if user_decision.choice == "approve":
+        return "finalize"
+    elif user_decision.choice == "edit":
+        return "apply_edit"
+    else:
+        return END
 
-# Execute with AsyncRunner
+@node(outputs="final_content")
+def finalize(draft: str) -> str:
+    """Finalize the approved draft."""
+    return f"✅ APPROVED\n\n{draft}"
+
+@node(outputs="final_content")
+def apply_edit(user_decision: ApprovalResponse) -> str:
+    """Apply user's edited content."""
+    return f"✏️ EDITED\n\n{user_decision.edited_content}"
+
+# Build the graph
+graph = Graph(
+    nodes=[
+        create_approval_prompt, 
+        approval_interrupt, 
+        route_decision,
+        finalize,
+        apply_edit,
+    ],
+)
+
+# Execute
 runner = AsyncRunner()
-result = await runner.run(graph, inputs={...})
+result = await runner.run(graph, inputs={"draft": "Initial content..."})
 
 # If interrupted, result contains checkpoint
 if result.interrupted:
-    # ... show generated_content to user, get feedback ...
+    # Show the prompt to user
+    prompt = result.interrupt_value  # The ApprovalPrompt object
+    print(prompt.message)
+    print(prompt.draft)
+    
+    # Get user's decision (via UI, CLI, etc.)
+    user_response = ApprovalResponse(
+        choice="approve",
+        feedback="Looks good!"
+    )
+    
+    # Resume execution
     result = await runner.run(
         graph,
-        inputs={"user_feedback": feedback},
+        inputs={"user_decision": user_response},
         checkpoint=result.checkpoint,
     )
+
+print(result.outputs["final_content"])
+```
+
+### Event Streaming with Interrupts
+
+```python
+async with runner.iter(graph, inputs={...}) as run:
+    async for event in run:
+        match event:
+            case NodeEndEvent(node_name=name, outputs=outputs):
+                print(f"{name} → {outputs}")
+            
+            case StreamingChunkEvent(chunk=chunk):
+                print(chunk, end="")
+            
+            case InterruptEvent(interrupt_name=name, value=prompt):
+                print(f"Paused at: {name}")
+                # Show prompt to user, get response
+                response = await get_user_input(prompt)
+                # Resume by providing response
+                # (implementation depends on your application architecture)
+                break
+
+# Access final result
+print(run.result.outputs)
 ```
 
 ### Requirements
@@ -362,6 +504,7 @@ if result.interrupted:
 - **AsyncRunner only** - InterruptNode requires async execution
 - **Checkpoint persistence** - State must be serializable
 - **Clear prompt/response contract** - Framework provides plumbing, user defines types
+- **RunResult vs dict** - AsyncRunner returns `RunResult` object (with `interrupted`, `checkpoint` fields)
 
 ---
 
@@ -370,7 +513,7 @@ if result.interrupted:
 ### Accumulator
 
 ```python
-@node(output_name="messages")
+@node(outputs="messages")
 def add_message(messages: list, new_message: dict) -> list:
     return messages + [new_message]
 
@@ -389,13 +532,13 @@ def should_use_expensive(data: dict) -> bool:
 ### Multi-Step Pipeline
 
 ```python
-@node(output_name="cleaned")
+@node(outputs="cleaned")
 def clean(raw: str) -> str: ...
 
-@node(output_name="embedded")
+@node(outputs="embedded")
 def embed(cleaned: str) -> list[float]: ...
 
-@node(output_name="result")
+@node(outputs="result")
 def classify(embedded: list[float]) -> str: ...
 
 # Edges inferred: raw → clean → embed → classify
@@ -404,10 +547,10 @@ def classify(embedded: list[float]) -> str: ...
 ### Cycle with Termination
 
 ```python
-@node(output_name="draft")
+@node(outputs="draft")
 def generate(prompt: str, feedback: str | None = None) -> str: ...
 
-@node(output_name=("score", "feedback"))
+@node(outputs=("score", "feedback"))
 def evaluate(draft: str) -> tuple[float, str]: ...
 
 @route(targets=["generate", END])

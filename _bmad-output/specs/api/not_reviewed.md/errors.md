@@ -120,7 +120,7 @@ How to fix:
 
   Option A: Rename one output
             
-            @node(output_name="result_a")  # Different name
+            @node(outputs="result_a")  # Different name
             def process_a(x: int) -> int: ...
 
   Option B: Make them mutually exclusive with @branch
@@ -134,7 +134,7 @@ How to fix:
 ```python
 GraphConfigError: Node references itself without a gate
 
-  → accumulate() has parameter 'messages' AND output_name='messages'
+  → accumulate() has parameter 'messages' AND outputs='messages'
   → This creates a self-loop
 
 The problem: Without a gate to break the loop, this would run forever.
@@ -299,7 +299,7 @@ IncompatibleRunnerError: This graph has cycles, but DaftRunner doesn't support c
 
 How to fix:
 
-  Option A: Use Runner or AsyncRunner instead
+  Option A: Use SyncRunner or AsyncRunner instead
             
             runner = AsyncRunner(cache=DiskCache("./cache"))
             result = await runner.run(graph, inputs={...})
@@ -310,10 +310,10 @@ How to fix:
 ### Async Nodes with Sync Runner
 
 ```python
-IncompatibleRunnerError: Graph has async nodes but Runner is synchronous.
+IncompatibleRunnerError: Graph has async nodes but SyncRunner is synchronous.
 
   → Async nodes found: ['generate', 'stream_response']
-  → Runner can only execute sync functions
+  → SyncRunner can only execute sync functions
 
 How to fix:
 
@@ -326,10 +326,10 @@ How to fix:
 ### InterruptNode with Sync Runner
 
 ```python
-IncompatibleRunnerError: Graph has InterruptNode but Runner doesn't support interrupts.
+IncompatibleRunnerError: Graph has InterruptNode but SyncRunner doesn't support interrupts.
 
   → InterruptNode 'human_review' requires async execution
-  → Runner is synchronous
+  → SyncRunner is synchronous
 
 How to fix:
 

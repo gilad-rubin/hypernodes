@@ -21,14 +21,14 @@ Refine draft → Evaluate quality (0.92) → Above threshold → END
 ```python
 from hypernodes import Graph, node, route, END
 
-@node(output_name="draft")
+@node(outputs="draft")
 def generate(prompt: str, feedback: str | None = None) -> str:
     """Generate or refine draft based on feedback."""
     if feedback:
         return f"Refined draft incorporating: {feedback}"
     return f"Initial draft for: {prompt}"
 
-@node(output_name=("score", "feedback"))
+@node(outputs=("score", "feedback"))
 def evaluate(draft: str) -> tuple[float, str]:
     """Evaluate draft quality, return score and feedback."""
     # Mock: score increases with each refinement
@@ -58,7 +58,7 @@ refinement_graph = Graph(nodes=[generate, evaluate, quality_gate])
 ```python
 def test_reaches_quality_threshold():
     """Refinement continues until threshold met."""
-    runner = Runner()
+    runner = SyncRunner()
     
     result = runner.run(
         refinement_graph,
@@ -85,7 +85,7 @@ def test_iteration_count_varies():
                 if name == "generate":
                     count += 1
         
-        runner = Runner(callbacks=[CountCallback()])
+        runner = SyncRunner(callbacks=[CountCallback()])
         runner.run(
             refinement_graph,
             inputs={"prompt": "test", "threshold": threshold},
@@ -103,7 +103,7 @@ def test_feedback_passed_to_generator():
     """Feedback from evaluator reaches generator on refinement."""
     received_feedback = []
     
-    @node(output_name="draft")
+    @node(outputs="draft")
     def tracked_generate(prompt: str, feedback: str | None = None) -> str:
         received_feedback.append(feedback)
         if feedback:
@@ -111,7 +111,7 @@ def test_feedback_passed_to_generator():
         return "Initial"
     
     test_graph = Graph(nodes=[tracked_generate, evaluate, quality_gate])
-    runner = Runner()
+    runner = SyncRunner()
     
     runner.run(test_graph, inputs={"prompt": "test"})
     
@@ -127,7 +127,7 @@ def test_draft_improves_each_iteration():
     """Each refinement should build on previous."""
     drafts = []
     
-    @node(output_name="draft")
+    @node(outputs="draft")
     def tracked_generate(prompt: str, feedback: str | None = None) -> str:
         if feedback:
             draft = f"[Refined] Previous + {feedback}"
@@ -137,7 +137,7 @@ def test_draft_improves_each_iteration():
         return draft
     
     test_graph = Graph(nodes=[tracked_generate, evaluate, quality_gate])
-    runner = Runner()
+    runner = SyncRunner()
     
     runner.run(test_graph, inputs={"prompt": "test"})
     
@@ -152,7 +152,7 @@ def test_draft_improves_each_iteration():
 ```python
 def test_configurable_threshold():
     """Threshold can be provided as input."""
-    runner = Runner()
+    runner = SyncRunner()
     
     # Low threshold - should finish quickly
     result_low = runner.run(
@@ -176,7 +176,7 @@ def test_configurable_threshold():
 ```python
 def test_initial_feedback_none():
     """First generation has no feedback (uses default)."""
-    runner = Runner()
+    runner = SyncRunner()
     
     # Should work without providing feedback
     result = runner.run(
@@ -207,16 +207,16 @@ def test_initial_feedback_none():
 ```python
 def test_already_good_enough():
     """If first draft meets threshold, no refinement needed."""
-    @node(output_name="draft")
+    @node(outputs="draft")
     def perfect_generate(prompt: str, feedback: str | None = None) -> str:
         return "Perfect draft"
     
-    @node(output_name=("score", "feedback"))
+    @node(outputs=("score", "feedback"))
     def generous_evaluate(draft: str) -> tuple[float, str]:
         return (0.99, "Perfect!")
     
     test_graph = Graph(nodes=[perfect_generate, generous_evaluate, quality_gate])
-    runner = Runner()
+    runner = SyncRunner()
     
     iterations = 0
     class CountCallback:
@@ -225,7 +225,7 @@ def test_already_good_enough():
             if name == "perfect_generate":
                 iterations += 1
     
-    runner = Runner(callbacks=[CountCallback()])
+    runner = SyncRunner(callbacks=[CountCallback()])
     result = runner.run(test_graph, inputs={"prompt": "test"})
     
     assert iterations == 1  # Only one generation
@@ -237,12 +237,12 @@ def test_already_good_enough():
 ```python
 def test_never_good_enough():
     """If quality never meets threshold, hits max_iterations."""
-    @node(output_name=("score", "feedback"))
+    @node(outputs=("score", "feedback"))
     def harsh_evaluate(draft: str) -> tuple[float, str]:
         return (0.1, "Terrible!")  # Always fails
     
     test_graph = Graph(nodes=[generate, harsh_evaluate, quality_gate])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InfiniteLoopError):
         runner.run(

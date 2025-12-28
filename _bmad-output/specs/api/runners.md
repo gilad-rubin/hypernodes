@@ -1,181 +1,572 @@
-# Runners API Specification
+# Runners
 
-## Runner Compatibility Matrix
+**Graphs define structure. Runners execute them.**
 
-| Feature | `Runner` | `AsyncRunner` | `DaftRunner` |
-|---------|----------|---------------|--------------|
+A `Graph` is a pure data structure describing computation flow. A `Runner` takes that structure and actually executes it—handling scheduling, concurrency, caching, and error propagation.
+
+---
+
+## The Three Runners
+
+Hypernodes provides three runners, each optimized for different execution contexts:
+
+| Runner | Description | Primary Use Case |
+|--------|-------------|------------------|
+| **SyncRunner** | Synchronous, blocking execution | Scripts, CLI tools, simple pipelines |
+| **AsyncRunner** | Async execution with full feature support | Web APIs, streaming, human-in-the-loop |
+| **DaftRunner** | Distributed execution via Daft DataFrames | Large-scale batch processing |
+
+---
+
+## Basic Usage
+
+### SyncRunner
+
+```python
+from hypernodes import Graph, SyncRunner, DiskCache
+
+graph = Graph(nodes=[fetch, process, save])
+
+runner = SyncRunner(cache=DiskCache("./cache"))
+result = runner.run(graph, inputs={"query": "hello"})
+
+print(result["response"])  # dict[str, Any]
+```
+
+### AsyncRunner
+
+```python
+from hypernodes import Graph, AsyncRunner
+
+graph = Graph(nodes=[fetch, process, save])
+
+runner = AsyncRunner(cache=DiskCache("./cache"))
+result = await runner.run(graph, inputs={"query": "hello"})
+
+print(result.outputs["response"])  # RunResult object
+```
+
+### DaftRunner
+
+```python
+from hypernodes import Graph, DaftRunner
+
+graph = Graph(nodes=[embed, process])  # Must be a DAG
+
+runner = DaftRunner()
+df = runner.map(
+    graph,
+    inputs={"texts": large_text_list},
+    map_over="texts",
+)
+results = df.collect()  # Execution happens here
+```
+
+---
+
+## Choosing the Right Runner
+
+```
+                    ┌─────────────────────────┐
+                    │  What do you need?      │
+                    └───────────┬─────────────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              │                 │                 │
+              ▼                 ▼                 ▼
+        ┌───────────┐    ┌─────────────┐   ┌─────────────┐
+        │ Blocking  │    │ Streaming,  │   │ Distributed │
+        │ execution │    │ interrupts, │   │ batch       │
+        │ sync nodes│    │ async nodes │   │ processing  │
+        └─────┬─────┘    └──────┬──────┘   └──────┬──────┘
+              │                 │                 │
+              ▼                 ▼                 ▼
+        ┌───────────┐    ┌─────────────┐   ┌─────────────┐
+        │SyncRunner │    │ AsyncRunner │   │ DaftRunner  │
+        └───────────┘    └─────────────┘   └─────────────┘
+```
+
+### Decision Guide
+
+**SyncRunner** when:
+- Building scripts or CLI tools
+- All nodes are synchronous (`def`, not `async def`)
+- No need for streaming output or interrupts
+- Simplest mental model is preferred
+
+**AsyncRunner** when:
+- Nodes use `async def` (API calls, database queries)
+- Streaming LLM responses token-by-token
+- Human-in-the-loop workflows with `InterruptNode`
+- Building web APIs or interactive applications
+
+**DaftRunner** when:
+- Processing large batches (thousands+ items)
+- Graph is a pure DAG (no cycles, no conditional routing)
+- Want distributed execution across workers
+- Willing to trade flexibility for scale
+
+### Feature Compatibility Matrix
+
+| Feature | SyncRunner | AsyncRunner | DaftRunner |
+|---------|:----------:|:-----------:|:----------:|
 | DAG execution | ✅ | ✅ | ✅ |
-| Cycles | ✅ | ✅ | ❌ |
-| `@branch` gates | ✅ | ✅ | ❌ |
-| `@route` gates | ✅ | ✅ | ❌ |
+| Cycles (loops) | ✅ | ✅ | ❌ |
+| `@branch` / `@route` gates | ✅ | ✅ | ❌ |
 | `InterruptNode` | ❌ | ✅ | ❌ |
 | `.iter()` streaming | ❌ | ✅ | ❌ |
 | `.map()` batch | ✅ | ✅ | ✅ |
-| Async nodes | ❌ | ✅ | ✅ |
+| Async nodes (`async def`) | ❌ | ✅ | ✅ |
 | Distributed execution | ❌ | ❌ | ✅ |
 
 ---
 
-## Runner (Synchronous)
+## Batch Processing with `.map()`
 
-### Constructor
+All runners support `.map()` for processing multiple inputs:
 
 ```python
-class Runner:
-    def __init__(
-        self,
-        *,
-        cache: Cache | None = None,
-        callbacks: list[Callback] | None = None,
-    ) -> None:
-        """
-        Create synchronous runner.
-        
-        Args:
-            cache: Cache backend (e.g., DiskCache, MemoryCache).
-            callbacks: Observability callbacks.
-        """
+# Process a list of queries
+results = runner.map(
+    graph,
+    inputs={"queries": ["q1", "q2", "q3"], "config": shared_config},
+    map_over="queries",  # This parameter gets iterated
+)
+# Returns: [{"response": "r1"}, {"response": "r2"}, {"response": "r3"}]
 ```
 
-### run()
+The `map_over` parameter specifies which input(s) to iterate. Other inputs are broadcast to all executions.
+
+### Multiple Parameters
+
+**zip mode** (default): Iterate parameters in parallel (must have equal lengths)
 
 ```python
-def run(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    select: list[str] | None = None,
-    session_id: str | None = None,
-    max_iterations: int = 1000,
-) -> dict[str, Any]:
-    """
-    Execute graph synchronously.
-    
-    Args:
-        graph: Graph to execute.
-        inputs: Input values. For cycles, determines starting point.
-        select: Output names to return. Default: all leaf outputs.
-        session_id: Group related runs (for logging/tracing).
-        max_iterations: Maximum iterations before InfiniteLoopError.
-    
-    Returns:
-        Dict mapping output names to values.
-    
-    Raises:
-        GraphConfigError: Graph structure invalid.
-        ConflictError: Parallel producers conflict.
-        MissingInputError: Required input not provided.
-        InfiniteLoopError: Exceeded max_iterations.
-        IncompatibleRunnerError: Graph has async nodes.
-    
-    Example:
-        runner = Runner(cache=DiskCache("./cache"))
-        result = runner.run(graph, inputs={"query": "hello"})
-        print(result["response"])
-    """
+results = runner.map(
+    graph,
+    inputs={"x": [1, 2], "y": [3, 4]},
+    map_over=["x", "y"],
+    map_mode="zip",
+)
+# Executes: (x=1, y=3), (x=2, y=4)
 ```
 
-### map()
+**product mode**: Cartesian product of all combinations
 
 ```python
-def map(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    map_over: str | list[str],
-    select: list[str] | None = None,
-    session_id: str | None = None,
-) -> list[dict[str, Any]]:
-    """
-    Execute graph for each item in mapped parameter(s).
-    
-    Args:
-        graph: Graph to execute.
-        inputs: Input values. map_over params should be lists.
-        map_over: Parameter name(s) to iterate over.
-        select: Outputs to return per item.
-        session_id: Group all runs under one session.
-    
-    Returns:
-        List of output dicts, one per input item.
-    
-    Example:
-        results = runner.map(
-            graph,
-            inputs={"queries": ["q1", "q2", "q3"], "config": shared_config},
-            map_over="queries",
-        )
-        # results = [{"response": "r1"}, {"response": "r2"}, {"response": "r3"}]
-    """
+results = runner.map(
+    graph,
+    inputs={"x": [1, 2], "y": [3, 4]},
+    map_over=["x", "y"],
+    map_mode="product",
+)
+# Executes: (x=1, y=3), (x=1, y=4), (x=2, y=3), (x=2, y=4)
+```
+
+### Map and Interrupts Are Incompatible
+
+Map operations batch multiple executions, but interrupts pause for human input—these don't mix. Attempting to `.map()` a graph containing `InterruptNode` raises `GraphConfigError`:
+
+```python
+# This will raise GraphConfigError
+runner.map(graph_with_interrupts, inputs={...}, map_over="x")
+
+# Instead, use run() in a loop:
+for item in items:
+    result = await runner.run(graph, inputs={...})
+    if result.interrupted:
+        # Handle interrupt individually
 ```
 
 ---
 
-## AsyncRunner (Asynchronous)
+## Streaming with `.iter()` (AsyncRunner Only)
 
-### Constructor
-
-```python
-class AsyncRunner:
-    def __init__(
-        self,
-        *,
-        cache: Cache | None = None,
-        callbacks: list[Callback] | None = None,
-    ) -> None:
-        """
-        Create asynchronous runner.
-        
-        Args:
-            cache: Cache backend.
-            callbacks: Observability callbacks.
-        """
-```
-
-### run()
+Watch execution unfold in real-time:
 
 ```python
-async def run(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    select: list[str] | None = None,
-    session_id: str | None = None,
-    max_iterations: int = 1000,
-    checkpoint: bytes | None = None,
-) -> RunResult:
-    """
-    Execute graph asynchronously.
-    
-    Args:
-        graph: Graph to execute.
-        inputs: Input values.
-        select: Outputs to return.
-        session_id: Session identifier.
-        max_iterations: Max iterations.
-        checkpoint: Resume from saved state (for InterruptNode).
-    
-    Returns:
-        RunResult with outputs and optional checkpoint.
-    
-    Example:
-        runner = AsyncRunner()
-        result = await runner.run(graph, inputs={"query": "hello"})
-        
-        if result.interrupted:
-            # Handle interrupt, get user input
-            result = await runner.run(
-                graph,
-                inputs={"user_decision": decision},
-                checkpoint=result.checkpoint,
-            )
-    """
+async for event in runner.iter(graph, inputs={"prompt": "Tell me a story"}):
+    match event:
+        case StreamingChunkEvent(chunk=chunk):
+            print(chunk, end="", flush=True)
+        case NodeEndEvent(node_name=name, duration_ms=ms):
+            print(f"\n[{name} completed in {ms:.1f}ms]")
+        case InterruptEvent():
+            # Handle human-in-the-loop
+            break
 ```
 
-### RunResult
+### Event Types
+
+| Event | When Emitted |
+|-------|--------------|
+| `RunStartEvent` | Execution begins |
+| `NodeStartEvent` | Node begins execution |
+| `NodeEndEvent` | Node completes (includes duration, cache status) |
+| `StreamingChunkEvent` | Generator yields a chunk |
+| `CacheHitEvent` | Node result retrieved from cache |
+| `RouteDecisionEvent` | Gate makes routing decision |
+| `InterruptEvent` | Execution paused for human input |
+| `RunEndEvent` | Execution completes |
+
+---
+
+## Human-in-the-Loop with Interrupts (AsyncRunner Only)
+
+Pause execution for human input and resume:
+
+```python
+result = await runner.run(graph, inputs={"draft": content})
+
+if result.interrupted:
+    # Show the value to the user
+    print(f"Review needed: {result.interrupt_value}")
+    user_decision = await get_user_approval()
+
+    # Resume execution with their input
+    result = await runner.run(
+        graph,
+        inputs={"approved": user_decision},
+        checkpoint=result.checkpoint,
+    )
+
+print(result.outputs["final_result"])
+```
+
+The `checkpoint` parameter contains serialized execution state, allowing seamless resume.
+
+---
+
+## Async Execution Model
+
+### Node Type Handling
+
+AsyncRunner handles both `def` and `async def` nodes in the same graph:
+
+```python
+@node(outputs="data")
+def fetch_local(path: str) -> str:
+    return open(path).read()  # Sync node
+
+@node(outputs="data")
+async def fetch_api(url: str) -> str:
+    return await httpx.get(url).text()  # Async node
+
+# Both work together
+graph = Graph(nodes=[fetch_local, fetch_api, process])
+result = await AsyncRunner().run(graph, inputs={...})
+```
+
+### Concurrency Rules
+
+**Independent async nodes run concurrently:**
+
+```python
+@node(outputs="a")
+async def fetch_a(x: int) -> int:
+    return await api_a.call(x)
+
+@node(outputs="b")
+async def fetch_b(x: int) -> int:
+    return await api_b.call(x)
+
+@node(outputs="c")
+def combine(a: int, b: int) -> int:
+    return a + b
+```
+
+Execution order:
+```
+Step 1: asyncio.gather(fetch_a(), fetch_b())  # Concurrent
+Step 2: combine()                              # After both complete
+```
+
+**Sync nodes run sequentially.** No thread pool by default—the GIL makes threading pointless for CPU-bound work.
+
+**Mixed async + sync in same generation:**
+1. Async nodes gathered first (concurrent)
+2. Then sync nodes execute (sequential)
+
+### Generator Handling
+
+Generators are automatically accumulated by the framework:
+
+```python
+@node(outputs="response")
+async def stream_llm(prompt: str) -> str:
+    async for chunk in llm.stream(prompt):
+        yield chunk
+    # Framework collects all chunks into final value
+```
+
+**In `.run()` mode:** Final accumulated value is stored
+
+```python
+result = await runner.run(graph, inputs={...})
+result.outputs["response"]  # Complete text
+```
+
+**In `.iter()` mode:** Each chunk is emitted as an event
+
+```python
+async for event in runner.iter(graph, inputs={...}):
+    if isinstance(event, StreamingChunkEvent):
+        print(event.chunk, end="")  # Real-time streaming
+```
+
+### Concurrency Control
+
+#### `max_concurrency` Parameter
+
+Limit the total number of concurrent async operations across the entire execution:
+
+```python
+# Limit total concurrent operations (across all nodes, all levels)
+result = await runner.run(graph, inputs={...}, max_concurrency=10)
+
+# Also works with map
+results = await runner.map(graph, inputs={...}, map_over="x", max_concurrency=20)
+```
+
+This limit is **shared across all levels** of execution:
+- All items in a `.map()` call
+- All independent async nodes within each execution
+- All nested graphs
+
+```
+runner.run(graph, max_concurrency=10)
+│
+├── Node A (async) ───── acquires slot ────┐
+├── Node B (async) ───── acquires slot ────┤  All share
+├── Nested graph:                          │  the same
+│   ├── Node C (async) ── acquires slot ───┤  10 slots
+│   └── Node D (async) ── acquires slot ───┘
+```
+
+The limiter is propagated via `contextvars`, so nested graphs automatically respect the parent's limit.
+
+#### Why One Parameter?
+
+Previous designs had separate `concurrency` (map-level) and node-level limits. This led to surprising multiplication effects. A single `max_concurrency` is easier to reason about: "at most N operations in flight at once."
+
+---
+
+## Nested Graphs and Runner Inheritance
+
+### Default: Inherit Parent Runner
+
+Nested graphs inherit their parent's runner by default:
+
+```python
+inner = Graph(nodes=[node_a, node_b])
+outer = Graph(nodes=[inner.as_node(name="inner"), other_node])
+
+await AsyncRunner().run(outer, inputs={...})
+# inner executes with AsyncRunner (inherited)
+```
+
+### Override with Explicit Runner
+
+Use `runner=` on `.as_node()` to override:
+
+```python
+inner = Graph(nodes=[batch_nodes])
+
+outer = Graph(nodes=[
+    preprocess,
+    inner.as_node(name="batch", runner=DaftRunner()),  # Override
+    postprocess,
+])
+
+await AsyncRunner().run(outer, inputs={...})
+# outer: AsyncRunner
+# inner: DaftRunner (explicit override)
+```
+
+### Resolution Order
+
+1. Explicit `runner=` on `.as_node()` (highest priority)
+2. Parent runner (inheritance)
+3. `SyncRunner` (default fallback)
+
+### Cross-Runner Execution
+
+When nested graphs use different runners, two things happen:
+
+#### 1. Compatibility Validation
+
+The runner's capabilities are checked against the graph's features:
+
+```python
+# This will fail at .as_node() time
+inner = Graph(nodes=[node_with_interrupt])
+outer = Graph(nodes=[
+    inner.as_node(name="inner", runner=DaftRunner()),  # Error!
+])
+# IncompatibleRunnerError: DaftRunner doesn't support interrupts
+```
+
+Validation checks:
+- `supports_async_nodes` vs graph's async nodes
+- `supports_cycles` vs graph's cycles
+- `supports_gates` vs graph's gates
+- `supports_interrupts` vs graph's interrupt nodes
+
+This validation happens recursively for all nested graphs.
+
+#### 2. Execution Strategy
+
+Then, *how* to call the nested runner is derived from `returns_coroutine`:
+
+| Parent `returns_coroutine` | Nested `returns_coroutine` | Strategy |
+|:--------------------------:|:--------------------------:|----------|
+| ✅ | ✅ | Direct `await` |
+| ✅ | ❌ | `asyncio.to_thread()` |
+| ❌ | ✅ | `asyncio.run()` |
+| ❌ | ❌ | Direct call |
+
+Adding a new runner only requires declaring its capabilities—no need to update a matrix of combinations.
+
+**Key rules:**
+- Sync runners in async context run via thread pool (avoids blocking event loop)
+- Inherited runner must be compatible with graph features
+- Incompatible combinations fail with clear `IncompatibleRunnerError`
+
+---
+
+## DaftRunner: Distributed Execution
+
+DaftRunner uses [Daft](https://www.getdaft.io/) DataFrames for distributed batch processing.
+
+### Constraints
+
+DaftRunner only supports **DAG graphs**:
+
+| Feature | Supported |
+|---------|:---------:|
+| Linear pipelines | ✅ |
+| Parallel branches | ✅ |
+| Async nodes | ✅ |
+| Cycles | ❌ |
+| `@branch` / `@route` gates | ❌ |
+| `InterruptNode` | ❌ |
+| `.iter()` streaming | ❌ |
+
+### Usage
+
+```python
+runner = DaftRunner(cache=DiskCache("./cache"))
+
+# Returns a Daft DataFrame (lazy)
+df = runner.map(
+    graph,
+    inputs={"texts": large_text_list},
+    map_over="texts",
+)
+
+# Trigger distributed execution
+results = df.collect()
+```
+
+### Validation
+
+DaftRunner validates graph compatibility at execution time:
+
+```python
+# Graph with cycles → IncompatibleRunnerError
+DaftRunner().map(cyclic_graph, inputs={...}, map_over="x")
+# Error: "This graph has cycles, but DaftRunner doesn't support cycles."
+
+# Graph with gates → IncompatibleRunnerError
+DaftRunner().map(graph_with_routes, inputs={...}, map_over="x")
+# Error: "This graph has gates (@route/@branch), but DaftRunner doesn't support gates."
+```
+
+**Note:** `MemoryCache` with DaftRunner is per-worker (not shared across distributed workers).
+
+---
+
+## Runner Architecture
+
+### Class Hierarchy
+
+All runners inherit from `BaseRunner`:
+
+```python
+class BaseRunner(ABC):
+    @property
+    @abstractmethod
+    def capabilities(self) -> RunnerCapabilities:
+        """Declare what this runner supports."""
+        ...
+
+    @abstractmethod
+    def run(self, graph: Graph, inputs: dict[str, Any], **kwargs):
+        """Execute graph. Return type varies by runner."""
+        ...
+
+    @abstractmethod
+    def map(self, graph: Graph, inputs: dict[str, Any], *, map_over: str | list[str], **kwargs):
+        """Batch execution. Return type varies by runner."""
+        ...
+```
+
+**Runner-specific methods** (not in base class):
+- `AsyncRunner.iter()` — streaming events
+
+### RunnerCapabilities
+
+Each runner declares its capabilities via a dataclass:
+
+```python
+@dataclass
+class RunnerCapabilities:
+    # Graph feature support
+    supports_cycles: bool = True
+    supports_gates: bool = True
+    supports_interrupts: bool = False
+    supports_async_nodes: bool = False
+    supports_streaming: bool = False
+    supports_distributed: bool = False
+
+    # Execution interface
+    returns_coroutine: bool = False  # Does .run() return a coroutine?
+
+    def validate_graph(self, graph: Graph) -> None:
+        """Raise IncompatibleRunnerError if graph uses unsupported features."""
+```
+
+Capability values per runner:
+
+| Capability | SyncRunner | AsyncRunner | DaftRunner |
+|------------|:----------:|:-----------:|:----------:|
+| `supports_cycles` | ✅ | ✅ | ❌ |
+| `supports_gates` | ✅ | ✅ | ❌ |
+| `supports_interrupts` | ❌ | ✅ | ❌ |
+| `supports_async_nodes` | ❌ | ✅ | ✅ |
+| `supports_streaming` | ❌ | ✅ | ❌ |
+| `supports_distributed` | ❌ | ❌ | ✅ |
+| `returns_coroutine` | ❌ | ✅ | ❌ |
+
+Note: `returns_coroutine` indicates whether `.run()` must be awaited. DaftRunner handles async nodes internally but returns a DataFrame synchronously.
+
+### Design Rationale
+
+**Why separate runner classes (not dual methods)?**
+1. **Clear intent** — Construction determines sync vs async mode
+2. **Type safety** — `SyncRunner.run()` returns `dict`, `AsyncRunner.run()` returns `Awaitable[RunResult]`
+3. **No ambiguity** — No "which method do I call?" question
+
+**Why a capabilities dataclass (not scattered flags)?**
+1. **Discoverable** — `runner.capabilities.supports_cycles` is self-documenting
+2. **Validated** — Automatic graph compatibility checking
+3. **Single source of truth** — One location declares all runner constraints
+
+---
+
+## RunResult
+
+`AsyncRunner.run()` returns a `RunResult` object:
 
 ```python
 @dataclass
@@ -183,290 +574,62 @@ class RunResult:
     outputs: dict[str, Any]      # Output values
     interrupted: bool            # True if stopped at InterruptNode
     checkpoint: bytes | None     # State for resume (if interrupted)
-    run_id: str                  # Unique run identifier
-    interrupt_name: str | None   # Name of interrupt (if interrupted)
+    run_id: str                  # Unique execution identifier
+    interrupt_name: str | None   # Name of interrupt node (if interrupted)
     interrupt_value: Any | None  # Value to show user (if interrupted)
 ```
 
-### iter()
-
-```python
-async def iter(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    session_id: str | None = None,
-    checkpoint: bytes | None = None,
-) -> AsyncIterator[Event]:
-    """
-    Execute graph and yield events.
-    
-    Args:
-        graph: Graph to execute.
-        inputs: Input values.
-        session_id: Session identifier.
-        checkpoint: Resume from saved state.
-    
-    Yields:
-        Event objects as they occur.
-    
-    Event types:
-        - RunStartEvent: Execution beginning
-        - NodeStartEvent: Node starting
-        - NodeEndEvent: Node completed
-        - StreamingChunkEvent: Token from generator
-        - CacheHitEvent: Cache hit occurred
-        - RouteDecisionEvent: Gate made decision
-        - InterruptEvent: Paused for human input
-        - RunEndEvent: Execution complete
-    
-    Example:
-        async for event in runner.iter(graph, inputs=inputs):
-            if isinstance(event, StreamingChunkEvent):
-                print(event.chunk, end="", flush=True)
-            elif isinstance(event, InterruptEvent):
-                # Handle human-in-the-loop
-                break
-    """
-```
-
-### map()
-
-```python
-async def map(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    map_over: str | list[str],
-    select: list[str] | None = None,
-    concurrency: int = 10,
-) -> list[dict[str, Any]]:
-    """
-    Execute graph for each item with controlled concurrency.
-    
-    Args:
-        graph: Graph to execute.
-        inputs: Input values.
-        map_over: Parameter(s) to iterate.
-        select: Outputs to return.
-        concurrency: Max concurrent executions.
-    
-    Returns:
-        List of output dicts.
-    """
-```
+`SyncRunner.run()` returns a plain `dict[str, Any]` (no interrupt support).
 
 ---
 
-## DaftRunner (Distributed)
-
-### Constructor
+## Session and Run IDs
 
 ```python
-class DaftRunner:
-    def __init__(
-        self,
-        *,
-        cache: Cache | None = None,
-    ) -> None:
-        """
-        Create distributed runner using Daft.
-        
-        Args:
-            cache: Cache backend. Note: MemoryCache is per-worker.
-        
-        Note:
-            DaftRunner only supports DAG graphs.
-            Cycles, gates, and interrupts are not supported.
-        """
-```
-
-### map()
-
-```python
-def map(
-    self,
-    graph: Graph,
-    inputs: dict[str, Any],
-    *,
-    map_over: str | list[str],
-    select: list[str] | None = None,
-) -> "daft.DataFrame":
-    """
-    Execute graph distributed using Daft DataFrames.
-    
-    Args:
-        graph: Must be DAG (no cycles).
-        inputs: Input values.
-        map_over: Parameter(s) to distribute.
-        select: Outputs to return.
-    
-    Returns:
-        Daft DataFrame with results.
-    
-    Raises:
-        IncompatibleRunnerError: If graph has cycles/gates/interrupts.
-    
-    Example:
-        runner = DaftRunner()
-        df = runner.map(
-            graph,
-            inputs={"texts": large_text_list},
-            map_over="texts",
-        )
-        results = df.collect()  # Trigger execution
-    """
-```
-
-### Compatibility Validation
-
-```python
-def _validate_graph(self, graph: Graph) -> None:
-    """Ensure graph is compatible with distributed execution."""
-    
-    if graph.has_cycles:
-        raise IncompatibleRunnerError(
-            "This graph has cycles, but DaftRunner doesn't support cycles.\n\n"
-            f"The problem: DaftRunner uses Daft DataFrames for distributed\n"
-            f"execution, which requires a DAG structure.\n\n"
-            f"Cycles found: {graph.cycles}\n\n"
-            f"How to fix:\n"
-            f"  Option A: Use Runner or AsyncRunner instead\n"
-            f"            → runner = AsyncRunner(cache=...)\n"
-            f"  Option B: Restructure as a DAG"
-        )
-    
-    if graph.gates:
-        raise IncompatibleRunnerError(
-            "This graph has gates (@route/@branch), but DaftRunner doesn't support gates.\n\n"
-            f"Gates found: {[g.name for g in graph.gates]}\n\n"
-            f"How to fix:\n"
-            f"  Use Runner or AsyncRunner instead"
-        )
-    
-    if graph.interrupt_nodes:
-        raise IncompatibleRunnerError(
-            "This graph has InterruptNodes, but DaftRunner doesn't support interrupts.\n\n"
-            f"How to fix:\n"
-            f"  Use AsyncRunner for human-in-the-loop workflows"
-        )
-```
-
----
-
-## Event Types
-
-### RunStartEvent
-
-```python
-@dataclass
-class RunStartEvent:
-    run_id: str
-    session_id: str | None
-    inputs: dict[str, Any]
-    timestamp: float
-```
-
-### NodeStartEvent
-
-```python
-@dataclass
-class NodeStartEvent:
-    run_id: str
-    node_name: str
-    inputs: dict[str, Any]
-    timestamp: float
-```
-
-### NodeEndEvent
-
-```python
-@dataclass
-class NodeEndEvent:
-    run_id: str
-    node_name: str
-    outputs: Any
-    duration_ms: float
-    cached: bool
-    timestamp: float
-```
-
-### StreamingChunkEvent
-
-```python
-@dataclass
-class StreamingChunkEvent:
-    run_id: str
-    node_name: str
-    chunk: str | Any
-    chunk_index: int
-    timestamp: float
-```
-
-### CacheHitEvent
-
-```python
-@dataclass
-class CacheHitEvent:
-    run_id: str
-    node_name: str
-    timestamp: float
-```
-
-### RouteDecisionEvent
-
-```python
-@dataclass
-class RouteDecisionEvent:
-    run_id: str
-    gate_name: str
-    decision: str  # Target node name or "END"
-    timestamp: float
-```
-
-### InterruptEvent
-
-```python
-@dataclass
-class InterruptEvent:
-    run_id: str
-    interrupt_name: str
-    value: Any              # Value to show user
-    response_param: str     # Where to put response
-    checkpoint: bytes       # State for resume
-    timestamp: float
-```
-
-### RunEndEvent
-
-```python
-@dataclass
-class RunEndEvent:
-    run_id: str
-    outputs: dict[str, Any]
-    duration_ms: float
-    iterations: int
-    timestamp: float
-```
-
----
-
-## Identity Model
-
-```python
-# session_id: User-provided, groups related runs
-# run_id: Framework-generated, identifies single execution
-
 result = await runner.run(
     graph,
     inputs={...},
-    session_id="conversation-123",  # User provides
+    session_id="conversation-123",  # User-provided: groups related runs
 )
-# result.run_id → "run-abc-456"  # Framework generates
+# result.run_id → "run-abc-456"     # Framework-generated: unique per execution
 ```
 
-Use cases:
-- `session_id`: Group multi-turn conversation runs
-- `run_id`: Trace/debug specific execution
+**Use cases:**
+- `session_id`: Group multi-turn conversations, log correlation
+- `run_id`: Trace and debug specific executions
+
+---
+
+## Error Handling
+
+| Error | Cause |
+|-------|-------|
+| `MissingInputError` | Required input not provided |
+| `GraphConfigError` | Invalid graph structure, or incompatible operation (e.g., map + interrupts) |
+| `ConflictError` | Parallel nodes produced conflicting values for same output |
+| `InfiniteLoopError` | Exceeded `max_iterations` (default: 1000) |
+| `IncompatibleRunnerError` | Runner doesn't support graph features (cycles, gates, async nodes) |
+
+---
+
+## Caching
+
+All runners accept a `cache` parameter:
+
+```python
+from hypernodes import DiskCache, MemoryCache
+
+# Persistent cache
+runner = SyncRunner(cache=DiskCache("./cache"))
+
+# In-memory cache (faster, not persistent)
+runner = AsyncRunner(cache=MemoryCache())
+```
+
+Cached nodes skip execution on re-runs with identical inputs.
+
+---
+
+## API Reference
+
+For complete method signatures with all parameters, see [Runners API Reference](./runners-api-reference.md).

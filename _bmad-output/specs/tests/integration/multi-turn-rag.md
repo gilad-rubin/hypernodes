@@ -24,20 +24,20 @@ System: [detects completion] → END
 ```python
 from hypernodes import Graph, node, route, END, AsyncRunner
 
-@node(output_name="docs")
+@node(outputs="docs")
 def retrieve(query: str, messages: list) -> list[str]:
     """Retrieve documents using query and conversation context."""
     # Mock implementation for testing
     context = " ".join(m["content"] for m in messages)
     return [f"Doc about {query} with context: {context[:50]}"]
 
-@node(output_name="response")
+@node(outputs="response")
 async def generate(docs: list[str], messages: list) -> str:
     """Generate response from docs and conversation."""
     # Mock LLM
     return f"Based on {len(docs)} docs: Here's information about your query."
 
-@node(output_name="messages")
+@node(outputs="messages")
 def add_response(messages: list, response: str) -> list:
     """Accumulator: add assistant response to messages."""
     return messages + [{"role": "assistant", "content": response}]
@@ -164,7 +164,7 @@ async def test_retrieval_uses_conversation_context():
     """Each retrieval has access to full conversation history."""
     retrieved_contexts = []
     
-    @node(output_name="docs")
+    @node(outputs="docs")
     def retrieve_with_tracking(query: str, messages: list) -> list[str]:
         retrieved_contexts.append(len(messages))
         return [f"Doc for turn {len(messages)}"]

@@ -37,7 +37,7 @@ def test_route_targets_not_empty():
 ```python
 def test_route_targets_validated_at_graph_construction():
     """Invalid targets caught when Graph() is called."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -60,7 +60,7 @@ def test_route_targets_validated_at_graph_construction():
 ```python
 def test_all_targets_validated():
     """All targets in list are validated, not just first."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(x: int) -> int:
         return x
     
@@ -85,7 +85,7 @@ def test_all_targets_validated():
 ```python
 def test_end_must_be_declared():
     """Can only return END if it's in targets."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -94,7 +94,7 @@ def test_end_must_be_declared():
         return END  # Will fail at runtime
     
     graph = Graph(nodes=[process, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -108,7 +108,7 @@ def test_end_must_be_declared():
 ```python
 def test_end_in_targets_allows_termination():
     """END in targets allows route to terminate."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -117,7 +117,7 @@ def test_end_in_targets_allows_termination():
         return END
     
     graph = Graph(nodes=[process, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     # Should complete without error
     result = runner.run(graph, inputs={"x": 1})
@@ -129,7 +129,7 @@ def test_end_in_targets_allows_termination():
 ```python
 def test_end_is_sentinel_not_string():
     """END is a sentinel object, not the string "END"."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -138,7 +138,7 @@ def test_end_is_sentinel_not_string():
         return "END"  # String, not sentinel!
     
     graph = Graph(nodes=[process, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -156,11 +156,11 @@ def test_end_is_sentinel_not_string():
 ```python
 def test_invalid_return_raises():
     """Route returning invalid target raises InvalidRouteError."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(x: int) -> int:
         return x
     
-    @node(output_name="b")
+    @node(outputs="b")
     def node_b(x: int) -> int:
         return x
     
@@ -169,7 +169,7 @@ def test_invalid_return_raises():
         return "c"  # Not in targets!
     
     graph = Graph(nodes=[node_a, node_b, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -183,7 +183,7 @@ def test_invalid_return_raises():
 ```python
 def test_typo_suggestion_at_runtime():
     """Runtime error suggests typo fixes."""
-    @node(output_name="retrieve")
+    @node(outputs="retrieve")
     def retrieve(x: int) -> int:
         return x
     
@@ -192,7 +192,7 @@ def test_typo_suggestion_at_runtime():
         return "retreive"  # Typo!
     
     graph = Graph(nodes=[retrieve, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -205,7 +205,7 @@ def test_typo_suggestion_at_runtime():
 ```python
 def test_none_return_invalid():
     """Route returning None raises clear error."""
-    @node(output_name="result")
+    @node(outputs="result")
     def process(x: int) -> int:
         return x
     
@@ -214,7 +214,7 @@ def test_none_return_invalid():
         return None  # Forgot to return!
     
     graph = Graph(nodes=[process, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -242,7 +242,7 @@ def test_branch_requires_both_targets():
 ```python
 def test_branch_targets_validated():
     """@branch targets validated at Graph() construction."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(x: int) -> int:
         return x
     
@@ -261,11 +261,11 @@ def test_branch_targets_validated():
 ```python
 def test_branch_accepts_node_objects():
     """@branch can use node objects instead of strings."""
-    @node(output_name="positive")
+    @node(outputs="positive")
     def handle_positive(x: int) -> str:
         return "positive"
     
-    @node(output_name="negative")
+    @node(outputs="negative")
     def handle_negative(x: int) -> str:
         return "negative"
     
@@ -283,11 +283,11 @@ def test_branch_accepts_node_objects():
 ```python
 def test_branch_must_return_bool():
     """@branch function must return boolean."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(x: int) -> int:
         return x
     
-    @node(output_name="b")
+    @node(outputs="b")
     def node_b(x: int) -> int:
         return x
     
@@ -296,7 +296,7 @@ def test_branch_must_return_bool():
         return "true"  # String, not bool!
     
     graph = Graph(nodes=[node_a, node_b, decide])
-    runner = Runner()
+    runner = SyncRunner()
     
     with pytest.raises(InvalidRouteError) as exc:
         runner.run(graph, inputs={"x": 1})
@@ -313,11 +313,11 @@ def test_branch_must_return_bool():
 ```python
 def test_route_creates_control_edges():
     """@route creates control edges to all targets."""
-    @node(output_name="a")
+    @node(outputs="a")
     def node_a(x: int) -> int:
         return x
     
-    @node(output_name="b")
+    @node(outputs="b")
     def node_b(x: int) -> int:
         return x
     
@@ -341,11 +341,11 @@ def test_route_creates_control_edges():
 ```python
 def test_branch_creates_two_control_edges():
     """@branch creates exactly two control edges."""
-    @node(output_name="pos")
+    @node(outputs="pos")
     def positive(x: int) -> str:
         return "pos"
     
-    @node(output_name="neg")
+    @node(outputs="neg")
     def negative(x: int) -> str:
         return "neg"
     
