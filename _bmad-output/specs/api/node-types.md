@@ -19,7 +19,7 @@
 | [GraphNode](#graphnode)           | Nested graph as a node            | Result of `Graph.as_node()`        |
 
 **See also:**
-- [Graph Types](graph-types.md) - InputSpec, Graph, composition
+- [Graph](graph.md) - InputSpec, Graph, composition
 - [Execution Types](execution-types.md) - GraphState, GraphResult, events
 
 ---

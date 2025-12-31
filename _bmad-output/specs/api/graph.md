@@ -762,14 +762,17 @@ result = runner.run(graph, inputs={...}, select=["rag_pipeline/**"])
 
 ```python
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 @dataclass
 class GraphResult:
-    """Result from graph execution."""
+    """Result from graph execution (outputs only).
+
+    Note: GraphResult has no status field. Status is a property of RunResult,
+    which wraps GraphResult with execution metadata. See execution-types.md.
+    """
 
     outputs: dict[str, Any | "GraphResult"]
-    status: Literal["complete", "interrupted", "error"]
     history: list[NodeExecution] | None = None
 
     # Dict-like access
@@ -785,6 +788,8 @@ class GraphResult:
     def __contains__(self, key: str):
         return key in self.outputs
 ```
+
+**See [Execution Types](execution-types.md)** for `RunResult`, `RunStatus`, and pause handling.
 
 ### Nested Graph Example
 
@@ -857,9 +862,14 @@ HyperNode (ABC)
 Graph (structure definition)
 ├── InputSpec (input parameter specification, returned by .inputs)
 └── GraphState (runtime values)
-    └── GraphResult (execution results)
-        └── RunResult (async execution with interrupts)
+    └── GraphResult (execution outputs)
+        └── RunResult (async result with status and pause info)
 ```
+
+**See [Execution Types](execution-types.md)** for complete type definitions including:
+- `RunStatus`, `PauseReason` enums
+- `RunResult` with pause handling
+- `Workflow`, `Step`, `StepResult` for persistence
 
 **Composition pattern:**
 

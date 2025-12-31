@@ -600,4 +600,4 @@ class OpenTelemetryProcessor(EventProcessor):
 See also:
 - [Execution Types](execution-types.md) - Event dataclass definitions
 - [Runners API Reference](runners-api-reference.md) - `event_processors` parameter
-- [Runners Guide](runners-updated.md) - Conceptual overview
+- [Runners Guide](runners.md) - Conceptual overview

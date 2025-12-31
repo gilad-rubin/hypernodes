@@ -43,7 +43,7 @@ graph = Graph(nodes=[fetch, process, save])
 runner = AsyncRunner(cache=DiskCache("./cache"))
 result = await runner.run(graph, inputs={"query": "hello"})
 
-print(result.outputs["response"])  # RunResult object
+print(result.outputs["response"])  # Access output value
 ```
 
 ### DaftRunner
@@ -174,7 +174,7 @@ runner.map(graph_with_interrupts, inputs={...}, map_over="x")
 # Instead, use run() in a loop:
 for item in items:
     result = await runner.run(graph, inputs={...})
-    if result.interrupted:
+    if result.pause:
         # Handle interrupt individually
 ```
 
@@ -216,24 +216,34 @@ async for event in runner.iter(graph, inputs={"prompt": "Tell me a story"}):
 Pause execution for human input and resume:
 
 ```python
-result = await runner.run(graph, inputs={"draft": content})
+from hypernodes import AsyncRunner
+from hypernodes.checkpointers import SqliteCheckpointer
 
-if result.interrupted:
+runner = AsyncRunner(checkpointer=SqliteCheckpointer("./dev.db"))
+
+result = await runner.run(
+    graph,
+    inputs={"draft": content},
+    workflow_id="review-123",
+)
+
+if result.pause:
     # Show the value to the user
-    print(f"Review needed: {result.interrupt_value}")
+    print(f"Review needed: {result.pause.value}")
     user_decision = await get_user_approval()
 
-    # Resume execution with their input
+    # Resume using workflow_id (checkpointer loads state internally)
     result = await runner.run(
         graph,
         inputs={"approved": user_decision},
-        checkpoint=result.checkpoint,
+        workflow_id="review-123",
+        resume=True,
     )
 
 print(result.outputs["final_result"])
 ```
 
-The `checkpoint` parameter contains serialized execution state, allowing seamless resume.
+**See [Execution Types](execution-types.md)** for `RunResult`, `RunStatus`, and `PauseReason` definitions.
 
 ---
 
@@ -571,13 +581,23 @@ Note: `returns_coroutine` indicates whether `.run()` must be awaited. DaftRunner
 ```python
 @dataclass
 class RunResult:
-    outputs: dict[str, Any]      # Output values
-    interrupted: bool            # True if stopped at InterruptNode
-    checkpoint: bytes | None     # State for resume (if interrupted)
-    run_id: str                  # Unique execution identifier
-    interrupt_name: str | None   # Name of interrupt node (if interrupted)
-    interrupt_value: Any | None  # Value to show user (if interrupted)
+    outputs: dict[str, Any]          # Output values
+    status: RunStatus                # COMPLETED, PAUSED, or ERROR
+    workflow_id: str | None          # Workflow ID (required with checkpointer)
+    run_id: str                      # Unique execution identifier
+
+    # Pause info (when status == PAUSED)
+    pause_reason: PauseReason | None # HUMAN_INPUT, SLEEP, SCHEDULED, EVENT
+    pause_node: str | None           # Name of the pause node
+    pause_value: Any | None          # Value to show user
+
+    @property
+    def paused(self) -> bool: ...    # True if status == PAUSED
+    @property
+    def interrupted(self) -> bool: ... # True if paused for HUMAN_INPUT
 ```
+
+**See [Execution Types](execution-types.md#runresult)** for full definition.
 
 `SyncRunner.run()` returns a plain `dict[str, Any]` (no interrupt support).
 

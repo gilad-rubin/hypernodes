@@ -2,7 +2,7 @@
 
 Complete method signatures and type definitions for all runners.
 
-> **Looking for concepts and examples?** See [Runners](./runners-updated.md) first.
+> **Looking for concepts and examples?** See [Runners](./runners.md) first.
 >
 > **Looking for observability and event processing?** See [Observability](./observability.md).
 
@@ -183,6 +183,7 @@ class AsyncRunner(BaseRunner):
         self,
         *,
         cache: Cache | None = None,
+        checkpointer: Checkpointer | None = None,
         event_processors: list[EventProcessor] | None = None,
     ) -> None:
         """
@@ -190,6 +191,8 @@ class AsyncRunner(BaseRunner):
 
         Args:
             cache: Cache backend.
+            checkpointer: Checkpointer for workflow persistence and resume.
+                See [Durable Execution](./durable-execution.md) for details.
             event_processors: Processors that receive execution events.
                 See [Observability](./observability.md) for details.
         """
@@ -207,7 +210,9 @@ async def run(
     session_id: str | None = None,
     max_iterations: int | None = None,
     max_concurrency: int | None = None,
-    checkpoint: bytes | None = None,
+    workflow_id: str | None = None,
+    resume: bool = False,
+    interrupt_handlers: dict[str, Callable] | None = None,
     event_processors: list[EventProcessor] | None = None,
 ) -> RunResult:
     """
@@ -223,19 +228,23 @@ async def run(
         max_concurrency: Limit total concurrent async operations across
             all nodes and nested graphs. Propagated via contextvars.
             None means unlimited.
-        checkpoint: Resume from saved state (for InterruptNode).
+        workflow_id: Workflow identifier (for persistence/resume).
+        resume: If True, resume from checkpointed state for workflow_id.
+        interrupt_handlers: Map of interrupt names to handler functions.
+            If all interrupts have handlers, runs to completion.
+            Handler signature: async def handler(value) -> response
         event_processors: Additional processors for this run only.
             Appended to runner's processors, not replacing them.
 
     Returns:
-        RunResult with outputs and optional checkpoint.
+        RunResult with outputs and status.
     """
 ```
 
 ### iter()
 
 ```python
-async def iter(
+def iter(
     self,
     graph: Graph,
     inputs: dict[str, Any],
@@ -243,11 +252,12 @@ async def iter(
     session_id: str | None = None,
     max_iterations: int | None = None,
     max_concurrency: int | None = None,
-    checkpoint: bytes | None = None,
+    workflow_id: str | None = None,
+    resume: bool = False,
     event_processors: list[EventProcessor] | None = None,
-) -> AsyncIterator[Event]:
+) -> AsyncContextManager[RunHandle]:
     """
-    Execute graph and yield events.
+    Execute graph and yield events via context manager.
 
     Args:
         graph: Graph to execute.
@@ -256,15 +266,57 @@ async def iter(
         max_iterations: Max iterations before InfiniteLoopError.
             None means unlimited (use with caution on graphs with cycles).
         max_concurrency: Limit total concurrent async operations.
-        checkpoint: Resume from saved state.
+        workflow_id: Workflow identifier (for persistence/resume).
+        resume: If True, resume from checkpointed state for workflow_id.
         event_processors: Additional processors for this run only.
             Appended to runner's processors, not replacing them.
 
-    Yields:
-        Event objects as they occur. All events include span_id
-        and parent_span_id for nested graph hierarchy.
-        See [Execution Types](./execution-types.md#event-types) for details.
+    Returns:
+        AsyncContextManager yielding a RunHandle that is async-iterable
+        and provides respond() for interrupts and result access.
+
+    Example:
+        async with runner.iter(graph, inputs={...}) as run:
+            async for event in run:
+                if isinstance(event, InterruptEvent):
+                    run.respond(event.response_param, user_response)
+            result = run.result  # RunResult after iteration
     """
+```
+
+### RunHandle
+
+The handle returned by `iter()` context manager:
+
+```python
+class RunHandle:
+    """Handle for streaming graph execution with interrupt support."""
+
+    async def __aiter__(self) -> AsyncIterator[Event]:
+        """Iterate over events as they occur."""
+        ...
+
+    def respond(self, param: str, value: Any) -> None:
+        """
+        Provide a response for an interrupt.
+
+        Args:
+            param: The response parameter name (from InterruptEvent.response_param)
+            value: The response value
+
+        Must be called after receiving InterruptEvent before continuing iteration.
+        """
+        ...
+
+    @property
+    def result(self) -> RunResult:
+        """
+        Final result after iteration completes.
+
+        Raises:
+            RuntimeError: If accessed before iteration completes.
+        """
+        ...
 ```
 
 ### map()
@@ -357,6 +409,22 @@ def map(
 
 ---
 
+## PauseInfo
+
+Pause details (only present when `RunResult.status == PAUSED`):
+
+```python
+@dataclass
+class PauseInfo:
+    reason: PauseReason      # HUMAN_INPUT, SLEEP, SCHEDULED, EVENT
+    node: str                # Name of node that paused
+    response_param: str      # Key to use in inputs dict when resuming
+    value: Any               # Value to show user
+    resume_at: datetime | None = None  # When to resume (for scheduled pauses)
+```
+
+---
+
 ## RunResult
 
 Returned by `AsyncRunner.run()`:
@@ -364,13 +432,14 @@ Returned by `AsyncRunner.run()`:
 ```python
 @dataclass
 class RunResult:
-    outputs: dict[str, Any]      # Output values
-    interrupted: bool            # True if stopped at InterruptNode
-    checkpoint: bytes | None     # State for resume (if interrupted)
-    run_id: str                  # Unique run identifier
-    interrupt_name: str | None   # Name of interrupt (if interrupted)
-    interrupt_value: Any | None  # Value to show user (if interrupted)
+    outputs: dict[str, Any]       # Output values
+    status: RunStatus             # COMPLETED, PAUSED, or ERROR
+    workflow_id: str | None       # For persistence/resume (if checkpointer configured)
+    run_id: str                   # Unique run identifier
+    pause: PauseInfo | None = None  # Pause details (only set when paused)
 ```
+
+See [Execution Types](./execution-types.md#runresult) for full documentation.
 
 ---
 
@@ -488,12 +557,14 @@ class InterruptEvent:
     run_id: str
     span_id: str
     parent_span_id: str | None
+    workflow_id: str        # Use this to resume
     interrupt_name: str
     value: Any              # Value to show user
     response_param: str     # Where to put response
-    checkpoint: bytes       # State for resume
     timestamp: float
 ```
+
+See [Execution Types](./execution-types.md#interruptevent) for full documentation.
 
 ### RunEndEvent
 
@@ -542,7 +613,7 @@ def validate_map_compatible(graph: Graph, context: str) -> None:
             f"  Use runner.run() in a loop instead of map:\n"
             f"    for item in items:\n"
             f"        result = runner.run(graph, inputs={{...item...}})\n"
-            f"        if result.interrupted:\n"
+            f"        if result.pause:\n"
             f"            # Handle interrupt\n"
         )
 ```

@@ -80,9 +80,9 @@ async def test_interrupt_pauses_execution():
         inputs={"prompt": "Write a blog post"},
     )
     
-    assert result.interrupted is True
-    assert result.interrupt_name == "human_review"
-    assert result.checkpoint is not None
+    assert result.pause is not None
+    assert result.pause.node == "human_review"
+    assert result.workflow_id is not None
 ```
 
 ### test_interrupt_provides_content
@@ -98,8 +98,8 @@ async def test_interrupt_provides_content():
         inputs={"prompt": "Write a blog post"},
     )
     
-    assert result.interrupt_value is not None
-    assert "Generated content" in result.interrupt_value
+    assert result.pause.value is not None
+    assert "Generated content" in result.pause.value
 ```
 
 ### test_resume_with_approval
@@ -120,10 +120,11 @@ async def test_resume_with_approval():
     result2 = await runner.run(
         approval_graph,
         inputs={"review": {"approved": True}},
-        checkpoint=result1.checkpoint,
+        workflow_id=result1.workflow_id,
+        resume=True,
     )
-    
-    assert result2.interrupted is False
+
+    assert result2.pause is None
     assert result2.outputs["published"]["status"] == "published"
 ```
 
@@ -145,13 +146,14 @@ async def test_resume_with_rejection():
     result2 = await runner.run(
         approval_graph,
         inputs={"review": {"approved": False, "feedback": "Add more examples"}},
-        checkpoint=result1.checkpoint,
+        workflow_id=result1.workflow_id,
+        resume=True,
     )
-    
+
     # Should pause again for review of revision
-    assert result2.interrupted is True
-    assert "Revised content" in result2.interrupt_value
-    assert "Add more examples" in result2.interrupt_value
+    assert result2.pause is not None
+    assert "Revised content" in result2.pause.value
+    assert "Add more examples" in result2.pause.value
 ```
 
 ### test_multiple_revision_cycles
@@ -172,25 +174,28 @@ async def test_multiple_revision_cycles():
     result = await runner.run(
         approval_graph,
         inputs={"review": {"approved": False, "feedback": "revision 1"}},
-        checkpoint=result.checkpoint,
+        workflow_id=result.workflow_id,
+        resume=True,
     )
-    assert result.interrupted is True
-    
+    assert result.pause is not None
+
     # Second rejection
     result = await runner.run(
         approval_graph,
         inputs={"review": {"approved": False, "feedback": "revision 2"}},
-        checkpoint=result.checkpoint,
+        workflow_id=result.workflow_id,
+        resume=True,
     )
-    assert result.interrupted is True
-    
+    assert result.pause is not None
+
     # Finally approve
     result = await runner.run(
         approval_graph,
         inputs={"review": {"approved": True}},
-        checkpoint=result.checkpoint,
+        workflow_id=result.workflow_id,
+        resume=True,
     )
-    assert result.interrupted is False
+    assert result.pause is None
     assert result.outputs["published"] is not None
 ```
 
@@ -211,10 +216,11 @@ async def test_abandon_workflow():
     result2 = await runner.run(
         approval_graph,
         inputs={"review": {"approved": False, "abandon": True}},
-        checkpoint=result1.checkpoint,
+        workflow_id=result1.workflow_id,
+        resume=True,
     )
-    
-    assert result2.interrupted is False
+
+    assert result2.pause is None
     assert "published" not in result2.outputs
 ```
 
