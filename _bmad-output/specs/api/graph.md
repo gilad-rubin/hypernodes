@@ -12,6 +12,8 @@
 - [Node Types](node-types.md) - All node types including GraphNode
 - [Execution Types](execution-types.md) - Runtime state and results
 - [Runners API](runners.md) - Execution guide
+- [State Model](state-model.md) - "Outputs ARE state" philosophy
+- [Durable Execution](durable-execution.md) - Checkpointing and persistence
 
 ---
 
@@ -27,6 +29,7 @@ class Graph:
         *,
         name: str | None = None,
         strict_types: bool = False,
+        persist: list[str] | None = None,
     ):
         """
         Create a graph from nodes.
@@ -37,10 +40,23 @@ class Graph:
                   nesting this graph. If not set here, must be provided
                   when calling as_node(name='...')
             strict_types: Validate type annotations between connected nodes (default: False)
+            persist: Output names to checkpoint for durability.
+                - None (default): All outputs are checkpointed
+                - [...]: Only listed outputs are checkpointed (allowlist)
+                - []: No outputs checkpointed (pure in-memory execution)
+
+                Individual nodes can override with @node(persist=True/False).
+                See state-model.md for the "outputs ARE state" philosophy.
 
         Example:
-            # Basic graph (no name needed)
+            # Basic graph - all outputs checkpointed (default)
             graph = Graph(nodes=[embed, retrieve, generate])
+
+            # Selective persistence - only checkpoint important outputs
+            graph = Graph(
+                nodes=[embed, retrieve, generate],
+                persist=["messages", "answer"],  # Only these survive crashes
+            )
 
             # Named graph for nesting
             rag = Graph(nodes=[embed, retrieve, generate], name="rag_pipeline")
@@ -48,6 +64,7 @@ class Graph:
         """
         self._nodes = {n.name: n for n in nodes}
         self.name = name
+        self.persist = persist
         self._nx_graph = self._build_graph(nodes)
         self._bound = {}
         self._validate()  # Build-time validation

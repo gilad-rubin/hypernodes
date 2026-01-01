@@ -297,6 +297,7 @@ class FunctionNode(HyperNode):
         name: str | None = None,
         rename_inputs: dict[str, str] | None = None,
         cache: bool = False,
+        persist: bool | None = None,
     ):
         """
         Wrap a function as a node.
@@ -307,19 +308,28 @@ class FunctionNode(HyperNode):
             name: Public node name (default: func.__name__)
             rename_inputs: Mapping to rename inputs {old: new}
             cache: Whether to cache results (default: False)
+            persist: Whether to checkpoint outputs for durability.
+                - True: Always checkpoint (survives crashes, loaded on resume)
+                - False: Never checkpoint (re-executed on resume)
+                - None (default): Follow graph-level persist policy
 
         Note: is_async and is_generator are auto-detected from func.
 
         When source is a FunctionNode:
             Only source.func is extracted. All other configuration (name,
-            outputs, renames, cache) from the source node is ignored.
+            outputs, renames, cache, persist) from the source node is ignored.
             The new node is built fresh from the underlying function.
+
+        See Also:
+            - state-model.md for the "outputs ARE state" philosophy
+            - durable-execution.md for persistence semantics
         """
         # Extract func if source is FunctionNode (ignores all other config)
         func = source.func if isinstance(source, FunctionNode) else source
 
         self.func = func
         self.cache = cache
+        self.persist = persist
         self._definition_hash = hash_definition(func)
 
         # Core HyperNode attributes
@@ -344,6 +354,15 @@ class FunctionNode(HyperNode):
 Inherits `name`, `inputs`, `outputs` from HyperNode.
 
 ```python
+@property
+def persist(self) -> bool | None:
+    """Whether outputs are checkpointed for durability.
+
+    - True: Always checkpoint (node-level override)
+    - False: Never checkpoint (node-level override)
+    - None: Follow graph-level persist policy
+    """
+
 @property
 def definition_hash(self) -> str:
     """SHA256 hash of function source (cached at creation)."""
@@ -482,6 +501,7 @@ def node(
     name: str | None = None,
     rename_inputs: dict[str, str] | None = None,
     cache: bool = False,
+    persist: bool | None = None,
 ) -> FunctionNode | Callable[[Callable], FunctionNode]:
     """
     Decorator to wrap a function as a FunctionNode.
@@ -499,9 +519,29 @@ def node(
         name: Public node name (default: func.__name__)
         rename_inputs: Mapping to rename inputs {old: new}
         cache: Whether to cache results (default: False)
+        persist: Whether to checkpoint outputs for durability.
+            - True: Always checkpoint (survives crashes, loaded on resume)
+            - False: Never checkpoint (re-executed on resume)
+            - None (default): Follow graph-level persist policy
 
     Returns:
         FunctionNode if source provided, else decorator function.
+
+    Example:
+        # Large intermediate values - don't persist
+        @node(output_name="embedding", persist=False)
+        def embed(text: str) -> list[float]:
+            return model.embed(text)
+
+        # Important outputs - always persist (explicit)
+        @node(output_name="answer", persist=True)
+        def generate(docs: list[str]) -> str:
+            return llm.generate(docs)
+
+        # Follow graph policy (default)
+        @node(output_name="docs")
+        def retrieve(embedding: list[float]) -> list[str]:
+            return db.search(embedding)
     """
     def decorator(func: Callable) -> FunctionNode:
         return FunctionNode(
@@ -510,6 +550,7 @@ def node(
             name=name,
             rename_inputs=rename_inputs,
             cache=cache,
+            persist=persist,
         )
 
     if source is not None:
